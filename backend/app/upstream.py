@@ -8,11 +8,16 @@ HOP_BY_HOP = {
     "proxy-authorization", "proxy-authenticate",
 }
 
+# Response-only drop set: httpx auto-decompresses the body (resp.content),
+# so a stale Content-Encoding header must not be forwarded to the client,
+# who would otherwise try (and fail) to decode already-decoded bytes.
+RESPONSE_DROP = HOP_BY_HOP | {"content-encoding"}
+
 def filter_request_headers(headers: Mapping[str, str]) -> dict:
     return {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP}
 
 def filter_response_headers(headers: Mapping[str, str]) -> dict:
-    return {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP}
+    return {k: v for k, v in headers.items() if k.lower() not in RESPONSE_DROP}
 
 def mask_token(value: str) -> str:
     return f"{value[:4]}…{value[-4:]}" if len(value) > 8 else "***"

@@ -1,3 +1,4 @@
+import gzip
 import httpx
 from fastapi.testclient import TestClient
 from app.config import Settings
@@ -27,3 +28,17 @@ def test_post_body_and_token_forwarded():
     r = tc.post("/api/auth/login", content=b'{"a":1}',
                 headers={"token": "TT", "content-type": "application/json"})
     assert r.status_code == 200
+
+def test_gzip_upstream_response_decoded_and_content_encoding_header_dropped():
+    def handler(req):
+        body = gzip.compress(b'{"ok":true}')
+        return httpx.Response(
+            200,
+            headers={"content-encoding": "gzip", "content-type": "application/json"},
+            content=body,
+        )
+    tc = make_client(handler)
+    r = tc.get("/api/user/info")
+    assert r.status_code == 200
+    assert r.content == b'{"ok":true}'
+    assert "content-encoding" not in {k.lower() for k in r.headers}
