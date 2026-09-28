@@ -1,0 +1,20 @@
+body{ background:url(../pic/bk.jpg) 100% #fff !important;}
+.left{left:10px; top:10px;padding:10px; bottom:10px; position:fixed; width:200px; background:#f3f3f3;}
+.leftbox1{ margin-bottom:10px;}
+.leftbox2{ margin-bottom:20px;}
+.leftbox3{ margin-bottom:5px;}
+.input{ border:1px solid #ccc; padding:5px;border-radius:30px;width:168px;}
+.f666{ color:#666;}
+
+.haoma{ z-index:99; background:#fff; position:fixed; top:20px; left:20px; bottom:110px; padding:10px; line-height:25px;  color:#666; overflow:none; width:180px;}
+.qsbox{padding:5px; width:75px; float:left;}
+
+.haomabox{ z-index:999; background:#fff; position:fixed; top:145px; left:30px; bottom:130px; padding:5px; line-height:20px; border:1px solid #ccc; color:#666; overflow:auto; width:150px;}
+/* .tishi{ z-index:999; background:#fff; position:fixed;  left:30px; bottom:120px; padding:5px;height:100px;   color:#666; ; width:160px;} */
+
+.leftbottom{ width:180px; z-index:99;position:fixed; bottom:20px; left:20px;height:80px;}
+
+.botton{ text-align:center; width:80px; padding:5px; border-radius:3px; background:#06C;  color:#fff;}
+.botton2{ text-align:center; width:180px; padding:5px; border-radius:3px; background:#036; margin-bottom:20px;  color:#fff;}
+
+.right{right:10px;left:220px;top:10px; bottom:10px;position:fixed;}

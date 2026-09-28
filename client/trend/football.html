@@ -1,0 +1,298 @@
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+		<title></title>
+		<link rel="stylesheet" type="text/css" href="css/pub.css" />
+		<link rel="stylesheet" type="text/css" href="css/table.css" />
+		<link rel="stylesheet" type="text/css" href="css/css/font-awesome.min.css" />
+		<script type="text/javascript" src="js/jquery-1.8.3.min.js"></script>
+		<script type="text/javascript" src="js/jweixin-1.6.0.js"></script>
+		<script type="text/javascript" src="js/uni.webview.1.5.2.js"></script>
+		<script type="text/javascript" src="js/ceng.js"></script>
+		<script type="text/javascript" src="js/layer.js"></script>
+		<script type="text/javascript" src="js/common.js"></script>
+		<script type="text/javascript" src="football_js/server.js"></script>
+		<script type="text/javascript" src="football_js/content.js"></script>
+		<script type="text/javascript" src="js/line.js"></script>
+		<script type="text/javascript">
+			sessionStorage.removeItem("obj");
+			sessionStorage.removeItem("rotate");
+			sessionStorage.removeItem("game_id");
+			sessionStorage.removeItem("total");
+			sessionStorage.removeItem("data");
+			sessionStorage.removeItem("page");
+			//从url截取获得的所有信息存入缓存
+			var url = window.location.href.substr(0).split("?")[1];
+			var type = url.split("&");
+			var submitRow = 1;
+			var obj = {};
+			for (var i = 0; i < type.length; i++) {
+				var key = type[i].split("=")[0];
+				var val = type[i].split("=")[1];
+				if (key == "competitionId") {
+					obj.competitionId = val;
+				} else if (key == "minOdds") {
+					obj.minOdds = val;
+				} else if (key == "maxOdds") {
+					obj.maxOdds = val;
+				} else if (key == "isSingle") {
+					obj.isSingle = val;
+				} else if (key == "type") {
+					obj.type = val;
+				} else if (key == "oddsType") {
+					obj.oddsType = val;
+				} else if (key == "game_id") {
+					obj.game_id = JSON.stringify(val);
+				} else if (key == "from_Id") {
+					obj.from_Id = val; //电脑版901 安卓902 苹果903
+				} else if (key == "back") {
+					obj.back = val; //回退几步
+				}
+			}
+			//
+			if (obj.from_Id == "901") {
+				common.cookieSet("game_id", parent.getGameId());
+			} else {
+				document.addEventListener('plusready', function() {
+					var localName = '';
+					if (obj.type == "crs") {
+						localName = 'homePageCrs';
+					} else if (obj.type == "hda") {
+						localName = "homePageHda";
+					} else if (obj.type == "hf") {
+						localName = "homePageHf";
+					} else if (obj.type == "hhda") {
+						localName = "homePageHhda";
+					} else if (obj.type == "ttg") {
+						localName = "homePageTtg";
+					}
+					var a = JSON.stringify(JSON.parse(plus.storage.getItem(localName)).matchIdAll);
+					common.cookieSet("token", plus.storage.getItem("newToken"));
+					var gameId = [];
+					for (var i = 0; i < a.split(",").length; i++) {
+						gameId.push(a.split(",")[i])
+					}
+					common.cookieSet("game_id", gameId);
+					server.server();
+				})
+			}
+			if (common.isNull(common.cookieGet("rotate"))) {
+				common.cookieSet("rotate", "heng");
+			}
+			common.cookieSet("obj", JSON.stringify(obj));
+			if (obj.from_Id == "901") {
+				$(document).ready(function() {
+					server.server();
+				});
+			}
+		</script>
+
+		<style>
+
+		</style>
+	</head>
+	<body class="webpBack">
+		<div id="showFace" style="width: 100%;height: 100%;background-color: #FFF;z-index: 2001;position:absolute;display: none;">
+			<div style="margin:0 auto; background:url(img/loding.gif) ;height:20px; width:400px;margin-top:100px; text-align:center; font-size:30px; padding-top:350px; color:#999;"
+			 id="loding">
+				走势图加载中</div>
+		</div>
+		<div id="print2" style="display: none;">
+			<div class="tishi">无符合要求数据！</div>
+		</div>
+		<div id="print1">
+			<div class="diqu">
+				<script>
+					document.writeln('<p class="dqtanbg" >20期</p>');
+				</script>
+				<ul class="dqtan">
+					<script>
+						var issue = [10, 20, 30];
+						for (var i = 0; i < issue.length; i++) {
+							if (obj.from_Id == 901 && issue[i] == 20) {
+								document.writeln("<li id='q" + issue[i] + "' class='on' onclick='server.refresh(" + issue[i] + ")'>" + issue[i] +
+									"期</li>");
+							} else {
+								document.writeln("<li id='q" + issue[i] + "' onclick='server.refresh(" + issue[i] + ")'>" + issue[i] +
+									"期</li>");
+							}
+						}
+						common.cookieSet("total", 20);
+					</script>
+
+				</ul>
+			</div>
+
+			<div class="diqu2">
+				<script>
+					document.writeln('<p class="dqtanbg2" id="chart">图表-1</p>');
+				</script>
+				<ul class="dqtan2" id="chartCon">
+					<!-- <script>
+						var code_name = "图表";
+						var game_id = [];
+						console.log(obj)
+						if (obj.from_Id == "901") {
+							game_id = JSON.parse(parent.getGameId());
+						}
+						if (game_id.length > 0) {
+							if (parseInt(game_id.length / 10) < 1) {
+								document.writeln("<li id='chart" + (+1) + "' class='on' onclick='common.refreshCode(" + (+1) + ")'>" +
+									code_name +
+									"-" + (+1) + "</li>");
+							} else {
+								//向上取整计算
+								for (var i = 0; i < Math.ceil(game_id.length / 10); i++) {
+									if (i == 0) {
+										document.writeln("<li id='chart" + (i + 1) + "' class='on' onclick='common.refreshCode(" + (i + 1) + ")'>" +
+											code_name + "-" + (i + 1) + "</li>");
+									} else {
+										document.writeln("<li id='chart" + (i + 1) + "' onclick='common.refreshCode(" + (i + 1) + ")'>" +
+											code_name + "-" + (i + 1) + "</li>");
+									}
+								}
+							}
+						}
+					</script> -->
+				</ul>
+			</div>
+			<div id="tanchu" class="tanchu" style="display: none;">
+				<div class="tBtn" id='rotate' onclick="common.rotate('heng')">横屏</div>
+				<div class="tBtn" onclick="common.onBack()">返回</div>
+				<div class="tBtn" onclick="common.botton('colse')">关闭</div>
+			</div>
+			<div class="rBtn">
+				<ul>
+					<script>
+						if (obj.from_Id != 901) {
+							document.writeln("<li onclick=common.botton('open')>更多</li>");
+						}
+						//document.writeln("<li onclick=ab()>test</li>");
+					</script>
+				</ul>
+			</div>
+			<div class="top">
+				<div class="topname" id="chart_name"></div>
+			</div>
+			<div class="t-head">
+				<div class="t-h-wrap" id="hh">
+					<table class="t-zebra" id="width2">
+						<colgroup id="titlecol">
+							<col width="35" class="bg4" span="10">
+							<col width="35" class="bg5" span="11">
+						</colgroup>
+						<tbody>
+							<tr id="title_name">
+								<th colspan="10" class="ltop3"></th>
+								<th colspan="11" class="ltop3"></th>
+							</tr>
+							<tr id="title_con">
+								<td>0</td>
+								<td>1</td>
+								<td>2</td>
+								<td>3</td>
+								<td>4</td>
+								<td>5</td>
+								<td>6</td>
+								<td>7</td>
+								<td>8</td>
+								<td>9</td>
+								<td>0</td>
+								<td>1</td>
+								<td>2</td>
+								<td>3</td>
+								<td>4</td>
+								<td>5</td>
+								<td>6</td>
+								<td>7</td>
+								<td>8</td>
+								<td>9</td>
+								<td>10</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+			<div class="l-top">
+				<table class="t-zebra">
+					<th class="ltop ltop4">序号</th>
+				</table>
+			</div>
+			<div class="l-center" id="dd">
+				<table class="l-zebra">
+					<colgroup class="bg1">
+					</colgroup>
+					<tbody id="serial">
+
+					</tbody>
+				</table>
+			</div>
+			<!--别删，删了不好使-->
+			<div class="t-content" id="cc" onscroll="roll()">
+				<table class="zebra" id="width1">
+					<colgroup>
+						<col width="35" class="bg4" span="10">
+						<col width="35" class="bg5" span="11">
+					</colgroup>
+					<tbody id="content">
+
+					</tbody>
+				</table>
+			</div>
+			<div class="l-bottom" id="leftbottom">
+				<table class="zebra">
+					<tbody>
+						<tr>
+							<td class="fline"><span class="btn m" onClick="content.submiting()">提交</span></td>
+						</tr>
+						<tr class="wai">
+							<td>出现</td>
+						</tr>
+						<tr class="wai">
+							<td>连出</td>
+						</tr>
+						<tr class="wai">
+							<td>遗漏</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+			<div class="t-bottom" id="conbottom">
+				<div class="t-b-wrap" id="mm">
+					<table class="zebra">
+						<colgroup id="bottom_col">
+							<col width="35" class="bg4" span="10">
+							<col width="35" class="bg5" span="11">
+						</colgroup>
+
+						<tbody>
+							<tr class="bg6 wai m" id="tjc1">
+							</tr>
+							<tr id="cxcs" class="wai">
+							</tr>
+							<tr id="tjlc" class="wai">
+							</tr>
+							<tr id="tjyl" class="wai">
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+			<div class="bBtn">
+				<script>
+					if (obj.from_Id != 901) {
+						document.writeln(
+							'<div id="show" style="display: none;" class="bBtn1" onclick=common.show("show")><i class="fa fa-sort-up"></i></div>'
+						);
+						document.writeln(
+							'<div id="hide" class="bBtn1 bBtntr" onclick=common.show("hide")><i class="fa fa-sort-up"></i></div>');
+					}
+				</script>
+			</div>
+		</div>
+		<script>
+
+		</script>
+	</body>
+</html>

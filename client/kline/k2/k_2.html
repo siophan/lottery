@@ -1,0 +1,109 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+
+<head>
+<meta charset="UTF-8">
+<title>k线图</title>
+<meta http-equiv="pragma" content="no-cache">
+<meta http-equiv="cache-control" content="no-cache">
+<meta http-equiv="expires" content="0">
+<meta http-equiv="keywords" content="">
+<meta http-equiv="description" content="">
+<script type="text/javascript" charset="utf-8"
+	src="../js/jquery-1.8.3.min.js"></script>
+
+	
+ <link rel="stylesheet" type="text/css" href="../css/k.css"/>
+</head>
+<body>
+	<div style="text-align: center;margin:0 auto;">
+
+		<div id="kzzId"
+			style="float: left;margin-top: 10px;margin-left: 10px;">
+			<select id="wf" style="height: 30px;" onchange="qhwf()" disabled="disabled">
+				<option value="3dr3">3D</option>
+				<option value="animalsa2">动物会前两名</option>
+				<option value="animalsp2">动物会后两名</option>
+				<option value="animalsa3">动物会前三名</option>
+				<option value="animalsp3">动物会后三名</option>
+				<option value="hasha3">哈希</option>
+				<option value="plsr3">排三</option>
+				<option value="1105r5">任五</option>
+				<option value="1105r4">任四</option>
+				<option value="1105r3">任三</option>
+				<option value="1105r2">任二</option>
+				<option value="1105a3">前三</option>
+				<option value="1105a2">前二</option>
+			</select>
+		</div>
+		<div style="float: left;margin-top: 10px;margin-left: 3px;text-align: left;">
+			<input type="button" id="szcs" value="设置参数" class="buttonK t"
+				style="cursor: hand" />  <input type="button" id="tijiao" value="提交"
+				class="buttonK t" onclick="tj()" style="cursor: hand" /> <input
+				type="button" id="houtui" value="<<后退" class="buttonK t"
+				onclick="goTo()" style="cursor: hand" /> <input type="button"
+				id="qianjin" value="前进>>" class="buttonK t" onclick="goBack()"
+				style="cursor: hand" />
+				<input type="button" id="tongping"
+				value="同屏" class="buttonK t" onclick="TongPing()"
+				style="cursor: hand" />
+		</div>
+		<div style="float: left;margin: 15px 10px 0 10px;">
+
+
+			<input type="radio" name="fa" id="zdyfa" onclick="k.checkfa(1)"
+				value="1" /> <label for="zdyfa" id="zdy"
+				style="border-radius: 13px;">自定义方案</label>
+		</div>
+
+		<div class="select dowebok" style="float: left;margin-top: 10px;">
+			<span class="placeholder" id="zdyfa3" ></span>
+			<ul id="zdyfa1">
+
+			</ul>
+		</div>
+		<div class="select dowebok" style="float: left;margin-top: 10px;">
+			<span class="placeholder" id="zdyfa4"></span>
+			<ul id="zdyfa2">
+
+			</ul>
+		</div>
+
+		<div style="float: left;margin: 10px 10px 0 10px;">
+
+			<input type="radio" name="fa" id="tjfa" checked="checked"
+				onclick="k.checkfa(2,1)" value="2" /><label for="tjfa"
+				style="border-radius: 13px;float: left;margin-top: 10px;"></label><span
+				id="tjding">推荐方案</span> <select id="tjfa3"
+				style="height: 30px;margin-right: 10px;width:120px"
+				onchange="loadingData()">
+
+			</select>
+		</div>
+		<input type="hidden" id="tp222" value="1" />
+	</div>
+	<div id="k1" style="width:100%; float:left;">
+		<div id="tp"
+			style="height:88%;width:98%;margin:0 auto;margin-top:10px; display:none"></div>
+		<div id="main"
+			style="height:88%;width:98%;margin:0 auto;margin-top: 10px;"></div>
+	</div>
+	<div id="option2" style="margin-top: 5px;float: left">
+		<input type="button" id="" value="MACD" onclick="macdFunction()"
+			class="buttonK" /> <input type="button" id="KDJ" value="KDJ"
+			onclick="kdjFunction()" class="buttonK" />
+	</div>
+
+	<script type="text/javascript" src="../js/btutil.js"></script>
+	<script src="../echarts/echarts.min.js"></script>
+	<script src="../layer/layer.js"></script>
+	<script type="text/javascript" src="k.js"></script>
+	<script src="../js/openLayersRefreh.js"></script>
+	<script src="../js/k_line.js"></script>
+	<script src="../js/tpk_line.js"></script>
+	<script src="../js/josn.js"></script>
+	<script src="../js/k_Util.js"></script>
+	<script src="k_2main.js"></script>
+
+</body>
+</html>

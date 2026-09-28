@@ -1,0 +1,83 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+        "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <title>遗漏查询</title>
+    <script type="text/javascript" charset="utf-8" src="js/jquery-1.8.3.min.js"></script>
+    <script type="text/javascript" charset="utf-8" src="js/layer.js"></script>
+    <script src="js/echarts.min.js"></script>
+    <script src="js/ylcx.js"></script>
+	<script src="js/kLin.js"></script>
+
+    <script src="js/zx_chart.js"></script>
+    <link rel="stylesheet" type="text/css" href="css/pub.css"/>
+    <link rel="stylesheet" type="text/css" href="css/115ylcx.css"/>
+    <link rel="stylesheet" type="text/css" href="css/layer.css"/>
+
+</head>
+<script type="text/javascript">
+    $(document).ready(function () {
+	
+    });
+
+  
+</script>
+<body>
+<div class="left">
+    <div class="haoma f14 scr">
+        <div class="qsbox" ><input type="radio" name="rows" value="50"  onclick="ylcx.KaiJiangShuJu()">50期</div>
+		<div class="qsbox" ><input type="radio" checked="checked" name="rows" value="100"  onclick="ylcx.KaiJiangShuJu()">100期</div>
+		<div class="qsbox" ><input type="radio" name="rows" value="200"  onclick="ylcx.KaiJiangShuJu()">200期</div>
+		<div class="qsbox" ><input type="radio" name="rows" value="300"  onclick="ylcx.KaiJiangShuJu()">300期</div>
+		<div class="qsbox" ><input type="radio" name="rows" value="500"  onclick="ylcx.KaiJiangShuJu()">500期</div>
+		<div class="qsbox" ><input type="radio" name="rows" value="1000"  onclick="ylcx.KaiJiangShuJu()">1000期</div>
+        <textarea class="haomabox" id="content" style="resize:none"></textarea>
+    </div>
+    <div class="tishi">
+        <!-- <font color="red" size="2" id="redFont"></font></div> -->
+        <div class="leftbottom">
+            <div class="leftbox2 f16 f666">
+                <div class="fl f16 botton2 m" onclick="ylcx.KaiJiangShuJu()">
+                    <i class="icon-search"></i> <span id="querySpan">查询</span>
+                </div>
+            </div>
+            <div class="leftbox1">
+                <div class="fl f14 botton m" onclick="ylcx.ZhanTieNeiRong()">
+                    <i class="  icon-plus-sign"></i> <span id="pasteSpan">粘贴</span>
+                </div>
+                <div class="fr f14 botton m" onclick="$('#content').val('')">
+                    <i class="icon-trash"></i> <span id="cleanSpan">清除</span>
+                </div>
+
+            </div>
+        </div>
+
+
+    </div>
+</div>
+<div class="right">
+    <div style="right: 10px;    left: 220px;    top: 10px;   height:100px;   position: fixed;">
+        <table border="0" width="100%">
+            <tr>
+                <td width="10%"></td>
+                <td align=' center'  id="title" style="font-size: 20px"></td>
+                <td width="10%"></td>
+            </tr>
+        </table>
+        <table border="0" width="100%" >
+            <tr style="height: 30px">
+
+                <td id="aaa" align="right" style="font-size: 15px"></td>
+                <td align="left" id="title_yl" style="font-size: 15px"></td>
+
+            </tr>
+        </table>
+    </div>
+    <div id="main" style="height:50%;width:100%;"></div>
+    <div id="main1" style="height:50%;width:100%;"></div>
+
+
+</div>
+</body>
+</html>

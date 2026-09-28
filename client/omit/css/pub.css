@@ -1,0 +1,177 @@
+@charset "utf-8";/*  手机专用
+@media only screen and (min-width:1010px) and (max-width: 1090px){body,html{font-size:320px}}
+@media only screen and (min-width:641px),only screen and (max-device-width:641px){body,html{font-size:234.38px}}
+@media only screen and (max-width:640px),only screen and (max-device-width:640px){body,html{font-size:200px}}
+@media only screen and (max-width:600px),only screen and (max-device-width:600px){body,html{font-size:187.5px}}
+@media only screen and (max-width:540px),only screen and (max-device-width:540px){body,html{font-size:168.75px}}
+@media only screen and (max-width:480px),only screen and (max-device-width:480px){body,html{font-size:150px}}
+@media only screen and (max-width:414px),only screen and (max-device-width:414px){body,html{font-size:129.38px}}
+@media only screen and (max-width:412px),only screen and (max-device-width:412px){body,html{font-size:128.8px}}
+@media only screen and (max-width:400px),only screen and (max-device-width:400px){body,html{font-size:125px}}
+@media only screen and (max-width:393px),only screen and (max-device-width:393px){body,html{font-size:122.81px}}
+@media only screen and (max-width:384px),only screen and (max-device-width:384px){body,html{font-size:120px}}
+@media only screen and (max-width:375px),only screen and (max-device-width:375px){body,html{font-size:117.19px}}
+@media only screen and (max-width:360px),only screen and (max-device-width:360px){body,html{font-size:112.5px}}
+@media only screen and (max-width:320px),only screen and (max-device-width:320px){body,html{font-size:100px}}
+@media only screen and (max-width:318px),only screen and (max-device-width:318px){body,html{font-size:99.35px}}
+@media only screen and (max-width:240px),only screen and (max-device-width:240px){body,html{font-size:75px}}
+*/
+body,dd,dl,dt,fieldset,form,h1,h2,h3,h4,h5,h6,hr,input,label,li,ol,p,textarea,ul{margin:0;padding:0;}
+body{font-family:Microsoft YaHei,Arial;-webkit-text-size-adjust:none;color:#333;background:#fff}
+body,html{-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;outline:0;-webkit-tap-highlight-color:transparent;-moz-tap-highlight-color:transparent;-ms-tap-highlight-color:transparent;tap-highlight-color:transparent;height:100%;}
+a{text-decoration:none;color:#333;outline:0}
+input{outline:0;font-family:Microsoft YaHei,Arial}
+::-webkit-input-placeholder{color:#bbb}
+img{border:0;vertical-align:middle;outline:0}
+em,i{font-style:normal}
+li,ul{list-style:none}
+table{border-collapse:collapse;border-spacing:0;margin:0;padding:0;}
+input[type=text],input[type=number],input[type=password]{-webkit-appearance:none;border-radius:0}
+
+/*placeholder css*/
+::-moz-placeholder{ font-family: "Microsoft YaHei"}              
+::-webkit-input-placeholder{ font-family: "Microsoft YaHei"}    
+:-ms-input-placeholder{ font-family: "Microsoft YaHei"}
+
+div,i{-moz-box-sizing:border-box;/*Firefox3.5+*/-webkit-box-sizing:border-box;/*Safari3.2+*/-o-box-sizing:border-box;/*Opera9.6*/-ms-box-sizing:border-box;/*IE8*/box-sizing:border-box;/*W3C标准  这 行控制padding不影响宽度)*/}
+
+/*原子类*/
+.cl{clear: both }
+.cl:after { display: block;clear: both;visibility: hidden;height: 0;overflow: hidden;content: ".";}
+
+.fl { float: left;}
+.fr { float: right}
+.yh{font-family:Microsoft YaHei; }
+.Arial{ font-family:Arial }
+.song{font-family:simsun}
+
+.m{ cursor:pointer;}
+
+.f10{ font-size:10px;}
+.f12{ font-size:12px;}
+.f14{ font-size:14px;}
+.f16{ font-size:16px;}
+.f18{ font-size:18px;}
+.f20{ font-size:20px;}
+.f25{ font-size:25px;}
+.f999{ color:#999}
+.fcolor_red{color:#f00}
+
+a.bai{ color:#fff;}
+a.hei { color:#000;}
+a.hui6 { color:#666;}
+a.lan { color:#0066bb;}
+a.hong { color:#C00;}
+a.hong2 { color:#900;}
+a.mfen { color:#ffd3d3;}
+
+.bai{ color:#fff}
+.hei{ color:#000;}
+.hui4 { color:#444;}
+.hui6 { color:#666;}
+.hong { color:#C00;}
+.lan { color:#0B528C;}
+.hui9 { color:#999;}
+.bgh{ background:#C00 !important; color:#fff !important;}
+.color_red{color:red;};
+
+.lh15{ line-height:15px;}
+.lh20{ line-height:20px;}
+.lh10{ line-height:10px;}
+.mt10{ margin-top:3px;}
+
+/* 左下菜单*/
+.menucenter{ position:fixed; left:0; bottom:79px; width:200px;}
+.menucenter ul {}
+.menucenter ul li{ background:#eee;     color: #5f6f81;border-bottom:1px solid #ccc;padding-left:25px;height: 50px; line-height:50px; z-index:99;}
+.menucenter ul li i{ margin-right:15px;}
+.menucenter ul li:hover{ background:#5f6f81;color: #fff;border-bottom:1px solid #ccc;;
+
+}
+/*loading层  */
+#loading_zz {
+	display: none;
+	position: absolute;
+	top: 0%;
+	left: 0%;
+	width: 100%;
+	height: 100%;
+	background-color: black;
+	z-index: 198910261;
+	-moz-opacity: 0.8;
+	opacity: 0.01;
+	filter: alpha(opacity=50);
+}
+
+#loading_text {
+	overflow: hidden;
+	padding: 10px;
+	display: none;
+	z-index: 198910261;
+	border-radius: 5px;
+	color:#0074d3;
+	position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);  /* 使用css3的transform来实现 */
+}
+
+#loading_text .goodbox {
+	overflow: hidden;
+	width: 100%;
+	margin-bottom: 10px;
+}
+/*修改用户信息  */
+#xiugai_kh{
+	margin-top: 30px;
+}
+#xiugai_kh li{
+	margin-bottom: 10px;
+	margin-left: 25px;
+	width: 300px;
+}
+#xiugai_kh li input{
+	float:right;
+	height: 25px;
+	border: 1px solid #2468a2;
+	padding-left: 5px;
+	background: #eee;
+	
+}
+#xiugai_kh li input:focus {
+
+ border: 1px solid red;
+
+}
+/*修改用户密码  */
+#xiugai_mima{
+	margin-top: 30px;
+}
+#xiugai_mima li{
+	margin-bottom: 20px;
+	margin-left: 25px;
+	width: 300px;
+}
+#xiugai_mima li input{
+	float:right;
+	height: 25px;
+/* 	border: 1px solid #999; */
+	padding-left: 5px;
+	color:#444;
+	border: 1px solid #2468a2;
+	background: #eee;
+}
+#xiugai_mima li input:focus {
+
+ border: 1px solid red;
+
+}
+#xiugai_mima li input::-webkit-input-placeholder { 
+    color:#bbb;
+}
+.setting{ border-top:1px solid #ccc; position:fixed; font-size:25px; text-align:center; padding:25px 5px 5px 5px; left:0; bottom:0; width:70px !important; height:80px !important;}
+
+/*滚动条*/
+.scb::-webkit-scrollbar {width: 15px;height: 1px; }
+.scb::-webkit-scrollbar-thumb {border-radius: 1.5px;-webkit-box-shadow: inset 0 0 3px rgba(0,0,0,0.2);background: #999;}
+.scb::-webkit-scrollbar-track {/*滚动条里面轨道*/-webkit-box-shadow: inset 0 0 3px rgba(0,0,0,0.2);border-radius: 1.5px;background: #EDEDED;}

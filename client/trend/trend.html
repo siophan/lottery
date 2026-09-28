@@ -1,0 +1,256 @@
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+		<title></title>
+		<link rel="stylesheet" type="text/css" href="css/pub.css" />
+		<link rel="stylesheet" type="text/css" href="css/table.css" />
+		<link rel="stylesheet" type="text/css" href="css/css/font-awesome.min.css" />
+		<script type="text/javascript" src="js/jquery-1.8.3.min.js"></script>
+		<script type="text/javascript" src="js/jweixin-1.6.0.js"></script>
+		<script type="text/javascript" src="js/uni.webview.1.5.2.js"></script>
+		<script type="text/javascript" src="js/ceng.js"></script>
+		<script type="text/javascript" src="js/layer.js"></script>
+		<script type="text/javascript" src="js/common.js"></script>
+		<script type="text/javascript" src="js/style.js"></script>
+		<script type="text/javascript" src="js/content.js"></script>
+		<script type="text/javascript" src="js/trend_name.js"></script>
+		<script type="text/javascript" src="js/line.js"></script>
+		<script type="text/javascript">
+			sessionStorage.removeItem("obj");
+			sessionStorage.removeItem("code_id");
+			sessionStorage.removeItem("rotate");
+			sessionStorage.removeItem("dm");
+			sessionStorage.removeItem("num");
+			sessionStorage.removeItem("cc");
+			sessionStorage.removeItem("dd");
+			//从url截取获得的所有信息存入缓存
+			var url = window.location.href.substr(0).split("?")[1];
+			var type = url.split("&");
+			var submitRow = 1;
+			var obj = {};
+			for (var i = 0; i < type.length; i++) {
+				var key = type[i].split("=")[0];
+				var val = type[i].split("=")[1];
+				if (key == "language") {
+					obj.language = val; //暂时没有使用
+				} else if (key == "token") {
+					obj.token = val;
+				} else if (key == "code") {
+					obj.code = val; //城市id
+				} else if (key == "play_id") {
+					obj.play_id = val; //玩法id
+				} else if (key == "chart_id") {
+					obj.chart_id = val; //走势图id 在json获取对应名
+				} else if (key == "from_Id") {
+					obj.from_Id = val; //电脑版901 安卓902 苹果903
+				} else if (key == "back") {
+					obj.back = val; //回退几步
+				} else if (key == "dm") {
+					obj.dm = val; //如果有值则是代码图表
+					common.cookieSet("dm", val);
+				} else if (key == "dis") {
+					obj.dis = val; //q==前区 h==后区
+				} else if (key == "code_id") {
+					obj.code_id = val; //代码走势使用
+					common.cookieSet("code_id", val);
+				} else if (key == "expect") {
+					let expects = val.split("-");
+					var result = [];
+					for (let i = 0; i < expects.length; i++) {
+						let data = {};
+						data.expect = expects[i].split("*")[0];
+						data.opennumber = expects[i].split("*")[1];
+						result.push(data);
+					}
+					obj.number = result;
+				}
+			}
+			if (common.isNull(common.cookieGet("rotate"))) {
+				common.cookieSet("rotate", "heng");
+			}
+			common.cookieSet("obj", JSON.stringify(obj));
+			$(document).ready(function() {
+				if (common.isNull(obj.code_id) && common.isNull(obj.dm)) {
+					common.showMsg("参数传入冲突,请联系客服处理", 2000);
+					return;
+				}
+				common.server();
+			});
+		</script>
+
+		<style>
+
+		</style>
+	</head>
+	<body class="webpBack">
+		<div id="showFace" style="width: 100%;height: 100%;background-color: #FFF;z-index: 2001;position:absolute;">
+			<div style="margin:0 auto; background:url(img/loding.gif) ;height:20px; width:400px;margin-top:100px; text-align:center; font-size:30px; padding-top:350px; color:#999;"
+			 id="loding">
+				走势图加载中</div>
+		</div>
+		<div id="print1">
+			<div class="diqu">
+				<script>
+					document.writeln('<p class="dqtanbg" >30期</p>');
+				</script>
+				<ul class="dqtan">
+					<script>
+						var issue;
+						if (obj.from_Id == 901) {
+							issue = [10, 20, 30, 50, 100, 200, 300];
+						} else {
+							issue = [20, 30, 50, 100];
+						}
+						for (var i = 0; i < issue.length; i++) {
+							if (obj.from_Id == 901 && issue[i] == 100) {
+								document.writeln("<li id='q" + issue[i] + "' class='on' onclick='common.refresh(" + issue[i] + ")'>" + issue[i] +
+									"期</li>");
+							} else {
+								document.writeln("<li id='q" + issue[i] + "' onclick='common.refresh(" + issue[i] + ")'>" + issue[i] + "期</li>");
+							}
+						}
+					</script>
+
+				</ul>
+			</div>
+
+			<div class="diqu1">
+				<script>
+					document.writeln('<p class="dqtanbg1" id="code_name">代码一</p>');
+				</script>
+				<ul class="dqtan1">
+					<script>
+						var code_name = ["代码一", "代码二", "代码三", "代码四"];
+						for (var i = 0; i < code_name.length; i++) {
+							if (i == 0) {
+								document.writeln("<li class='on' id='code" + i + "' onclick='common.refreshCode(" + (i + 1) + ")'>" + code_name[
+										i] +"</li>");
+							} else {
+								document.writeln("<li id='code" + i + "' onclick='common.refreshCode(" + (i + 1) + ")'>" + code_name[
+										i] +"</li>");
+							}
+						}
+					</script>
+				</ul>
+			</div>
+			<div id="tanchu" class="tanchu" style="display: none;">
+				<div class="tBtn" id='rotate' onclick="common.rotate('heng')">横屏</div>
+				<div class="tBtn" onclick="common.onBack()">返回</div>
+				<div class="tBtn" onclick="common.botton('colse')">关闭</div>
+			</div>
+			<div class="rBtn">
+				<ul>
+					<script>
+						if (obj.from_Id != 901) {
+							document.writeln("<li onclick=common.botton('open')>更多</li>");
+						}
+						//document.writeln("<li onclick=ab()>test</li>");
+					</script>
+				</ul>
+			</div>
+			<div class="top">
+				<div class="topname" id="chart_name"></div>
+			</div>
+			<div class="t-head">
+				<div class="t-h-wrap" id="hh">
+					<table class="t-zebra" id="width2">
+						<colgroup id="titlecol">
+
+						</colgroup>
+						<tbody>
+							<tr id="title_name">
+							</tr>
+							<tr id="title_con">
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+			<div class="l-top">
+				<table class="t-zebra">
+					<th class="ltop ltop4">期号</th>
+					<th class="ltop">开奖号</th>
+				</table>
+			</div>
+			<div class="l-center" id="dd">
+				<table class="l-zebra">
+					<colgroup class="bg1">
+					</colgroup>
+					<tbody id="opennumber">
+
+					</tbody>
+				</table>
+			</div>
+			<!--别删，删了不好使-->
+			<div class="t-content" id="cc" onscroll="roll()">
+				<table class="zebra" id="width1">
+					<colgroup id="content_col">
+
+					</colgroup>
+					<tbody id="content">
+
+					</tbody>
+				</table>
+			</div>
+			<div class="l-bottom" id="leftbottom">
+				<table class="zebra">
+					<tbody>
+						<tr id="tj2" style="display: none;">
+							<td class="fline" style=" line-height: 62px;"><span class="btn m" onClick="common.specialSub()">提交</span><span
+								 class="btn m" onClick="common.clickClean('tjc2')">清除</span></td>
+						</tr>
+						<tr id="tj1">
+							<td class="fline"><span class="btn m" onClick="common.submiting()">提交</span><span class="btn m" onClick="common.clickClean('tjc1')">清除</span></td>
+						</tr>
+						<tr class="wai">
+							<td>当前出现次数</td>
+						</tr>
+						<tr class="wai">
+							<td>当前最大连出</td>
+						</tr>
+						<tr class="wai">
+							<td>当前最大遗漏</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+			<div class="t-bottom" id="conbottom">
+				<div class="t-b-wrap" id="mm">
+					<table class="zebra">
+						<colgroup id="bottom_col">
+
+						</colgroup>
+
+						<tbody>
+							<tr class="bg6 wai m" id="tjc2" style="display: none;">
+							</tr>
+							<tr class="bg6 wai m" id="tjc1">
+							</tr>
+							<tr id="cxcs" class="wai">
+							</tr>
+							<tr id="tjlc" class="wai">
+							</tr>
+							<tr id="tjyl" class="wai">
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+			<div class="bBtn">
+				<script>
+					if (obj.from_Id != 901) {
+						document.writeln(
+							'<div id="show" style="display: none;" class="bBtn1" onclick=common.show("show")><i class="fa fa-sort-up"></i></div>'
+						);
+						document.writeln(
+							'<div id="hide" class="bBtn1 bBtntr" onclick=common.show("hide")><i class="fa fa-sort-up"></i></div>');
+					}
+				</script>
+			</div>
+		</div>
+		<script>
+
+		</script>
+	</body>
+</html>

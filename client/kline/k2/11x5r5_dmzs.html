@@ -1,0 +1,711 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+
+	<head>
+		<base href="<%=basePath%>">
+		<meta charset="UTF-8">
+		<title>k线图</title>
+		<meta http-equiv="pragma" content="no-cache">
+		<meta http-equiv="cache-control" content="no-cache">
+		<meta http-equiv="expires" content="0">
+		<meta http-equiv="keywords" content="keyword1,keyword2,keyword3">
+		<meta http-equiv="description" content="This is my page">
+		<link rel="stylesheet" href="k.css" />
+		<script type="text/javascript" charset="utf-8" src="../echarts/echarts.min.js"></script>
+		<script type="text/javascript" charset="utf-8" src="../jquery/jquery-1.9.1.js"></script>
+		<script type="text/javascript" charset="utf-8" src="../js/jquery.i18n.properties.js"></script>
+		<script type="text/javascript" charset="utf-8" src="../layer/layer.js"></script>
+		<script type="text/javascript" charset="utf-8" src="../js/localStorage.js"></script>
+		<script type="text/javascript" charset="utf-8" src="../../js/btms.js"></script>
+		<script type="text/javascript" charset="utf-8" src="../../js/btutil.js"></script>
+		<script type="text/javascript" charset="utf-8" src="../js/openLayersRefreh.js"></script>
+		<script type="text/javascript" charset="utf-8" src="../js/josn.js"></script>
+		<script type="text/javascript" charset="utf-8" src="k.js"></script>
+		<script type="text/javascript">
+			var url = window.parent.document.referrer;
+			var cookie,
+				oldOpenNumber;
+
+			function c() {
+				window.close();
+			}
+
+			var csid = btutil.cookieGet("topCode1105r5");
+			var from_id = "301";
+			var cat = "1105";
+			var g_id = 0;
+			var g_count = 0;
+			var isTP = "";
+			var g_zdy = "";
+			var g_m;
+			var cn_en = ""
+			$(document).ready(function() {
+				myChart = echarts.init(document.getElementById('main'));
+				cn_en = btutil.cookieGet("language", 1);
+				k.getnameqh(cn_en);
+				rxgetkjname();
+				init();
+				//定时扫描代当前开奖号码是否改变
+				setInterval(function() {
+					if (oldOpenNumber && oldOpenNumber != btutil.cookieGet("openNumber")) {
+						init();
+					}
+				}, 500);
+			});
+
+			function rxgetkjname() {
+				$("#qishu").html(k.getName('k.rxqishu'))
+				$(".qi").html(k.getName('k.rxxxqi'))
+			}
+
+			//请求数据
+			function guanbi() {
+				windowK.closed;
+			}
+
+			function init() {
+				zgValue = [], sgValue = [], xgValue = [], qhSum = [], difList = [],
+					deaList = [],
+					macdList = [];
+				openNumber = [];
+				duicuo = [];
+				kList = [], dList = [], jList = [], zdjList = [], zgjList = [], zgValue = [], sgValue = [], xgValue = [], zqValue = [],
+					bcnCnum = [];
+				faZs = 0, hm1 = 0, bcfw = 20, zgz1 = 0, hlxzh = 0, xs = 2, sumC = 0, kssc = 0, ksc = 0; //步长范围内所有c之和
+				kdjZq = 9, zdj = 0, zgj = 0, kdjK = 50, kdjD = 50, syqK = 0, syqD = 0, macdZb = 0, sygParam = 0, zqNum = 0, cwNum =
+					0;
+				syqEma12 = 0,
+					syqEma26 = 0,
+					sunZs = 0, type_id = "";
+				syqDea = 0;
+				csid = 0;
+
+				//发送请求
+				ajaxs(onBack);
+				//console.log(getDataByrecommendUrl+"////"+JSON.stringify(parm))
+
+			}
+
+			function ajaxs(onback) {
+				//console.log(JSON.stringify(window.opener.GetDaiMa()) + "--");
+				var data;
+				cookie = window.opener.dmzs11x5.pinjiedmzs_k();
+				cookie.rows = cookie.qishu;
+				cookie.play_id = cookie.type_id;
+				delete cookie.qishu;
+				//根据代码走势中期数选中K线中期数
+				$("input[name='qs']").each(function() {
+					if ($(this).val() == cookie.rows) {
+						$(this).attr("checked", "checked");
+					}
+				});
+				cookie.code = btutil.cookieGet("topCode1105r5");
+				oldOpenNumber = btutil.cookieGet("openNumber");
+				var url = "/codeTrend/KLine";
+				var successRes = function(res) {
+					data = res;
+					sunZs = 462;
+					type_id = data.play_id;
+					csid = data.code;
+					if (type_id == "ssca2" || type_id == "sscp2" || type_id == "sscrx2") {
+						sunZs = 100
+					} else if (type_id == "ssca3" || type_id == "sscp3" || type_id == "sscrx3" || type_id == "plsr3" || type_id ==
+						"3dr3") {
+						sunZs = 1000
+					} else if (type_id == "sscs4" || type_id == "sscrx4") {
+						sunZs = 10000
+					} else if (type_id == "sscs5") {
+						sunZs = 100000
+					}
+					onBack(data);
+				};
+				btms.request(url, cookie, "", successRes, false);
+			}
+
+			/////k线图内提交的期数
+			function k_ajaxs() {
+				zgValue = [], sgValue = [], xgValue = [], qhSum = [], difList = [],
+					deaList = [],
+					macdList = [];
+				openNumber = [];
+				duicuo = [];
+				kList = [], dList = [], jList = [], zdjList = [], zgjList = [], zgValue = [], sgValue = [], xgValue = [], zqValue = [],
+					bcnCnum = [];
+				faZs = 0, hm1 = 0, bcfw = 20, zgz1 = 0, hlxzh = 0, xs = 2, sumC = 0, kssc = 0, ksc = 0; //步长范围内所有c之和
+				kdjZq = 9, zdj = 0, zgj = 0, kdjK = 50, kdjD = 50, syqK = 0, syqD = 0, macdZb = 0, sygParam = 0, zqNum = 0, cwNum =
+					0;
+				syqEma12 = 0,
+					syqEma26 = 0,
+					sunZs = 0, type_id = cookieGet("pageId");
+				syqDea = 0;
+				csid = 0;
+
+				var data;
+				if (!cookie) {
+					cookie = window.opener.dmzs11x5.pinjiedmzs_k();
+				}
+				var qishu = $("input[type='radio']:checked").val();
+				cookie.rows = qishu;
+				cookie.play_id = cookie.type_id;
+				delete cookie.qishu;
+				
+				var url = "/codeTrend/KLine";
+				var successRes = function(res) {
+					data = res;
+					sunZs = 462;
+					onBack(data);
+					type_id = data.type_id;
+					csid = btutil.cookieGet("topCode1105r5");
+					if (type_id == "ssca2" || type_id == "sscp2" || type_id == "sscrx2") {
+						sunZs = 100
+					} else if (type_id == "ssca3" || type_id == "sscp3" || type_id == "sscrx3" || type_id == "plsr3" || type_id ==
+						"3dr3") {
+						sunZs = 1000
+					} else if (type_id == "sscs4" || type_id == "sscrx4") {
+						sunZs = 10000
+					} else if (type_id == "sscs5") {
+						sunZs = 100000
+					}
+				};
+				
+				btms.request(url, cookie, "", successRes, false);
+			}
+
+			function tijiaoqisu() {
+				zgValue = [], sgValue = [], xgValue = [], qhSum = [], difList = [],
+					deaList = [],
+					macdList = [];
+				openNumber = [];
+				duicuo = [];
+				kList = [], dList = [], jList = [], zdjList = [], zgjList = [], zgValue = [], sgValue = [], xgValue = [], zqValue = [],
+					bcnCnum = [];
+				faZs = 0, hm1 = 0, bcfw = 20, zgz1 = 0, hlxzh = 0, xs = 2, sumC = 0, kssc = 0, ksc = 0; //步长范围内所有c之和
+				kdjZq = 9, zdj = 0, zgj = 0, kdjK = 50, kdjD = 50, syqK = 0, syqD = 0, macdZb = 0, sygParam = 0, zqNum = 0, cwNum =
+					0;
+				syqEma12 = 0,
+					syqEma26 = 0,
+					sunZs = 0, type_id = cookieGet("pageId");
+				syqDea = 0;
+				csid = 0;
+				var qishu = $("input[type='radio']:checked").val();
+				k_ajaxs(onBack, qishu);
+
+			}
+
+
+			function up(x,y) {
+				return x.expect - y.expect
+			}
+			function onBack(data) {
+				data.data.sort(up);
+				ktjfaList = "";
+				rows = data.data.length;
+				ksc = 0;
+				if (data.succ) {
+					faZs = data.len;
+					var myobj = eval(data.data);
+					$.each(data.data, function(i, item) {
+						if (i <= rows) {
+							ktjfaList += item.opennumber + "-";
+							openNumber.push(item.openNumber);
+							qhSum.push(item.expect);
+							duicuo.push(item.result);
+							kssc = i + 1;
+							if (item.result.toString() == "y") { //红
+								ksc++;
+							}
+						}
+
+					})
+					kssc = rows;
+					/* myobj = myobj.slice(0, rows); */
+					addMainData(data);
+				} else {
+					layer.msg('加载数据失败');
+				}
+
+			}
+
+			function pushdArray(arr, index, value, value2) { //arr 被插二维数组 index二维数组索引 value插入值
+				arr[index] = new Array();
+				arr[index][0] = index + 1;
+				arr[index][1] = value;
+				arr[index][2] = value2;
+				arr[index][3] = value;
+				arr[index][4] = value2;
+				arr[index][5] = value;
+				arr[index][6] = value2;
+				arr[index][7] = value;
+				arr[index][8] = value2;
+				arr[index][9] = value;
+				arr[index][10] = value2;
+
+				return arr;
+			}
+
+
+			function jsbcr5() {
+				var bc = (sunZs / faZs) / 1 - 1;
+				var t = $('#wf', parent.document).val();
+				if (t == 2 || t == 3 || t == 4) {
+					bc = (sjfw - ksc) / ksc;
+				}
+				//console.log("总注数："+sunZs+"；方案注数："+faZs+";")
+				return bc;
+			}
+
+
+			function addMainData(data23) {
+				myChart.clear();
+				//1105r5任五  1105a3前三组  1105a2前二组   1105a3z前三直  1105a2z前二直
+				var datar5 = new Array();
+				var datar51 = new Array();
+				//ma标准
+				var ma1 = 0;
+				var bc = jsbcr5();
+				var pjyl = "";
+				//				console.log("理论遗漏："+bc)
+				var yl1 = 0;
+				for (var i = 0; i < data23.data.length; i++) { //计算k线
+					//K线
+					var one = i + 1;
+					var yn = data23.data[i].result; //y红  n绿
+					if (yn.toString() == "y") { //红
+						datar5 = pushdArray(datar5, i, hm1, (hm1 + bc));
+						hm1 = hm1 + bc; //红线计算上端坐标
+						//ksc ++;
+						yl1 = 0;
+					} else { //绿
+						datar5 = pushdArray(datar5, i, hm1, (hm1 - 1));
+						hm1 = hm1 - 1; //绿线计算下端坐标   固定值为-1
+						yl1++;
+					}
+					//收盘价c
+					var spjC = hm1;
+					//					console.log(i+"收盘价："+spjC)
+					//当前是否超出不长
+					var js1 = i - (bcfw - 1);
+					if (js1 > 0) { //当等于步长时，去掉
+						if (yn.toString() == "y") {
+							if (zqValue[0] == "y") {
+
+							} else {
+								zqNum++;
+								cwNum--;
+							}
+						} else {
+							if (zqValue[0] == "n") {
+
+							} else {
+								zqNum--;
+								cwNum++;
+							}
+						}
+						hlxzh = hlxzh - datar5[js1 - 1][1] + hm1;
+						zqValue.splice(0, 1);
+						zqValue.push(yn);
+						bcnCnum.splice(0, 1);
+						bcnCnum.push(hm1);
+
+					} else {
+						hlxzh = hlxzh + hm1;
+						zqValue.push(yn);
+						bcnCnum.push(hm1);
+						if (yn.toString() == "y") {
+							zqNum++;
+						} else {
+							cwNum++;
+						}
+					}
+					//console.log("zqValue:"+zqValue);
+					//ma = 步长范围内所有c（红绿线）之和  / 步长
+					ma1 = hlxzh / bcfw;
+					var tsumC = 0;
+					for (var j = 0; j < bcnCnum.length; j++) {
+						tsumC = tsumC + (bcnCnum[j] - ma1) * (bcnCnum[j] - ma1);
+					}
+
+					//sumC = sumC + ((spjC-ma1)*(spjC-ma1));//（步长内每期c-ma）平方    累加之和
+
+					//标准差
+					var httttt = tsumC / bcfw;
+					var bzc = Math.sqrt(httttt); //开放【（步长内每期c-ma）平方    累加之和 / 步长】
+					bzc = parseFloat(bzc).toFixed(2);
+					//					console.log(tsumC+"-----"+bcfw+"-----"+httttt+"标准差："+bzc)
+					//中轨  = 步长范围内所有红绿线之和  / 步长  + 上一期中轨值
+					//					console.log("正确数："+zqNum+";错误数："+cwNum+";")
+
+					var hz111 = (zqNum * bc) - cwNum;
+					hz111 = parseFloat(hz111).toFixed(2);
+					var zg1 = hz111 / bcfw + zgz1 * 1;
+					//					zg1 = parseFloat(zg1).toFixed(2);
+					//					console.log(""+"上一期中轨："+zgz1+"；和:"+(zqNum*bc - cwNum)+";步长："+bcfw)
+					//console.log(i+"中轨："+zg1)
+					//添加中轨集合
+					zgValue.push(zg1);
+					//上轨     中轨+系数*标准差
+					var sg1 = zg1 + xs * bzc;
+					//添加上轨集合
+					sgValue.push(sg1);
+
+					//下轨     中轨-系数*标准差
+					var xg1 = zg1 - xs * bzc;
+					//console.log(i+"下轨："+xg1)
+					//添加下轨集合
+					//console.log("中轨："+zg1+"；上轨："+sg1+"；下轨："+xg1)
+					xgValue.push(xg1);
+					//上一期中轨值
+					zg1 = parseFloat(zg1).toFixed(2);
+					zgz1 = zg1;
+
+					//第二个图表
+					var dqqEma12 = (syqEma12 * 11 / 13) + (spjC * 2 / 13);
+
+					var dqqEma26 = (syqEma26 * 25 / 27) + (spjC * 2 / 27);
+					syqEma12 = dqqEma12;
+					syqEma26 = dqqEma26;
+					var dqDif = syqEma12 - syqEma26;
+					//console.log(syqEma12+"=="+syqEma26+"dqDif="+(syqEma12 - syqEma26));
+					var dqDea = (syqDea * 8 / 10) + (dqDif * 2 / 10);
+					var dqMacd = (dqDif - dqDea) * 2;
+					//console.log("dqqEma12="+dqDif +"dqDea=="+dqDea+"dqMacd=="+dqMacd);
+					difList.push(dqDif);
+					deaList.push(dqDea);
+					//if(dqMacd==0){
+					//macdList.push(-0.01);
+					//}else{
+					macdList.push(dqMacd);
+					//}
+
+
+					syqDea = dqDea;
+
+					//第三个坐标图表
+
+					//					var kdj = 9;//kdj周期
+					//					var zdj=0,zgj=0,kdjK=50,kdjD=50,syqK=0,syqD=0;
+					//					var kList = [],dList = [],jList=[];
+					//					var zdjList =[],zgjList[];
+
+					var js2 = i - (kdjZq - 1);
+					if (js2 > 0) {
+						zdjList.splice(0, 1);
+						zdjList.push(spjC);
+					} else {
+						zdjList.push(spjC);
+					}
+					zgj = zdjList.max(); //最高价H
+					zdj = zdjList.min(); //最低价L
+
+					var rsv = 0;
+					if (i == 0) {
+						rsv = 100;
+					} else {
+						rsv = (spjC - zdj) / (zgj - zdj) * 100;
+					}
+					if (syqK == 0) {
+						syqK = 50;
+					}
+					if (syqD == 0) {
+						syqD = 50;
+					}
+
+					kdjK = 2 / 3 * syqK + 1 / 3 * rsv;
+					kdjD = 2 / 3 * syqD + 1 / 3 * kdjK;
+					var kdjJ = 3 * kdjK - 2 * kdjD;
+					if (i == 0) {
+						kdjJ = 0;
+					}
+					kList.push(kdjK);
+					dList.push(kdjD);
+					jList.push(kdjJ);
+					syqK = kdjK;
+					syqD = kdjD;
+				}
+				//console.log("macdListmacdList:"+JSON.stringify(macdList));
+				var dmji = $("#dm", window.opener.document).val();
+				if (dmji == "dm1") {
+					faName = "代码一";
+					faName = k.getName('k.dm1');
+				} else if (dmji == "dm2") {
+					faName = "代码二";
+					faName = k.getName('k.dm2');
+				} else if (dmji == "dm3") {
+					faName = "代码三";
+					faName = k.getName('k.dm3');
+				} else if (dmji == "dm4") {
+					faName = "代码四";
+					faName = k.getName('k.dm4');
+				}
+				if (cn_en == "cn") {
+
+					ktitle = "【" + faZs + "注    实出：" + ksc + "/" + kssc +
+						"   当前遗漏：" + yl1 + "】";
+				} else {
+					ktitle = "【" + faZs + "notes    Real output：" + ksc + "/" + kssc +
+						"   Current omission：" + yl1 + "】";
+				}
+
+				var data = splitData(datar5);
+
+				//数组处理
+				function splitData(rawData) {
+					var datas = [];
+					var times = [];
+					var vols = [];
+					var macds = [];
+					var difs = [];
+					var deas = [];
+					var hm = [];
+					for (var i = 0; i < rawData.length; i++) {
+						datas.push(rawData[i]);
+						times.push(rawData[i].splice(0, 1)[0]);
+						vols.push(rawData[i][4]);
+						macds.push(rawData[i][6]);
+						difs.push(rawData[i][7]);
+						deas.push(rawData[i][8]);
+						hm.push(i + "sdfsdf");
+					}
+					return {
+						datas: datas,
+						times: times,
+						vols: vols,
+						macds: macds,
+						difs: difs,
+						deas: deas,
+						hm: hm
+					};
+				}
+
+				var gridListHeight = '85%';
+				var macdKListHeight = '30%';
+				var kdjKListHeight = '30%';
+				var macdKListTop = '45%';
+				var kdjKListTop = '66%';
+				var macdK = cookieGet("macdK");
+				var kdjK = cookieGet("kdjK");
+				var gridBoolen = false;
+				if (macdK != null && macdK != "" && kdjK != null && kdjK != "") {
+					gridListHeight = '85%';
+					gridBoolen = true;
+				}
+				var legendlist = [{
+					inactiveColor: '#777',
+					itemHeight: 14,
+					top: '90%',
+					textStyle: {
+						color: '#fff'
+					}
+				}];
+				var gridList = [{
+					left: '1%',
+					right: '1%',
+					height: gridListHeight,
+					zlevel: 1
+				}];
+				var xAxisList = [{
+					type: 'category',
+					data: data.times,
+					scale: true,
+					silent: true,
+					show: false,
+					axisLine: {
+						onZero: false,
+					},
+					splitLine: {
+						show: false,
+					},
+					axisLabel: {
+						show: gridBoolen
+					},
+					boundaryGap: false
+				}];
+				var yAxisList = [{
+					scale: true,
+					splitArea: {
+						show: false
+					},
+					gridIndex: 0,
+					axisLabel: {
+						show: false
+					},
+					axisTick: {
+						show: false
+					},
+					splitLine: {
+						show: false
+					},
+				}]
+
+				var seriesList = [{
+					name: 'KLine',
+					type: 'candlestick',
+					data: data.datas,
+					symbolSize: 0,
+					smooth: true,
+					itemStyle: {
+						normal: {
+							color: 'red',
+							color0: '#47e1e9',
+							borderColor: 'red',
+							borderColor0: '#47e1e9'
+						}
+					},
+				}, {
+					name: k.getName('k.zhonggui'),
+					type: 'line',
+					data: zgValue,
+					smooth: true,
+					symbolSize: 0,
+					lineStyle: {
+						normal: {
+							width: 1
+						}
+					},
+					itemStyle: {
+						normal: {
+							color: '#FFFFFF'
+						}
+					}
+				}, {
+					name: k.getName('k.shanggui'),
+					type: 'line',
+					data: sgValue,
+					smooth: true,
+					symbolSize: 0,
+					lineStyle: {
+						normal: {
+							width: 1
+						}
+					},
+					itemStyle: {
+						normal: {
+							color: '#FFFF00'
+						}
+					}
+				}, {
+					name: k.getName('k.xiagui'),
+					type: 'line',
+					data: xgValue,
+					smooth: true,
+					symbolSize: 0,
+					lineStyle: {
+						normal: {
+							width: 1
+						}
+					},
+					itemStyle: {
+						normal: {
+							color: '#FF00FF'
+						}
+					}
+				}];
+				var option = {
+					backgroundColor: '#000',
+					textStyle: {
+						color: '#fff'
+					},
+					title: {
+						text: ktitle,
+						right: 0,
+						textStyle: {
+							color: '#fff'
+						}
+					},
+					tooltip: {
+						trigger: 'axis',
+						alwaysShowContent: true,
+						position: [10, 10],
+						formatter: function(params, ticket, callback) {
+							var htmlStr = '';
+							for (var i = 0; i < params.length; i++) {
+								var param = params[i];
+								var xName = param.name; //x轴的名称
+								var seriesName = param.seriesName; //图例名称
+								var value = 0; //y轴值
+								if (seriesName.toString() == "KLine") {
+									value = param.value[0];
+								}
+								var color = param.color; //图例颜色
+								if (i === 0) {
+									if (cn_en == "cn") {
+										htmlStr += GetCodeName(btutil.cookieGet("topCode1105r5")) +
+											"【" + qhSum[value] +
+											"期     开奖号码：" + openNumber[value] +
+											'】'; //x轴的名称
+									} else {
+										htmlStr += GetCodeName_en(btutil.cookieGet("topCode1105r5")) +
+											"【" + qhSum[value] +
+											"notes     Lottery number：" + openNumber[value] +
+											'】'; //x轴的名称
+									}
+
+								}
+							}
+							return htmlStr;
+						},
+						axisPointer: {
+							type: 'cross',
+							label: {
+								show: false,
+							},
+							crossStyle: {
+								type: 'solid'
+							},
+						},
+					},
+					axisPointer: {
+						link: {
+							xAxisIndex: 'all'
+						},
+						label: false
+					},
+					legend: legendlist,
+					grid: gridList,
+					xAxis: xAxisList,
+					yAxis: yAxisList,
+					series: seriesList,
+					animation: false
+				};
+				if ($("#main").is(':hidden')) {
+					$("#tp").html("");
+					$("#tp").hide();
+					$("#main").show();
+					ishide(false);
+					window.resizeTo(1200, 780);
+				}
+				
+				myChart.setOption(option);
+				//myChart.resize;
+				window.onresize = myChart.resize;
+
+			}
+		</script>
+	</head>
+
+	<body style="background-color: #BDBDBD;">
+
+		<span id="qishu">请选择期数：</span>
+		<input type="radio" name="qs" onclick="k_ajaxs()" value="10" style="margin-left: 30px;">10
+		<span class="qi">期</span>
+		<input type="radio" name="qs" onclick="k_ajaxs()" value="20" style="margin-left: 30px;">20
+		<span class="qi">期</span>
+		<input type="radio" name="qs" onclick="k_ajaxs()" value="30" style="margin-left: 30px;">30
+		<span class="qi">期</span>
+		<input type="radio" name="qs" onclick="k_ajaxs()" value="50" style="margin-left: 30px;">50
+		<span class="qi">期</span>
+		<input type="radio" name="qs" onclick="k_ajaxs()" value="100" style="margin-left: 30px;">100
+		<span class="qi">期</span>
+		<input type="radio" name="qs" onclick="k_ajaxs()" value="200" style="margin-left: 30px;">200
+		<span class="qi">期</span>
+		<input type="radio" name="qs" onclick="k_ajaxs()" value="300" style="margin-left: 30px;">300
+		<span class="qi">期</span>
+		<div id="k1" style="width:100%; float:left;">
+			<div id="tp" style="height:88%;width:98%;margin:0 auto;margin-top:10px; display:none"></div>
+			<div id="main" style="height:88%;width:98%;margin:0 auto;margin-top: 10px;"></div>
+		</div>
+
+
+	</body>
+
+</html>
