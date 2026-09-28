@@ -1,4 +1,5 @@
 import os
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -22,9 +23,20 @@ def create_app(settings: Settings = None, client=None) -> FastAPI:
 
     @app.api_route("/api/{path:path}", methods=METHODS)
     async def proxy(path: str, request: Request):
+        import time
+        from .upstream import mask_token
+        from fastapi.responses import JSONResponse
         body = await request.body()
-        resp = await forward(app.state.client, request.method, "/" + path,
-                             dict(request.headers), body, dict(request.query_params))
+        masked = mask_token(request.headers.get("token", ""))
+        t0 = time.monotonic()
+        try:
+            resp = await forward(app.state.client, request.method, "/" + path,
+                                 dict(request.headers), body, dict(request.query_params))
+        except (httpx.TimeoutException, httpx.RequestError) as e:
+            print(f"{request.method} /api/{path} -> ERR {int((time.monotonic()-t0)*1000)}ms token={masked} ({e})")
+            return JSONResponse(status_code=502,
+                                content={"error": "upstream_unreachable", "detail": str(e)})
+        print(f"{request.method} /api/{path} -> {resp.status_code} {int((time.monotonic()-t0)*1000)}ms token={masked}")
         return Response(content=resp.content, status_code=resp.status_code,
                         headers=filter_response_headers(dict(resp.headers)))
     return app
