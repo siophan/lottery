@@ -1,0 +1,14 @@
+{
+  "name": "ys-mac",
+  "version": "1.0.0",
+  "description": "赢晟 数据/选号工具 macOS 版",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test electron/*.test.js",
+    "test:engine": "node src/engine/pl3.test.js"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
