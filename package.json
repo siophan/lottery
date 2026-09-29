@@ -6,9 +6,32 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test electron/*.test.js",
-    "test:engine": "node src/engine/pl3.test.js"
+    "test:engine": "node src/engine/pl3.test.js",
+    "dist": "electron-builder --mac"
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.yingsheng.ysmac",
+    "productName": "赢晟",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "client/**/*",
+      "src/engine/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "dir"
+      ],
+      "identity": null,
+      "icon": "build/icon.png"
+    }
   }
 }
