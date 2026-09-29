@@ -81,3 +81,69 @@ test('returns 502 json when upstream unreachable', async () => {
   assert.equal((await r.json()).error, 'upstream_unreachable');
   server.close();
 });
+
+test('malformed URL returns 400 and process does not crash', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ys-static-'));
+  fs.writeFileSync(path.join(dir, 'index.html'), '<h1>ok</h1>');
+  const { server, port } = await startServer({ port: 0, clientDir: dir, log() {} });
+
+  // Send malformed URL with raw path /%
+  await new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: '/%',
+      method: 'GET',
+    }, (res) => {
+      assert.equal(res.statusCode, 400);
+      res.on('data', () => {});
+      res.on('end', resolve);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+
+  // Verify process is still alive with a normal request
+  const r = await fetch(`http://127.0.0.1:${port}/`);
+  assert.equal(r.status, 200);
+  assert.match(await r.text(), /ok/);
+  server.close();
+});
+
+test('client abort during request body does not crash', async () => {
+  const upstream = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: 1 }));
+  });
+  const uport = await listen(upstream);
+  const { server, port } = await startServer({
+    port: 0, clientDir: __dirname, upstream: `http://127.0.0.1:${uport}`, log() {},
+  });
+
+  // Start a POST request and destroy it mid-body
+  const destroyReq = new Promise((resolve) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: '/api/x',
+      method: 'POST',
+    }, (res) => {
+      res.on('data', () => {});
+      res.on('end', resolve);
+    });
+    req.on('error', () => resolve());
+    req.write('partial body');
+    req.destroy();
+  });
+  await destroyReq;
+
+  // Wait a bit for any async cleanup
+  await new Promise((r) => setTimeout(r, 100));
+
+  // Verify process is still alive with a normal request
+  const r = await fetch(`http://127.0.0.1:${port}/api/y`);
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).ok, 1);
+  server.close();
+  upstream.close();
+});

@@ -30,17 +30,18 @@ function maskToken(t) {
 
 async function proxy(req, res, url, upstream, log) {
   const t0 = Date.now();
-  const target = upstream + url.pathname.replace(/^\/api/, '') + url.search;
-  const chunks = [];
-  for await (const c of req) chunks.push(c);
-  const body = chunks.length ? Buffer.concat(chunks) : undefined;
-  const headers = {};
-  for (const [k, v] of Object.entries(req.headers)) {
-    const lk = k.toLowerCase();
-    if (HOP_BY_HOP.has(lk) || lk === 'host' || lk === 'content-length') continue;
-    headers[k] = v;
-  }
+  const base = upstream.replace(/\/+$/, '');
+  const target = base + url.pathname.replace(/^\/api/, '') + url.search;
   try {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const body = chunks.length ? Buffer.concat(chunks) : undefined;
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers)) {
+      const lk = k.toLowerCase();
+      if (HOP_BY_HOP.has(lk) || lk === 'host' || lk === 'content-length') continue;
+      headers[k] = v;
+    }
     const up = await fetch(target, {
       method: req.method,
       headers,
@@ -60,7 +61,14 @@ async function proxy(req, res, url, upstream, log) {
 }
 
 function serveStatic(req, res, url, clientDir) {
-  let rel = decodeURIComponent(url.pathname);
+  let rel;
+  try {
+    rel = decodeURIComponent(url.pathname);
+  } catch (e) {
+    res.writeHead(400);
+    res.end('bad request');
+    return;
+  }
   if (rel === '/' || rel === '') rel = '/index.html';
   const root = path.resolve(clientDir);
   const filePath = path.join(root, path.normalize(rel));
