@@ -2,7 +2,7 @@
   "name": "ys-mac",
   "version": "1.0.0",
   "description": "赢晟 数据/选号工具 macOS 版",
-  "main": "electron/main.js",
+  "main": "electron/boot-original.js",
   "scripts": {
     "start": "electron .",
     "test": "node --test electron/*.test.js",

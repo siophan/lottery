@@ -6,3 +6,5 @@ node_modules/
 *.appproto.bak
 dist/
 build/*.icns
+.DS_Store
+*.orig
