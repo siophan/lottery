@@ -68,3 +68,17 @@ def test_admin_index_served_as_html():
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     assert "<html" in r.text.lower()
+
+def test_admin_login_non_string_inputs_return_401_not_500():
+    conn, tc = build()
+    db.upsert_admin(conn, "root", "pw")
+    for body in ({"username": "root", "password": 123},
+                 {"username": "root", "password": None},
+                 {"username": 5, "password": "pw"},
+                 {"username": None, "password": None}):
+        assert tc.post("/admin/login", json=body).status_code == 401
+
+def test_admin_key_non_ascii_header_denied_not_500():
+    _, tc = build()
+    r = tc.get("/admin/users", headers={"X-Admin-Key": "SÉCRET".encode("latin-1")})
+    assert r.status_code == 403

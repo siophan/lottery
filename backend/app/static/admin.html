@@ -81,8 +81,11 @@ async function refresh() {
   tb.innerHTML = "";
   for (const u of users) {
     const tr = document.createElement("tr");
-    tr.innerHTML =
-      `<td>${u.code}</td><td>${u.status}</td><td>${fmt(u.expires_at)}</td><td>${fmt(u.created_at)}</td>`;
+    for (const text of [u.code, u.status, fmt(u.expires_at), fmt(u.created_at)]) {
+      const c = document.createElement("td");
+      c.textContent = text;
+      tr.appendChild(c);
+    }
     const td = document.createElement("td");
     td.className = "row";
     td.appendChild(btn(u.status === "active" ? "停用" : "启用",

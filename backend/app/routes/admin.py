@@ -58,7 +58,11 @@ async def delete_user(code: str, request: Request):
 async def admin_login(request: Request, response: Response, payload: dict = Body(...)):
     conn = request.app.state.db_conn
     settings = request.app.state.settings
-    admin = admin_auth.authenticate(conn, payload.get("username", ""), payload.get("password", ""))
+    username = payload.get("username", "")
+    password = payload.get("password", "")
+    if not isinstance(username, str) or not isinstance(password, str):
+        return JSONResponse({"ok": False}, status_code=401)
+    admin = admin_auth.authenticate(conn, username, password)
     if not admin:
         return JSONResponse({"ok": False}, status_code=401)
     token = admin_auth.issue_session(conn, settings, admin)

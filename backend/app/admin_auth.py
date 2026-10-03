@@ -1,3 +1,4 @@
+import hmac
 import time
 from . import db, security
 
@@ -29,4 +30,6 @@ def cookie_or_key_ok(request) -> bool:
     if current_admin(conn, token) is not None:
         return True
     key = settings.admin_key
-    return bool(key) and request.headers.get("X-Admin-Key") == key
+    header = request.headers.get("X-Admin-Key") or ""
+    # encode to bytes: compare_digest raises TypeError on non-ASCII str
+    return bool(key) and hmac.compare_digest(header.encode("utf-8"), key.encode("utf-8"))
