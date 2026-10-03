@@ -1,15 +1,22 @@
+import os
 from fastapi import APIRouter, Request, Body, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from .. import db
 from .. import admin_auth
 
 router = APIRouter()
+
+_ADMIN_HTML = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "admin.html")
 
 def _check(request: Request):
     return admin_auth.cookie_or_key_ok(request)
 
 def _forbidden():
     return JSONResponse({"error": "forbidden"}, status_code=403)
+
+@router.get("/")
+async def admin_index():
+    return FileResponse(_ADMIN_HTML)
 
 @router.post("/users")
 async def create_user(request: Request, payload: dict = Body(...)):

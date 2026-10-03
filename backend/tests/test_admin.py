@@ -61,3 +61,10 @@ def test_users_auth_accepts_cookie_or_key():
     assert tc.get("/admin/users", headers={"X-Admin-Key": "SECRET"}).status_code == 200  # key 路径
     tc.post("/admin/login", json={"username": "root", "password": "pw"})
     assert tc.get("/admin/users").status_code == 200                               # cookie 路径
+
+def test_admin_index_served_as_html():
+    conn, tc = build()
+    r = tc.get("/admin/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "<html" in r.text.lower()
