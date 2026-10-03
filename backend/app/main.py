@@ -6,10 +6,13 @@ from fastapi.responses import Response
 from .config import Settings, load_settings
 from .upstream import build_client, forward, filter_response_headers
 from .routes import local_router
+from .db import connect, init_db
+from .dayys_session import DataYsSession
+from .routes import auth as auth_routes
 
 METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 
-def create_app(settings: Settings = None, client=None) -> FastAPI:
+def create_app(settings: Settings = None, client=None, conn=None, dayys=None) -> FastAPI:
     settings = settings or load_settings(os.environ)
     app = FastAPI()
     app.add_middleware(
@@ -17,8 +20,22 @@ def create_app(settings: Settings = None, client=None) -> FastAPI:
         allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
         allow_methods=["*"], allow_headers=["*"], allow_credentials=True,
     )
+    app.state.settings = settings
     app.state.client = client or build_client(settings)
+    if conn is not None:
+        app.state.db_conn = conn
+    else:
+        d = os.path.dirname(settings.db_path)
+        if d:
+            os.makedirs(d, exist_ok=True)      # 确保 DB 目录存在
+        app.state.db_conn = connect(settings.db_path)
+        init_db(app.state.db_conn)
+    app.state.dayys = dayys or DataYsSession(
+        app.state.client, settings.dayys_code, settings.dayys_password,
+        settings.dayys_device_id, settings.from_id, settings.dayys_token_ttl,
+    )
 
+    app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all
     app.include_router(local_router, prefix="/api")
 
     @app.api_route("/api/{path:path}", methods=METHODS)

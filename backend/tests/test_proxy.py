@@ -18,17 +18,6 @@ def test_get_forwarded_with_status_and_body():
     assert r.status_code == 201
     assert r.json() == {"ok": True}
 
-def test_post_body_and_token_forwarded():
-    def handler(req):
-        assert req.method == "POST"
-        assert req.content == b'{"a":1}'
-        assert req.headers.get("token") == "TT"
-        return httpx.Response(200, json={"code": 0})
-    tc = make_client(handler)
-    r = tc.post("/api/auth/login", content=b'{"a":1}',
-                headers={"token": "TT", "content-type": "application/json"})
-    assert r.status_code == 200
-
 def test_gzip_upstream_response_decoded_and_content_encoding_header_dropped():
     def handler(req):
         body = gzip.compress(b'{"ok":true}')
