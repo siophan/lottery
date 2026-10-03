@@ -112,6 +112,16 @@ ADMIN_COOKIE_SECURE=false DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
 相关环境变量：`ADMIN_SESSION_TTL`（默认 86400）、`ADMIN_COOKIE_SECURE`（默认 true）、
 `ADMIN_COOKIE_NAME`（默认 admin_session）。
 
+### 官网落地页与下载
+
+- 根路径 `https://lottery.jh8.ai/` 返回官网落地页（`backend/app/static/index.html`），含 Windows / macOS 下载按钮。
+- 下载链接指向 `/download/ys-win.exe` 与 `/download/ys-mac.dmg`，由后端 `StaticFiles` 托管 `backend/app/static/downloads/`。
+- 部署时把实际安装包按这两个文件名放入该目录；**生产建议 nginx/Caddy 直接 `alias` 到该目录**托管大文件，不经 uvicorn：
+  ```nginx
+  location /download/ { alias /srv/ys/backend/app/static/downloads/; }
+  location / { proxy_pass http://127.0.0.1:8000; }   # 其余转给 uvicorn
+  ```
+
 ### 部署（lottery.jh8.ai）
 用 nginx/Caddy 终止 HTTPS，反代到本机 uvicorn（127.0.0.1:8000）。SQLite 文件放持久化磁盘。**仅单实例**（data-ys 会话在内存）。
 

@@ -2,7 +2,8 @@ import os
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
+from fastapi.staticfiles import StaticFiles
 from .config import Settings, load_settings
 from .upstream import build_client, forward, filter_response_headers
 from .routes import local_router
@@ -39,6 +40,16 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None) ->
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all
     app.include_router(local_router, prefix="/api")
     app.include_router(admin_routes.router, prefix="/admin")
+
+    _static_dir = os.path.join(os.path.dirname(__file__), "static")
+    _downloads_dir = os.path.join(_static_dir, "downloads")
+    os.makedirs(_downloads_dir, exist_ok=True)
+
+    @app.get("/")
+    async def landing():
+        return FileResponse(os.path.join(_static_dir, "index.html"))
+
+    app.mount("/download", StaticFiles(directory=_downloads_dir), name="download")
 
     @app.api_route("/api/{path:path}", methods=METHODS)
     async def proxy(path: str, request: Request):
