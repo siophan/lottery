@@ -9,6 +9,7 @@ from .routes import local_router
 from .db import connect, init_db
 from .dayys_session import DataYsSession
 from .routes import auth as auth_routes
+from .routes import admin as admin_routes
 
 METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 
@@ -37,6 +38,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None) ->
 
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all
     app.include_router(local_router, prefix="/api")
+    app.include_router(admin_routes.router, prefix="/admin")
 
     @app.api_route("/api/{path:path}", methods=METHODS)
     async def proxy(path: str, request: Request):
