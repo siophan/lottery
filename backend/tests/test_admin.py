@@ -10,7 +10,7 @@ def build():
     client = httpx.AsyncClient(base_url="https://up.example/api",
                                transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"code": 0})))
     dayys = DataYsSession(client, "SRV", "pw", "dev", "1004")
-    app = create_app(Settings(admin_key="SECRET"), client=client, conn=conn, dayys=dayys)
+    app = create_app(Settings(admin_key="SECRET", admin_cookie_secure=False), client=client, conn=conn, dayys=dayys)
     return conn, TestClient(app)
 
 H = {"X-Admin-Key": "SECRET"}
@@ -41,3 +41,23 @@ def test_patch_user():
 def test_patch_missing_user_returns_false():
     _, tc = build()
     assert tc.patch("/admin/users/nope", headers=H, json={"status": "disabled"}).json()["ok"] is False
+
+def test_admin_login_me_logout_cookie_flow():
+    conn, tc = build()
+    db.upsert_admin(conn, "root", "pw")
+    assert tc.get("/admin/me").status_code == 401
+    assert tc.post("/admin/login", json={"username": "root", "password": "bad"}).status_code == 401
+    r = tc.post("/admin/login", json={"username": "root", "password": "pw"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    me = tc.get("/admin/me")
+    assert me.status_code == 200 and me.json()["username"] == "root"
+    assert tc.post("/admin/logout").json()["ok"] is True
+    assert tc.get("/admin/me").status_code == 401
+
+def test_users_auth_accepts_cookie_or_key():
+    conn, tc = build()
+    db.upsert_admin(conn, "root", "pw")
+    assert tc.get("/admin/users").status_code == 403                               # 两者皆无
+    assert tc.get("/admin/users", headers={"X-Admin-Key": "SECRET"}).status_code == 200  # key 路径
+    tc.post("/admin/login", json={"username": "root", "password": "pw"})
+    assert tc.get("/admin/users").status_code == 200                               # cookie 路径
