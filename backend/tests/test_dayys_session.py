@@ -52,8 +52,9 @@ def test_invalidate_forces_relogin():
 
 def test_concurrent_get_token_logs_in_once():
     calls = {"n": 0}
-    def handler(req):
+    async def handler(req):
         calls["n"] += 1
+        await asyncio.sleep(0.05)  # Yield to let other coroutines run, proving all 10 are in flight
         return httpx.Response(200, json={"code": 0, "data": {"token": "T", "userInfo": {}}})
     client, s = make(handler)
     async def run():
@@ -61,6 +62,20 @@ def test_concurrent_get_token_logs_in_once():
         await client.aclose()
     asyncio.run(run())
     assert calls["n"] == 1   # 锁串行化，只登录一次
+
+def test_token_ttl_expiry_forces_relogin():
+    calls = {"n": 0}
+    def handler(req):
+        calls["n"] += 1
+        return httpx.Response(200, json={"code": 0, "data": {"token": f"T{calls['n']}", "userInfo": {}}})
+    transport = httpx.MockTransport(handler)
+    client = httpx.AsyncClient(base_url="https://up.example/api", transport=transport)
+    s = DataYsSession(client, "ABC1234", "pw", "dev-1", "1004", token_ttl=0)  # Never cached
+    async def run():
+        a = await s.get_token(); b = await s.get_token()
+        await client.aclose(); return a, b
+    a, b = asyncio.run(run())
+    assert a == "T1" and b == "T2" and calls["n"] == 2  # Stale cache forces relogin
 
 def test_login_failure_raises():
     def handler(req):
