@@ -43,12 +43,30 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None) ->
         import time
         from .upstream import mask_token
         from fastapi.responses import JSONResponse
+        from . import gate
+
         body = await request.body()
-        masked = mask_token(request.headers.get("token", ""))
+        headers = dict(request.headers)
+
+        if path not in gate.PREAUTH_PATHS:
+            ok, err = gate.authorize(app.state.db_conn, headers.get("token", ""))
+            if not ok:
+                return JSONResponse(err)
+            headers["token"] = await app.state.dayys.get_token()   # 换成 data-ys token
+        headers["fromId"] = app.state.settings.from_id             # 确保带 fromId
+
+        async def do_forward():
+            return await forward(app.state.client, request.method, "/" + path,
+                                 headers, body, dict(request.query_params))
+
         t0 = time.monotonic()
+        masked = mask_token(headers.get("token", ""))
         try:
-            resp = await forward(app.state.client, request.method, "/" + path,
-                                 dict(request.headers), body, dict(request.query_params))
+            resp = await do_forward()
+            if path not in gate.PREAUTH_PATHS and gate.response_signals_invalid(resp.content):
+                app.state.dayys.invalidate()
+                headers["token"] = await app.state.dayys.get_token()
+                resp = await do_forward()
         except (httpx.TimeoutException, httpx.RequestError) as e:
             print(f"{request.method} /api/{path} -> ERR {int((time.monotonic()-t0)*1000)}ms token={masked} ({e})")
             return JSONResponse(status_code=502,
