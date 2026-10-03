@@ -37,3 +37,13 @@ def test_del():
     manage.main(["add", "u1", "pw"], conn=conn)
     manage.main(["del", "u1"], conn=conn)
     assert db.get_user_by_code(conn, "u1") is None
+
+def test_admin_set_creates_and_resets():
+    conn = mem()
+    assert manage.main(["admin-set", "root", "pw1"], conn=conn) == 0
+    a = db.get_admin_by_username(conn, "root")
+    assert a is not None
+    h1 = a.password_hash
+    manage.main(["admin-set", "root", "pw2"], conn=conn)
+    assert db.get_admin_by_username(conn, "root").password_hash != h1
+    assert len(conn.execute("SELECT 1 FROM admins").fetchall()) == 1

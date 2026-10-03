@@ -20,6 +20,7 @@ def main(argv: list, conn=None) -> int:
     se = sub.add_parser("set-expiry"); se.add_argument("code"); se.add_argument("date")
     di = sub.add_parser("disable"); di.add_argument("code")
     en = sub.add_parser("enable"); en.add_argument("code")
+    ads = sub.add_parser("admin-set"); ads.add_argument("username"); ads.add_argument("password")
     sub.add_parser("list")
     args = p.parse_args(argv)
 
@@ -37,6 +38,8 @@ def main(argv: list, conn=None) -> int:
         print("ok" if db.update_user(conn, args.code, status="disabled") else "not found")
     elif args.cmd == "enable":
         print("ok" if db.update_user(conn, args.code, status="active") else "not found")
+    elif args.cmd == "admin-set":
+        db.upsert_admin(conn, args.username, args.password); print(f"admin set: {args.username}")
     elif args.cmd == "list":
         for u in db.list_users(conn):
             exp = "never" if u.expires_at is None else time.strftime("%Y-%m-%d", time.gmtime(u.expires_at))

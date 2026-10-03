@@ -96,6 +96,22 @@ DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
 .venv/bin/python manage.py list
 ```
 
+### 管理后台
+
+引导管理员账号（幂等，重复执行即重置密码；凭据只在本机输入，不进仓库）：
+```bash
+.venv/bin/python manage.py admin-set admin 'your-strong-password'
+```
+
+然后访问 `https://lottery.jh8.ai/admin/` 登录。管理端点同时接受管理员 cookie
+或 `X-Admin-Key`（供脚本自动化）。本地 http 调试需把 cookie Secure 关掉：
+```bash
+ADMIN_COOKIE_SECURE=false DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
+  .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+相关环境变量：`ADMIN_SESSION_TTL`（默认 86400）、`ADMIN_COOKIE_SECURE`（默认 true）、
+`ADMIN_COOKIE_NAME`（默认 admin_session）。
+
 ### 部署（lottery.jh8.ai）
 用 nginx/Caddy 终止 HTTPS，反代到本机 uvicorn（127.0.0.1:8000）。SQLite 文件放持久化磁盘。**仅单实例**（data-ys 会话在内存）。
 
