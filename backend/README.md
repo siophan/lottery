@@ -71,3 +71,35 @@ All tests verify proxy behavior in isolation without calling the real upstream A
 4. Proxy never stores, generates, or manages tokens
 
 The proxy is designed for **local development only** (CORS restricted to localhost/127.0.0.1).
+
+## 中间层后端（自有用户体系 + 共享 data-ys 账号）
+
+### 环境变量（必填项无默认）
+- `DATA_YS_CODE` / `DATA_YS_PASSWORD`：服务器持有的那个 data-ys 账号（软件编号 + 密码）
+- `DATA_YS_DEVICE_ID`：服务器固定设备号（任意稳定字符串，默认 `ys-middleware`）
+- `ADMIN_KEY`：管理 API 密钥
+- `DB_PATH`：SQLite 路径（默认 `data/app.db`）
+- 可选：`SESSION_TTL`（默认 604800）、`DATA_YS_TOKEN_TTL`（默认 3600）、`UPSTREAM_TIMEOUT`
+
+### 运行
+```bash
+cd backend
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+mkdir -p data
+DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
+  .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+### 建用户
+```bash
+.venv/bin/python manage.py add USER01 theirpassword --expires 2027-01-01
+.venv/bin/python manage.py list
+```
+
+### 部署（lottery.jh8.ai）
+用 nginx/Caddy 终止 HTTPS，反代到本机 uvicorn（127.0.0.1:8000）。SQLite 文件放持久化磁盘。**仅单实例**（data-ys 会话在内存）。
+
+### 测试
+```bash
+.venv/bin/python -m pytest -q
+```
