@@ -57,3 +57,36 @@ def test_list_users():
     db.create_user(conn, "u2", "pw", 999)
     codes = sorted(u.code for u in db.list_users(conn))
     assert codes == ["U1", "U2"]
+
+def test_admin_upsert_idempotent_and_lookup():
+    from app import db
+    conn = db.connect(":memory:"); db.init_db(conn)
+    a1 = db.upsert_admin(conn, "root", "pw1")
+    assert db.get_admin_by_username(conn, "root").id == a1.id
+    assert db.get_admin_by_id(conn, a1.id).username == "root"
+    old_hash = db.get_admin_by_username(conn, "root").password_hash
+    a2 = db.upsert_admin(conn, "root", "pw2")
+    assert a2.id == a1.id                      # 同一行
+    assert db.get_admin_by_username(conn, "root").password_hash != old_hash
+    assert len(conn.execute("SELECT 1 FROM admins").fetchall()) == 1
+
+def test_admin_session_crud():
+    from app import db
+    conn = db.connect(":memory:"); db.init_db(conn)
+    a = db.upsert_admin(conn, "root", "pw")
+    exp = db.create_admin_session(conn, "TOK", a.id, 1000)
+    s = db.get_admin_session(conn, "TOK")
+    assert s.admin_id == a.id and s.expires_at == exp
+    assert db.delete_admin_session(conn, "TOK") is True
+    assert db.get_admin_session(conn, "TOK") is None
+    assert db.delete_admin_session(conn, "TOK") is False
+
+def test_purge_expired_admin_sessions():
+    from app import db
+    conn = db.connect(":memory:"); db.init_db(conn)
+    a = db.upsert_admin(conn, "root", "pw")
+    db.create_admin_session(conn, "OLD", a.id, -10)   # 立即过期
+    db.create_admin_session(conn, "NEW", a.id, 1000)
+    assert db.purge_expired_admin_sessions(conn) == 1
+    assert db.get_admin_session(conn, "OLD") is None
+    assert db.get_admin_session(conn, "NEW") is not None
