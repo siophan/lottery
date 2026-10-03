@@ -53,6 +53,8 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None) ->
             if not ok:
                 return JSONResponse(err)
             headers["token"] = await app.state.dayys.get_token()   # 换成 data-ys token
+        for k in [k for k in headers if k.lower() == "fromid"]:    # 去掉客户端自带的任意大小写 fromId
+            del headers[k]
         headers["fromId"] = app.state.settings.from_id             # 确保带 fromId
 
         async def do_forward():
