@@ -39,3 +39,19 @@ def test_load_settings_defaults_for_middleware_fields():
     assert s.session_ttl == 604800
     assert s.dayys_token_ttl == 3600
     assert s.dayys_code == "" and s.dayys_password == ""
+
+def test_admin_console_settings_defaults():
+    from app.config import load_settings
+    s = load_settings({})
+    assert s.admin_session_ttl == 86400
+    assert s.admin_cookie_secure is True
+    assert s.admin_cookie_name == "admin_session"
+
+def test_admin_console_settings_from_env():
+    from app.config import load_settings
+    s = load_settings({"ADMIN_SESSION_TTL": "60",
+                       "ADMIN_COOKIE_SECURE": "false",
+                       "ADMIN_COOKIE_NAME": "ac"})
+    assert s.admin_session_ttl == 60
+    assert s.admin_cookie_secure is False
+    assert s.admin_cookie_name == "ac"

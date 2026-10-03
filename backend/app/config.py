@@ -16,6 +16,9 @@ class Settings:
     db_path: str = "data/app.db"
     session_ttl: int = 604800       # 我方会话 7 天
     dayys_token_ttl: int = 3600     # data-ys token 刷新间隔（秒）
+    admin_session_ttl: int = 86400     # 管理员会话 1 天
+    admin_cookie_secure: bool = True   # 生产必开；本地 http 调试置 false
+    admin_cookie_name: str = "admin_session"
 
 def load_settings(env: Mapping[str, str]) -> Settings:
     def flag(v: str) -> bool:
@@ -33,4 +36,7 @@ def load_settings(env: Mapping[str, str]) -> Settings:
         db_path=env.get("DB_PATH", "data/app.db"),
         session_ttl=int(env.get("SESSION_TTL", 604800)),
         dayys_token_ttl=int(env.get("DATA_YS_TOKEN_TTL", 3600)),
+        admin_session_ttl=int(env.get("ADMIN_SESSION_TTL", 86400)),
+        admin_cookie_secure=flag(env.get("ADMIN_COOKIE_SECURE", "true")),
+        admin_cookie_name=env.get("ADMIN_COOKIE_NAME", "admin_session"),
     )
