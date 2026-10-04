@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS } = require('../scripts/patch-ds-client.js');
+const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS, AUTH_MARK } = require('../scripts/patch-ds-client.js');
 const dsSources = require('../client/ds-sources.js');
 
 const DIR = path.join(__dirname, '..', 'client', 'js');
@@ -337,6 +337,9 @@ test('app chunk: 补丁幂等', () => {
 test('app chunk: 锚点不匹配时报错', () => {
   assert.throws(() => patchApp("eval('function topRows(params) {')"), /命中 0 次/);
   assert.throws(() => patchApp('no eval here'), /topRows/);
+  // norm v1 已打、auth 层缺 request 模块或锚点：报错
+  assert.throws(() => patchApp(`eval('function topRows(params) {${APP_MARK}')`), /service\.interceptors\.request\.use/);
+  assert.throws(() => patchApp(`eval('function topRows(params) {${APP_MARK}');eval('service.interceptors.request.use(config => {')`), /命中 0 次/);
 });
 
 test('app chunk: 补丁后的 topRows 行为——后端分支不套归一化，第三方分支套', async () => {
@@ -356,4 +359,88 @@ test('app chunk: 补丁后的 topRows 行为——后端分支不套归一化，
   const own = await exp.t({ code: 'c1', rows: 1 });
   assert.strictEqual(own.data[0].expect, undefined);
   assert.strictEqual(calls[1].url, 'http://api/lotteryNumber/topRows');
+});
+
+// ---- auth v1：request 拦截器只给自家接口带 token/fromId；第三方返回 1002x 不踢人 ----
+function appModuleSource(raw, locator) {
+  const i = raw.indexOf(locator);
+  const e = raw.lastIndexOf('eval(', i);
+  assert.ok(i > 0 && e > 0);
+  const m = /^eval\(('(?:[^'\\]|\\[\s\S])*'|"(?:[^"\\]|\\[\s\S])*")\)/.exec(raw.slice(e));
+  return new vm.Script('(' + m[1] + ')').runInNewContext({});
+}
+const REQ_LOCATOR = 'service.interceptors.request.use(config => {';
+
+function requestHarness(token = 'TOK') {
+  const src = appModuleSource(fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8'), REQ_LOCATOR);
+  const ic = {};
+  const service = {
+    interceptors: {
+      request: { use: (ok, bad) => { ic.req = ok; } },
+      response: { use: (ok, bad) => { ic.res = ok; } },
+    },
+  };
+  const alerts = [];
+  const sent = [];
+  loadComponent(src, {
+    modules: {
+      bc3a: { create: () => service },
+      '5c96': { MessageBox: { alert: (msg) => alerts.push(msg) } },
+      f121: { apiURL: API_URL, fromId: 1004 },
+    },
+    window: { electron: { ipcRenderer: { send: (...a) => sent.push(a) } } },
+    globals: { localStorage: { getItem: (k) => (k === 'token' ? token : null), removeItem() {} } },
+  });
+  const send = (url) => ic.req({ url, headers: {} }).headers;
+  return { ic, alerts, sent, send };
+}
+
+test('app chunk: request 模块已打 auth 补丁，幂等，源码语法有效', () => {
+  const raw = fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8');
+  const src = appModuleSource(raw, REQ_LOCATOR);
+  assert.ok(src.includes(AUTH_MARK));
+  new vm.Script(src);
+  assert.strictEqual(patchApp(raw), raw);
+});
+
+test('app chunk: 自家接口（apiURL 前缀 / 相对地址）带 token 与 fromId', () => {
+  const { send } = requestHarness();
+  for (const url of [API_URL + '/lotteryNumber/topRows', SRV('qqtj') + '?code=6001&rows=2', API_URL, API_URL + '?a=1', '/user/isExpire', undefined]) {
+    const h = send(url);
+    assert.strictEqual(h.token, 'TOK', String(url));
+    assert.strictEqual(h.fromId, 1004, String(url));
+  }
+});
+
+test('app chunk: 第三方地址不带 token / fromId', () => {
+  const { send, ic } = requestHarness();
+  for (const url of [
+    'https://qqtj.example.com/api/draw-result?code=6001&rows=2',
+    'HTTP://qkltj.example.com/x',
+    '//evil.example.com/api',
+    'https://lottery.jh8.ai/api.evil.com/x',
+    'https://lottery.jh8.ai.evil.com/api/x',
+    'https://evil.com/?u=' + API_URL,
+  ]) {
+    const h = send(url);
+    assert.ok(!('token' in h), url);
+    assert.ok(!('fromId' in h), url);
+  }
+  const cfg = ic.req({ url: 'https://x.example/a', headers: {} });
+  assert.deepStrictEqual(plain(cfg.data), {});                       // 其他行为不变：data 默认 {}
+});
+
+test('app chunk: 第三方返回 10020/10021/10022 不踢人，原样 resolve；自家接口照旧踢', async () => {
+  let h = requestHarness();
+  for (const code of [10020, 10021, 10022]) {
+    const res = { code, msg: 'x' };
+    assert.strictEqual(await h.ic.res({ status: 200, data: res, config: { url: 'https://qqtj.example.com/draw' } }), res);
+  }
+  assert.strictEqual(h.alerts.length, 0);
+  h = requestHarness();
+  const out = h.ic.res({ status: 200, data: { code: 10021 }, config: { url: API_URL + '/user/isExpire' } });
+  assert.strictEqual(out, undefined);
+  assert.strictEqual(h.alerts.length, 1);
+  const ok = { code: 0, data: [] };
+  assert.strictEqual(await h.ic.res({ status: 200, data: ok, config: { url: 'https://qqtj.example.com/draw' } }), ok);
 });

@@ -202,8 +202,46 @@ const TREND_SRC_REPLACEMENTS = [
 ];
 const TREND_LAYERS = [{ mark: TREND_MARK, replacements: TREND_SRC_REPLACEMENTS }];
 
+// app chunk 的 request 工具（src/utils/request.js）：拦截器原本给所有请求都带 token/fromId，包括第三方 requestUrl；
+// 改为只给自家接口（相对地址，或以 apiURL 为前缀且前缀后紧跟 / ? # 或结尾）带。响应拦截器的 10020/10021/10022
+// 踢下线逻辑也只对自家接口生效，第三方返回同样的 code 时原样 resolve
+const AUTH_MARK = '/* ds-patch auth v1 */';
+const CFG = '_config__WEBPACK_IMPORTED_MODULE_2__';
+const AUTH_REPLACEMENTS = [
+  {
+    find: '// request拦截器\nservice.interceptors.request.use(config => {\n  if (localStorage.getItem("token")) {',
+    repl: [
+      AUTH_MARK,
+      `function dsOwnApi(url) {`,
+      `  if (typeof url !== "string") return true;`,
+      `  if (!/^[a-z][a-z0-9+.-]*:/i.test(url) && url.indexOf("//") !== 0) return true;`,
+      `  const api = String(${CFG}["apiURL"] || "");`,
+      `  if (!api || url.indexOf(api) !== 0) return false;`,
+      `  const next = url.charAt(api.length);`,
+      `  return next === "" || next === "/" || next === "?" || next === "#" || api.charAt(api.length - 1) === "/";`,
+      `}`,
+      `// request拦截器`,
+      `service.interceptors.request.use(config => {`,
+      `  const dsOwn = dsOwnApi(config.url);`,
+      `  if (dsOwn && localStorage.getItem("token")) {`,
+    ].join('\n'),
+    count: 1,
+  },
+  {
+    find: `  config.headers["fromId"] = ${CFG}["fromId"];\n  return config;`,
+    repl: `  if (dsOwn) {\n    config.headers["fromId"] = ${CFG}["fromId"];\n  }\n  return config;`,
+    count: 1,
+  },
+  {
+    find: '    if (res.code == 10021 || res.code == 10020 || res.code == 10022) {',
+    repl: '    if ((res.code == 10021 || res.code == 10020 || res.code == 10022) && dsOwnApi(response.config && response.config.url)) {',
+    count: 1,
+  },
+];
+
 const APP_LAYERS = [
   { locator: 'function topRows(params)', layers: [{ mark: APP_MARK, replacements: APP_REPLACEMENTS }] },
+  { locator: 'service.interceptors.request.use(config => {', layers: [{ mark: AUTH_MARK, replacements: AUTH_REPLACEMENTS }] },
 ];
 
 // 在 locator 所在模块的 eval 字符串编码下，依次叠加尚未打过的层
@@ -244,7 +282,7 @@ function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, CHUNK_LAYERS, APP_LAYERS,
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS };
 
 if (require.main === module) {
