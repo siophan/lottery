@@ -317,3 +317,19 @@ def test_concurrent_reloads_leave_exactly_one_task():
         await col.stop()
         assert live_tasks(1) == [] and live_tasks(2) == []
     asyncio.run(run())
+
+def test_disabled_collector_never_spawns():
+    reqs = []
+    def handler(req):
+        reqs.append(req.url)
+        return ok_handler(req)
+    conn = db.connect(":memory:"); db.init_db(conn)
+    col = Collector(conn, httpx.AsyncClient(transport=httpx.MockTransport(handler)), enabled=False)
+    async def run():
+        await col.start()
+        await col.reload(1)
+        await asyncio.sleep(0)
+        assert col.running_ids() == set() and col._backfills == {}
+        await col.stop()
+    asyncio.run(run())
+    assert reqs == []

@@ -111,3 +111,16 @@ def test_latest_draws():
     assert d == [{"expect": "E4", "opennumber": "1,2,3,4,5", "open_time": "2026-10-04 00:04:00"},
                  {"expect": "E3", "opennumber": "1,2,3,4,5", "open_time": "2026-10-04 00:03:00"}]
     assert tc.get("/admin/data-sources/99/draws?code=6001", headers=H).status_code == 404
+
+def test_collector_disabled_admin_writes_never_spawn():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    client = httpx.AsyncClient(base_url="https://up.example/api",
+                               transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"code": 0})))
+    app = create_app(Settings(admin_key="SECRET", admin_cookie_secure=False, collector_enabled=False),
+                     client=client, conn=conn, dayys=DataYsSession(client, "SRV", "pw", "dev", "1004"))
+    col = app.state.collector
+    assert col.enabled is False
+    with TestClient(app) as tc:
+        assert tc.patch("/admin/data-sources/2/enabled", headers=H, json={"enabled": True}).json() == {"ok": True}
+        assert tc.post("/admin/data-sources", headers=H, json=payload()).status_code == 200
+        assert col.running_ids() == set() and col._backfills == {}     # 写操作只取消、不重建

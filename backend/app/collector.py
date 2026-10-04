@@ -25,8 +25,9 @@ def backoff_delay(interval_sec: int, failures: int) -> float:
     return min(interval_sec * 2 ** failures, MAX_BACKOFF)
 
 class Collector:
-    def __init__(self, conn, client: httpx.AsyncClient | None = None):
+    def __init__(self, conn, client: httpx.AsyncClient | None = None, enabled: bool = True):
         self.conn = conn
+        self.enabled = enabled          # False（COLLECTOR_ENABLED=false）：start 不启动、reload 只取消不重建
         self._owns_client = client is None
         self.client = client or httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=True)
         self._tasks: dict[int, asyncio.Task] = {}
@@ -150,6 +151,8 @@ class Collector:
         return self._locks.setdefault(source_id, asyncio.Lock())
 
     async def start(self) -> None:
+        if not self.enabled:
+            return
         for src in db.list_data_sources(self.conn):
             if src.enabled:
                 self._spawn(src.id)
@@ -159,6 +162,8 @@ class Collector:
         """配置变更后调用：取消旧任务，源仍存在且启用时按新配置重建。同一源的 reload 串行执行。"""
         async with self._lock(source_id):
             await self._cancel(source_id)
+            if not self.enabled:
+                return
             src = db.get_data_source(self.conn, source_id)
             if src is not None and src.enabled:
                 self._spawn(source_id)

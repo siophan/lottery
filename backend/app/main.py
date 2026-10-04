@@ -50,7 +50,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
         app.state.client, settings.dayys_code, settings.dayys_password,
         settings.dayys_device_id, settings.from_id, settings.dayys_token_ttl,
     )
-    app.state.collector = collector or Collector(app.state.db_conn)
+    app.state.collector = collector or Collector(app.state.db_conn, enabled=settings.collector_enabled)
 
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all
     app.include_router(ds_routes.router, prefix="/api")     # 多数据源，先于 catch-all
