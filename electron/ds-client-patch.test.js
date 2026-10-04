@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS } = require('../scripts/patch-ds-client.js');
+const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK } = require('../scripts/patch-ds-client.js');
 const dsSources = require('../client/ds-sources.js');
 
 const DIR = path.join(__dirname, '..', 'client', 'js');
@@ -87,6 +87,10 @@ test('锚点不匹配时报错，而不是静默跳过', () => {
   assert.throws(() => patchChunk("eval('switchCode(index) {')", CHUNKS[0]), /命中 0 次/);
   // v1 已打、后续层锚点缺失：同样报错而不是跳过
   assert.throws(() => patchChunk("eval('switchCode(index) {/* ds-patch v1 */')", CHUNKS[0]), /命中 0 次/);
+  // race 层锚点缩进按文件名确定，未知 chunk 直接报错
+  const preRace = CHUNK_LAYERS.slice(0, CHUNK_LAYERS.findIndex((l) => l.mark === RACE_MARK)).map((l) => l.mark).join('');
+  assert.throws(() => patchChunk(`eval('switchCode(index) {${preRace}')`, 'chunk-unknown.js'), /未知 chunk/);
+  assert.throws(() => patchChunk(`eval('switchCode(index) {${preRace}')`, CHUNKS[1]), /命中 0 次/);
 });
 
 // ---- keep v1：服务端列表拉取失败（null）时保留现有下拉项与选中项 ----
@@ -164,6 +168,44 @@ for (const name of CHUNKS) {
     await h.comp.methods.dsLoad.call(h.vmThis, false);
     assert.strictEqual(h.vmThis.requestUrl, h.local.requestUrl);
     assert.strictEqual(h.vmThis.opened, 0);
+  });
+}
+
+// ---- race v1：showOpenNum 的响应回来时若已切换数据源，丢弃旧响应 ----
+function openNumHarness(name) {
+  const pending = [];
+  const softNum = { t: (params) => new Promise((resolve) => pending.push({ params, resolve })) };
+  const comp = loadComponent(pageSource(name), { modules: { b456: softNum, f121: { apiURL: API_URL } } });
+  const vmThis = {
+    codeId: '6001', requestUrl: SRV('qqtj'), qitwId: null, num: {}, numList: [], numArr: [],
+    drawer: false, titleId: 0, saveConditionUtils: [], typeId: 'hash5', pageId: 'p',
+  };
+  const DRAW = { code: 0, data: [{ expect: '202610050001', opennumber: '1,2,3,4,5', lottoId: '6001' }] };
+  return { comp, vmThis, pending, DRAW };
+}
+
+for (const name of CHUNKS) {
+  test(`${name}: showOpenNum 请求期间切换了数据源 → 丢弃旧响应`, async () => {
+    for (const change of [{ codeId: '6002' }, { requestUrl: SRV('qkltj') }]) {
+      const { comp, vmThis, pending, DRAW } = openNumHarness(name);
+      comp.methods.showOpenNum.call(vmThis);
+      assert.strictEqual(pending.length, 1);
+      assert.strictEqual(pending[0].params.rows, 2);
+      Object.assign(vmThis, change);
+      pending[0].resolve(DRAW);
+      await tick();
+      assert.deepStrictEqual(vmThis.num, {}, `切换 ${JSON.stringify(change)} 后不应写入旧响应`);
+      assert.deepStrictEqual(vmThis.numList, []);
+    }
+  });
+
+  test(`${name}: showOpenNum 期间未切换 → 照常写入开奖号`, async () => {
+    const { comp, vmThis, pending, DRAW } = openNumHarness(name);
+    comp.methods.showOpenNum.call(vmThis);
+    pending[0].resolve(DRAW);
+    await tick();
+    assert.strictEqual(vmThis.num, DRAW.data[0]);
+    assert.strictEqual(vmThis.numArr.join(','), '1,2,3,4,5');   // numArr 由 vm 内的 split 产生，跨 realm 不能 deepStrictEqual
   });
 }
 

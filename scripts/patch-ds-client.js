@@ -125,11 +125,34 @@ const RESELECT_REPLACEMENTS = [
   },
 ];
 
+// showOpenNum：请求发出时记下 codeId/requestUrl，响应回来时若已切换数据源则丢弃（防旧源响应覆盖新源）。
+// 三个 chunk 的 topRows 调用缩进不同（哈希、运动会在 if/else 块内），按文件名取各自的缩进，锚点仍需精确命中 1 次
+const RACE_MARK = '/* ds-patch race v1 */';
+const RACE_INDENT = {
+  'chunk-b7e0f68a.59391aa2.js': 8, // 哈希：if (this.requestUrl != null) { 内
+  'chunk-50732e0a.702f76ce.js': 6, // 11选5：方法体顶层
+  'chunk-60235acf.b3ce76aa.js': 8, // 运动会：qitwId 为空的 else 分支内
+};
+function raceReplacements(name) {
+  if (!(name in RACE_INDENT)) throw new Error(`未知 chunk：${name}（race 层需要按文件名确定锚点缩进）`);
+  const i = ' '.repeat(RACE_INDENT[name]);
+  const call = `${i}Object(softNum["t" /* topRows */])({\n${i}  code: this.codeId,\n${i}  rows: 2,\n` +
+    `${i}  requestUrl: this.requestUrl\n${i}}).then(res => {\n`;
+  const body = `${i}  if (res.code == 0 && res.data.length > 0) {`;
+  return [{
+    find: call + body,
+    repl: `${i}${RACE_MARK}\n${i}const dsReqCode = this.codeId, dsReqUrl = this.requestUrl;\n` + call +
+      `${i}  if (dsReqCode !== this.codeId || dsReqUrl !== this.requestUrl) return;\n` + body,
+    count: 1,
+  }];
+}
+
 // 工作台 chunk 的补丁层（顺序即叠加顺序）。replacements 可以是按 chunk 文件名生成锚点的函数
 const CHUNK_LAYERS = [
   { mark: MARK, replacements: REPLACEMENTS },
   { mark: KEEP_MARK, replacements: KEEP_REPLACEMENTS },
   { mark: RESELECT_MARK, replacements: RESELECT_REPLACEMENTS },
+  { mark: RACE_MARK, replacements: raceReplacements },
 ];
 
 const APP_LAYERS = [
@@ -170,7 +193,7 @@ function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, CHUNK_LAYERS, APP_LAYERS };
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, CHUNK_LAYERS, APP_LAYERS };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');
