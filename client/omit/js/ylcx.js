@@ -79,6 +79,8 @@ var ylcx = function() {
 						dataType: "json",
 						url: requestUrl + "?code=" + code + "&rows=" + hangshu,
 						success: function(response) {
+							// 第三方源字段名各异，先归一化成 expect/opennumber/openTime/lottoId
+							response = window.dsSources ? window.dsSources.normalizeDraws(response, code) : response;
 							if (response.code == 0) {
 								ylcx.HuiDiao(response.data);
 							}

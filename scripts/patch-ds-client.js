@@ -7,6 +7,9 @@ const path = require('path');
 
 const MARK = '/* ds-patch v1 */';
 const DS = 'window.dsSources';
+// app 入口 chunk：topRows 的第三方（requestUrl）分支返回体归一化，与上面三个 chunk 的补丁互不影响
+const APP_MARK = '/* ds-patch norm v1 */';
+const APP_CHUNK = 'app.9ba1133b.js';
 const API = '__webpack_require__("f121")["apiURL"]';   // src/config/index.js
 const CHUNKS = [
   'chunk-b7e0f68a.59391aa2.js', // 哈希
@@ -85,6 +88,35 @@ function enc(s, q) {
   return s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').split(q).join('\\' + q);
 }
 
+const REQ = 'Object(_utils_request__WEBPACK_IMPORTED_MODULE_0__[/* default */ "a"])';
+const APP_REPLACEMENTS = [
+  { // 仅 requestUrl 分支套用归一化，后端分支原样返回
+    find: `    method = "GET";\n  }\n  return ${REQ}({\n    url: url,\n    method: method,\n    data: params\n  });\n}`,
+    repl: `    method = "GET";\n  }\n  ${APP_MARK}\n  const dsReq = ${REQ}({\n    url: url,\n    method: method,\n    data: params\n  });\n` +
+      `  if (requestUrl != null && requestUrl != "") {\n` +
+      `    return dsReq.then(res => ${DS} ? ${DS}.normalizeDraws(res, params.code) : res);\n  }\n` +
+      `  return dsReq;\n}`,
+    count: 1,
+  },
+];
+
+function patchApp(raw) {
+  const p = raw.indexOf('function topRows(params)');
+  if (p < 0) throw new Error('找不到 topRows(params)');
+  const e = raw.lastIndexOf('eval(', p);
+  if (e < 0) throw new Error('找不到 topRows 模块的 eval(');
+  const q = raw[e + 5];
+  if (raw.includes(enc(APP_MARK, q))) return raw;
+  let out = raw;
+  for (const r of APP_REPLACEMENTS) {
+    const f = enc(r.find, q);
+    const n = out.split(f).length - 1;
+    if (n !== r.count) throw new Error(`锚点命中 ${n} 次（应为 ${r.count}）：${r.find.slice(0, 60)}`);
+    out = out.split(f).join(enc(r.repl, q));
+  }
+  return out;
+}
+
 function patchChunk(raw) {
   const p = raw.indexOf('switchCode(index) {');
   if (p < 0) throw new Error('找不到 switchCode(index)');
@@ -102,7 +134,7 @@ function patchChunk(raw) {
   return out;
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc };
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');
@@ -116,5 +148,14 @@ if (require.main === module) {
       fs.writeFileSync(file, out);
       console.log(`patched ${name}`);
     }
+  }
+  const appFile = path.join(dir, APP_CHUNK);
+  const appRaw = fs.readFileSync(appFile, 'utf8');
+  const appOut = patchApp(appRaw);
+  if (appOut === appRaw) {
+    console.log(`skip    ${APP_CHUNK}（已打过补丁）`);
+  } else {
+    fs.writeFileSync(appFile, appOut);
+    console.log(`patched ${APP_CHUNK}`);
   }
 }

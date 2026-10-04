@@ -49,6 +49,29 @@
       .catch(function () { return []; });
   }
 
+  // 全球统计等源返回 issue/drawResult/drawTime，客户端统一按区块链统计的
+  // expect/opennumber/openTime/lottoId 读取；这里把前者补齐成后者（纯函数、幂等、不改入参）
+  function normalizeDraws(res, code) {
+    if (!res || typeof res !== 'object' || res.code != 0 || !Array.isArray(res.data)) return res;
+    var out = {};
+    Object.keys(res).forEach(function (k) { out[k] = res[k]; });
+    out.data = res.data.map(function (item) {
+      if (!item || typeof item !== 'object') return item;
+      var n = {};
+      Object.keys(item).forEach(function (k) { n[k] = item[k]; });
+      var hasCode = code !== null && code !== undefined && code !== '';
+      var pairs = [
+        ['expect', item.expect !== undefined && item.expect !== null ? item.expect : item.issue],
+        ['opennumber', item.opennumber !== undefined && item.opennumber !== null ? item.opennumber : item.drawResult],
+        ['openTime', item.openTime !== undefined && item.openTime !== null ? item.openTime : item.drawTime],
+        ['lottoId', item.lottoId !== undefined && item.lottoId !== null ? item.lottoId : (hasCode ? code : undefined)],
+      ];
+      pairs.forEach(function (p) { if (p[1] !== undefined) n[p[0]] = p[1]; });
+      return n;
+    });
+    return out;
+  }
+
   return { optKey: optKey, toOption: toOption, persistable: persistable, merge: merge,
-           dotColor: dotColor, fetchServer: fetchServer };
+           dotColor: dotColor, fetchServer: fetchServer, normalizeDraws: normalizeDraws };
 });

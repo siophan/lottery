@@ -124,6 +124,9 @@ var k_util = function() {
 				url : url,
 				async : true,
 				success : function(response) {
+					// 第三方源（requestUrl）字段名各异，按 url 里的 code 归一化成 expect/opennumber/openTime/lottoId
+					var codeM = /[?&]code=([^&]*)/.exec(url || "");
+					response = window.dsSources ? window.dsSources.normalizeDraws(response, codeM ? decodeURIComponent(codeM[1]) : null) : response;
 					if (response && response.result == -1) {
 						clearInterval(isLoginObj);
 						if (setIntervalArray) { //主页面获取最新开奖号的定时方法对象，要是没用就不用管

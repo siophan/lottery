@@ -71,3 +71,47 @@ test('Electron nodeIntegration 环境（module 和 window 共存）', () => {
   // 验证它们是同一个对象
   assert.strictEqual(sandbox.module.exports, sandbox.window.dsSources, 'module.exports 和 window.dsSources 应该是同一对象');
 });
+
+// ---- normalizeDraws：把全球统计返回体映射为区块链统计字段 ----
+const QQ = { cycleNo: 1440, issue: '202610041440', drawResult: '4,5,7,2,2', drawTime: '2026-10-05 00:00:00', context: { a: 1 } };
+const QK = { expect: '202610041440', opennumber: '4,5,7,2,2', openTime: '2026-10-05 00:00:00', lottoId: 'trxbhffc' };
+
+test('normalizeDraws：全球统计条目映射出 expect/opennumber/openTime/lottoId，其余字段保留', () => {
+  const out = ds.normalizeDraws({ code: 0, msg: '成功', data: [QQ] }, 'trxbhffc');
+  assert.strictEqual(out.msg, '成功');
+  assert.deepStrictEqual(out.data[0], {
+    ...QQ, expect: '202610041440', opennumber: '4,5,7,2,2', openTime: '2026-10-05 00:00:00', lottoId: 'trxbhffc',
+  });
+});
+
+test('normalizeDraws：区块链统计形态的条目保持不变（深相等）', () => {
+  const out = ds.normalizeDraws({ code: 0, data: [QK] }, 'other');
+  assert.deepStrictEqual(out.data[0], QK);
+});
+
+test('normalizeDraws：code 为空时不设置 lottoId；非对象条目原样透传', () => {
+  const out = ds.normalizeDraws({ code: 0, data: [QQ, null, 5] }, '');
+  assert.ok(!('lottoId' in out.data[0]));
+  assert.strictEqual(out.data[1], null);
+  assert.strictEqual(out.data[2], 5);
+  assert.ok(!('lottoId' in ds.normalizeDraws({ code: 0, data: [QQ] }, undefined).data[0]));
+});
+
+test('normalizeDraws：res 非对象 / code 非 0 / data 非数组 时原样返回', () => {
+  const bad = { code: 10020, data: [QQ] };
+  const noArr = { code: 0, data: { a: 1 } };
+  assert.strictEqual(ds.normalizeDraws(null, 'x'), null);
+  assert.strictEqual(ds.normalizeDraws('str', 'x'), 'str');
+  assert.strictEqual(ds.normalizeDraws(bad, 'x'), bad);
+  assert.strictEqual(ds.normalizeDraws(noArr, 'x'), noArr);
+});
+
+test('normalizeDraws：幂等，且不修改入参', () => {
+  const input = { code: 0, data: [QQ] };
+  const snapshot = JSON.parse(JSON.stringify(input));
+  const once = ds.normalizeDraws(input, 'c1');
+  assert.deepStrictEqual(input, snapshot);
+  assert.notStrictEqual(once, input);
+  assert.notStrictEqual(once.data[0], input.data[0]);
+  assert.deepStrictEqual(ds.normalizeDraws(once, 'c1'), once);
+});
