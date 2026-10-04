@@ -9,7 +9,7 @@
     "test:engine": "node src/engine/pl3.test.js",
     "dist": "electron-builder --mac",
     "dist:mac": "electron-builder --mac dmg --arm64 --publish never",
-    "dist:win": "electron-builder --win nsis --x64 --publish never"
+    "dist:win": "electron-builder --win nsis --ia32 --publish never"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -39,7 +39,16 @@
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "extraFiles": [
+        {
+          "from": "native/win32/ia32",
+          "to": ".",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
