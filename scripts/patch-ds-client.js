@@ -260,7 +260,19 @@ const TREND_SRC_REPLACEMENTS = [
     count: 1,
   },
 ];
-const TREND_LAYERS = [{ mark: TREND_MARK, replacements: TREND_SRC_REPLACEMENTS }];
+// 上面新加的按数据源取数分支补 .catch：网络错误不应成为未处理的 Promise 拒绝（失败时同样不回调）
+const TREND_CATCH_MARK = '/* ds-patch trend-catch v1 */';
+const TREND_CATCH_REPLACEMENTS = [
+  {
+    find: '              }));\n            }\n          });\n          return;\n        }',
+    repl: `              }));\n            }\n          }).catch(() => {});\n          ${TREND_CATCH_MARK}\n          return;\n        }`,
+    count: 1,
+  },
+];
+const TREND_LAYERS = [
+  { mark: TREND_MARK, replacements: TREND_SRC_REPLACEMENTS },
+  { mark: TREND_CATCH_MARK, replacements: TREND_CATCH_REPLACEMENTS },
+];
 
 // app chunk 的 request 工具（src/utils/request.js）：拦截器原本给所有请求都带 token/fromId，包括第三方 requestUrl；
 // 改为只给自家接口（相对地址，或以 apiURL 为前缀且前缀后紧跟 / ? # 或结尾）带。响应拦截器的 10020/10021/10022
@@ -343,7 +355,7 @@ function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, CHUNK_LAYERS, APP_LAYERS,
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS };
 
 if (require.main === module) {

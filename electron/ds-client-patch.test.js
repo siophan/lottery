@@ -395,6 +395,27 @@ test('trend: 6001 也走所选数据源；非哈希原样回传；失败不回�
   assert.strictEqual(h.got.length, 0);
 });
 
+test('trend: 所选数据源请求失败（reject）时不产生未处理的 Promise 拒绝，也不回调', async () => {
+  const unhandled = [];
+  const onUnhandled = (e) => unhandled.push(e);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const calls = [];
+    const softNum = { t: (p) => { calls.push(p); return Promise.reject(new Error('offline')); } };
+    const comp = loadComponent(trendSource(), { modules: { b456: softNum, f121: {} } });
+    const got = [];
+    const vmThis = { data: { cat: 'hash', requestUrl: SRV('qqtj') }, htmlCallback: '' };
+    comp.methods.topRows.call(vmThis, { code: 'trxbhffc', rows: 2 }, (arr) => got.push(arr));
+    await tick();
+    await tick();
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(got.length, 0);
+    assert.strictEqual(unhandled.length, 0, String(unhandled[0]));
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
+
 test('trend: 没有 requestUrl 时保持原逻辑（600x 走后端、其他走 store）', async () => {
   let h = trendHarness({ cat: 'hash', requestUrl: null }, ROWS());
   h.run({ code: 6002, rows: 2 });
