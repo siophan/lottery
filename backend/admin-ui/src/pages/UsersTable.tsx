@@ -174,7 +174,7 @@ export default function UsersTable() {
           }
           onFinish={async (v: { code: string; password: string; expires?: unknown }) => {
             const ok = await createUser(
-              (v.code || '').toUpperCase(),
+              (v.code || '').trim().toUpperCase(),
               v.password,
               toEpoch(v.expires),
             )

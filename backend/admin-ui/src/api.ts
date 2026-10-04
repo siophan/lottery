@@ -3,10 +3,15 @@
 const BASE = '/admin'
 
 async function req(path: string, options: RequestInit = {}): Promise<Response> {
+  // 仅在有请求体时附带 JSON 头，避免无 body 的 GET/DELETE 带上多余的 Content-Type。
+  const headers: Record<string, string> = { ...(options.headers as Record<string, string>) }
+  if (options.body != null && headers['Content-Type'] == null) {
+    headers['Content-Type'] = 'application/json'
+  }
   return fetch(BASE + path, {
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
+    headers,
   })
 }
 

@@ -25,8 +25,15 @@ async def admin_index():
 async def create_user(request: Request, payload: dict = Body(...)):
     if not _check(request):
         return _forbidden()
+    code = payload.get("code")
+    password = payload.get("password")
+    # 编号/密码不能为空，否则会产生无法通过 /users/{code} 路由删除的脏数据
+    if not isinstance(code, str) or not code.strip():
+        return JSONResponse({"ok": False, "error": "code required"}, status_code=400)
+    if not isinstance(password, str) or not password:
+        return JSONResponse({"ok": False, "error": "password required"}, status_code=400)
     conn = request.app.state.db_conn
-    u = db.create_user(conn, payload["code"], payload["password"], payload.get("expires_at"))
+    u = db.create_user(conn, code.strip(), password, payload.get("expires_at"))
     return {"ok": True, "code": u.code}
 
 @router.get("/users")
