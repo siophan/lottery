@@ -6,11 +6,34 @@
 // 之所以还需要代理：原版 shipped bundle 的 apiURL 就是 127.0.0.1:8000，
 // 说明原 Windows 版同样依赖一个本地代理把 /api/* 转发到上游 soft-api.data-ys.com。
 const path = require('path');
+const { ipcMain } = require('electron');
 const { startServer, UPSTREAM_DEFAULT } = require('./server');
 
 // 原生插件 shim：必须在 require 原版主进程之前挂到 global。
 // background.js 里的 a(131)("*.node") 已被改写为 global.__ys_native("*.node")。
 global.__ys_native = require('./native-shim');
+
+// Mac 版不做自动更新（dmg 分发）。原版 background.js 的 checkForUpdate 处理器会
+// 在 exe 同级目录 mkdir 一个 "<app> update" 目录——Windows 安装目录可写、Mac 上
+// 应用跑在只读 dmg 或 /Applications 里必然失败，于是弹出“应用更新出现错误”。
+// 这里在 require 原版主进程之前拦截该频道的注册，替换为“安静地回复无需更新”：
+// 不建目录、不请求 /renew、不弹窗。前端监听的 updateMsg({process:0}) 即“无需更新”。
+const _ipcOn = ipcMain.on.bind(ipcMain);
+ipcMain.on = function (channel, listener) {
+  if (channel === 'checkForUpdate') {
+    return _ipcOn(channel, () => {
+      try {
+        if (global.mainwindow && !global.mainwindow.isDestroyed()) {
+          global.mainwindow.webContents.send('updateMsg', { process: 0 });
+        }
+      } catch (e) {
+        console.error('[update-stub] 通知前端失败:', (e && e.message) || e);
+      }
+      console.log('[update-stub] checkForUpdate 已拦截 -> 无需更新 (mac)');
+    });
+  }
+  return _ipcOn(channel, listener);
+};
 
 const PROXY_PORT = 8000; // 必须与前端 apiURL 里的端口一致
 const CLIENT_DIR = path.join(__dirname, '..', 'client');
