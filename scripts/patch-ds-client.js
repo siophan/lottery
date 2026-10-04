@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // 多数据源客户端补丁：给哈希 / 11选5 / 运动会三个工作台 chunk 注入「服务端下发数据源」逻辑。
 // 页面源码位于 webpack 的 eval('...') 字符串内，锚点与替换文本都按该字符串的引号规则编码后再替换。
-// 幂等：已含 MARK 的文件原样返回；任一锚点命中次数与预期不符则抛错、不写盘。
+// 分层：每层有自己的 MARK，已含该 MARK 的层跳过，其余层按顺序叠加（后续层的锚点可以落在前面层注入的代码上）。
+// 幂等：所有层都已打过的文件原样返回；任一锚点命中次数与预期不符则抛错、不写盘。
 const fs = require('fs');
 const path = require('path');
 
@@ -100,48 +101,70 @@ const APP_REPLACEMENTS = [
   },
 ];
 
+// ---- 后续补丁层（叠加在 v1 / norm v1 之上，各自独立 MARK）----
+
+// 服务端列表拉取失败（fetchServer 返回 null）时保留现有下拉项与选中项
+const KEEP_MARK = '/* ds-patch keep v1 */';
+const KEEP_REPLACEMENTS = [
+  {
+    find: `.then(items => {\n        this.options = ${DS}.merge(items, this.options, ${API});`,
+    repl: `.then(items => {\n        ${KEEP_MARK}\n        if (!Array.isArray(items)) return;\n        this.options = ${DS}.merge(items, this.options, ${API});`,
+    count: 1,
+  },
+];
+
+// 工作台 chunk 的补丁层（顺序即叠加顺序）。replacements 可以是按 chunk 文件名生成锚点的函数
+const CHUNK_LAYERS = [
+  { mark: MARK, replacements: REPLACEMENTS },
+  { mark: KEEP_MARK, replacements: KEEP_REPLACEMENTS },
+];
+
+const APP_LAYERS = [
+  { locator: 'function topRows(params)', layers: [{ mark: APP_MARK, replacements: APP_REPLACEMENTS }] },
+];
+
+// 在 locator 所在模块的 eval 字符串编码下，依次叠加尚未打过的层
+function applyLayers(raw, locator, layers, name) {
+  const p = raw.indexOf(locator);
+  if (p < 0) throw new Error(`找不到 ${locator}`);
+  const e = raw.lastIndexOf('eval(', p);
+  if (e < 0) throw new Error(`找不到 ${locator} 所在模块的 eval(`);
+  const q = raw[e + 5];
+  let out = raw;
+  for (const layer of layers) {
+    const mark = enc(layer.mark, q);
+    if (out.includes(mark)) continue;
+    const reps = typeof layer.replacements === 'function' ? layer.replacements(name) : layer.replacements;
+    for (const r of reps) {
+      const f = enc(r.find, q);
+      const n = out.split(f).length - 1;
+      if (n !== r.count) throw new Error(`锚点命中 ${n} 次（应为 ${r.count}）：${r.find.slice(0, 60)}`);
+      out = out.split(f).join(enc(r.repl, q));
+    }
+    if (!out.includes(mark)) throw new Error(`补丁层 ${layer.mark} 没有写入自己的标记`);
+  }
+  return out;
+}
+
 function patchApp(raw) {
-  const p = raw.indexOf('function topRows(params)');
-  if (p < 0) throw new Error('找不到 topRows(params)');
-  const e = raw.lastIndexOf('eval(', p);
-  if (e < 0) throw new Error('找不到 topRows 模块的 eval(');
-  const q = raw[e + 5];
-  if (raw.includes(enc(APP_MARK, q))) return raw;
   let out = raw;
-  for (const r of APP_REPLACEMENTS) {
-    const f = enc(r.find, q);
-    const n = out.split(f).length - 1;
-    if (n !== r.count) throw new Error(`锚点命中 ${n} 次（应为 ${r.count}）：${r.find.slice(0, 60)}`);
-    out = out.split(f).join(enc(r.repl, q));
-  }
+  for (const g of APP_LAYERS) out = applyLayers(out, g.locator, g.layers);
   return out;
 }
 
-function patchChunk(raw) {
-  const p = raw.indexOf('switchCode(index) {');
-  if (p < 0) throw new Error('找不到 switchCode(index)');
-  const e = raw.lastIndexOf('eval(', p);
-  if (e < 0) throw new Error('找不到页面模块的 eval(');
-  const q = raw[e + 5];
-  if (raw.includes(enc(MARK, q))) return raw;
-  let out = raw;
-  for (const r of REPLACEMENTS) {
-    const f = enc(r.find, q);
-    const n = out.split(f).length - 1;
-    if (n !== r.count) throw new Error(`锚点命中 ${n} 次（应为 ${r.count}）：${r.find.slice(0, 60)}`);
-    out = out.split(f).join(enc(r.repl, q));
-  }
-  return out;
+// name：chunk 文件名（CHUNKS 之一），部分层的锚点因 chunk 而异
+function patchChunk(raw, name) {
+  return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK };
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, CHUNK_LAYERS, APP_LAYERS };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');
   for (const name of CHUNKS) {
     const file = path.join(dir, name);
     const raw = fs.readFileSync(file, 'utf8');
-    const out = patchChunk(raw);
+    const out = patchChunk(raw, name);
     if (out === raw) {
       console.log(`skip    ${name}（已打过补丁）`);
     } else {

@@ -37,16 +37,18 @@
     return COLORS[o && o.status] || UNKNOWN;
   }
 
+  // 成功时返回服务端列表（可能是 []，表示服务端确实没有源）；任何失败（无 fetch、网络错误、
+  // 非 JSON、code != 0、data 非数组）都返回 null，调用方据此保留现有下拉项，避免一次抖动清空服务端源
   function fetchServer(apiURL, cat, token, fetchImpl) {
     var f = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
-    if (!f) return Promise.resolve([]);
+    if (!f) return Promise.resolve(null);
     var headers = {};
     if (token) headers.token = token;
     return Promise.resolve()
       .then(function () { return f(apiURL + '/ds/sources?cat=' + encodeURIComponent(cat), { headers: headers }); })
       .then(function (r) { return r.json(); })
-      .then(function (d) { return d && d.code === 0 && Array.isArray(d.data) ? d.data : []; })
-      .catch(function () { return []; });
+      .then(function (d) { return d && d.code === 0 && Array.isArray(d.data) ? d.data : null; })
+      .catch(function () { return null; });
   }
 
   // 全球统计等源返回 issue/drawResult/drawTime，客户端统一按区块链统计的

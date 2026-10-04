@@ -46,9 +46,29 @@ test('fetchServer：带 token 请求并返回 data', async () => {
   assert.strictEqual(seen.opts.headers.token, 'TOK');
 });
 
-test('fetchServer：业务错误或网络失败返回空数组', async () => {
-  assert.deepStrictEqual(await ds.fetchServer(API, 'hash', 'T', async () => ({ json: async () => ({ code: 10020 }) })), []);
-  assert.deepStrictEqual(await ds.fetchServer(API, 'hash', 'T', async () => { throw new Error('offline'); }), []);
+test('fetchServer：任何失败都返回 null（与「服务端确实没有源」的 [] 区分）', async () => {
+  const bad = (body) => async () => ({ json: async () => body });
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', bad({ code: 10020 })), null);            // 业务错误
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', bad({ code: 0, data: { a: 1 } })), null); // data 非数组
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', bad({ code: 0 })), null);
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', bad(null)), null);
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', async () => { throw new Error('offline'); }), null); // 网络错误
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', async () => ({ json: async () => { throw new SyntaxError('not json'); } })), null);
+});
+
+test('fetchServer：服务端确实返回空列表时是 []', async () => {
+  assert.deepStrictEqual(await ds.fetchServer(API, 'hash', 'T', async () => ({ json: async () => ({ code: 0, data: [] }) })), []);
+});
+
+test('fetchServer：没有 fetch 实现时返回 null', async () => {
+  const had = Object.prototype.hasOwnProperty.call(globalThis, 'fetch');
+  const old = globalThis.fetch;
+  delete globalThis.fetch;
+  try {
+    assert.strictEqual(await ds.fetchServer(API, 'hash', 'T'), null);
+  } finally {
+    if (had) globalThis.fetch = old;
+  }
 });
 
 test('Electron nodeIntegration 环境（module 和 window 共存）', () => {
