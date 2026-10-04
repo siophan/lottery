@@ -197,3 +197,33 @@ test('k_Util.js：decodeURIComponent 有 try/catch 兜底', () => {
   const kutil = fs.readFileSync(path.join(__dirname, '../client/kline/js/k_Util.js'), 'utf8');
   assert.match(kutil, /try\s*\{[^}]*decodeURIComponent\(codeM\[1\]\)[^}]*\}\s*catch/);
 });
+
+// ---- isServerUrl / needsReselect：选中的服务端源被停用/删除后自动切走 ----
+test('isServerUrl：只认自家 /api/ds/<key>/draw-result 路径（忽略 query/hash）', () => {
+  assert.strictEqual(ds.isServerUrl(API + '/ds/qqtj/draw-result'), true);
+  assert.strictEqual(ds.isServerUrl(API + '/ds/qqtj/draw-result?code=1#x'), true);
+  assert.strictEqual(ds.isServerUrl('https://evil.com/?u=/api/ds/x/draw-result'), false);
+  assert.strictEqual(ds.isServerUrl('https://x.example/api'), false);
+  assert.strictEqual(ds.isServerUrl(''), false);
+  assert.strictEqual(ds.isServerUrl(null), false);
+  assert.strictEqual(ds.isServerUrl(undefined), false);
+});
+
+test('needsReselect：当前选中的服务端源已不在列表中 → true', () => {
+  const kept = ds.toOption(ITEM, API);
+  const gone = ds.toOption({ ...ITEM, source: 'qkltj', sourceName: '区块链统计' }, API);
+  const local = { value: '9', label: '我的源', requestUrl: 'https://x.example/api' };
+  assert.strictEqual(ds.needsReselect([kept, local], gone.value, gone.requestUrl), true);
+  // 同源不同彩种也算消失
+  assert.strictEqual(ds.needsReselect([kept, local], '6002', kept.requestUrl), true);
+});
+
+test('needsReselect：仍在列表中 / 本地源 / 后端默认源 / 列表为空 → false', () => {
+  const kept = ds.toOption(ITEM, API);
+  const local = { value: '9', label: '我的源', requestUrl: 'https://x.example/api' };
+  assert.strictEqual(ds.needsReselect([kept, local], kept.value, kept.requestUrl), false);
+  assert.strictEqual(ds.needsReselect([kept], local.value, local.requestUrl), false);   // 不从本地源切走
+  assert.strictEqual(ds.needsReselect([kept], '11001', null), false);                   // requestUrl 为空的内置项
+  assert.strictEqual(ds.needsReselect([], '6001', kept.requestUrl), false);
+  assert.strictEqual(ds.needsReselect(undefined, '6001', kept.requestUrl), false);
+});

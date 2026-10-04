@@ -126,6 +126,47 @@ for (const name of CHUNKS) {
   });
 }
 
+// ---- reselect v1：选中的服务端源被后台停用/删除后，刷新时切到 options[0] ----
+const ITEM2 = { source: 'qkltj', sourceName: '区块链统计', code: '6001', name: '哈希分分彩', status: 'ok' };
+for (const name of CHUNKS) {
+  test(`${name}: dsLoad(false) 发现选中的服务端源已消失 → 切到 options[0] 并刷新开奖`, async () => {
+    const { comp, vmThis } = dsLoadHarness(name, [ITEM2]);
+    await comp.methods.dsLoad.call(vmThis, false);
+    const first = dsSources.toOption(ITEM2, API_URL);
+    assert.deepStrictEqual(vmThis.options[0], first);
+    assert.strictEqual(vmThis.codeId, first.value);
+    assert.strictEqual(vmThis.codeName, first.label);
+    assert.strictEqual(vmThis.requestUrl, first.requestUrl);
+    assert.strictEqual(vmThis.num, '');
+    assert.strictEqual(vmThis.opened, 1);
+  });
+
+  test(`${name}: dsLoad(false) 服务端列表清空但有本地源 → 切到本地源；全空 → 保持不动`, async () => {
+    let h = dsLoadHarness(name, []);
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.strictEqual(h.vmThis.requestUrl, h.local.requestUrl);
+    assert.strictEqual(h.vmThis.opened, 1);
+    h = dsLoadHarness(name, []);
+    h.vmThis.options = [h.server];
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.deepStrictEqual(h.vmThis.options, []);
+    assert.strictEqual(h.vmThis.requestUrl, h.server.requestUrl);
+    assert.strictEqual(h.vmThis.opened, 0);
+  });
+
+  test(`${name}: dsLoad(false) 选中项仍在 / 选中的是本地源 → 不切换`, async () => {
+    let h = dsLoadHarness(name, [{ ...ITEM2 }, { source: 'qqtj', sourceName: '全球统计', code: '6001', name: '哈希分分彩', status: 'error' }]);
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.strictEqual(h.vmThis.requestUrl, h.server.requestUrl);
+    assert.strictEqual(h.vmThis.opened, 0);
+    h = dsLoadHarness(name, [ITEM2]);
+    Object.assign(h.vmThis, { codeId: h.local.value, codeName: h.local.label, requestUrl: h.local.requestUrl });
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.strictEqual(h.vmThis.requestUrl, h.local.requestUrl);
+    assert.strictEqual(h.vmThis.opened, 0);
+  });
+}
+
 // ---- app 入口 chunk：topRows 的第三方请求分支归一化返回体 ----
 // app.9ba1133b.js 是 webpack 入口 chunk，evalSources 不适用；直接用正则抠出 topRows 模块的 eval('...') 字面量求值
 function topRowsSource(raw) {

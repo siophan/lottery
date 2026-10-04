@@ -113,10 +113,23 @@ const KEEP_REPLACEMENTS = [
   },
 ];
 
+// 刷新后若当前选中的服务端源已被后台停用/删除（新列表里没有它），像首次加载那样切到 options[0]；
+// 判定见 dsSources.needsReselect（本地源、空列表都不切）
+const RESELECT_MARK = '/* ds-patch reselect v1 */';
+const RESELECT_REPLACEMENTS = [
+  {
+    find: '        if (first && hadNone && items.length > 0) {',
+    repl: `        ${RESELECT_MARK}\n        if ((first && hadNone && items.length > 0) || ` +
+      `(!first && ${DS}.needsReselect(this.options, this.codeId, this.requestUrl))) {`,
+    count: 1,
+  },
+];
+
 // 工作台 chunk 的补丁层（顺序即叠加顺序）。replacements 可以是按 chunk 文件名生成锚点的函数
 const CHUNK_LAYERS = [
   { mark: MARK, replacements: REPLACEMENTS },
   { mark: KEEP_MARK, replacements: KEEP_REPLACEMENTS },
+  { mark: RESELECT_MARK, replacements: RESELECT_REPLACEMENTS },
 ];
 
 const APP_LAYERS = [
@@ -157,7 +170,7 @@ function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, CHUNK_LAYERS, APP_LAYERS };
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, CHUNK_LAYERS, APP_LAYERS };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');
