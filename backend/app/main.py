@@ -14,6 +14,7 @@ from .routes import auth as auth_routes
 from .routes import admin as admin_routes
 from .collector import Collector
 from .routes import ds as ds_routes
+from .routes import admin_datasources as admin_ds_routes
 
 METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 
@@ -55,6 +56,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
     app.include_router(ds_routes.router, prefix="/api")     # 多数据源，先于 catch-all
     app.include_router(local_router, prefix="/api")
     app.include_router(admin_routes.router, prefix="/admin")
+    app.include_router(admin_ds_routes.router, prefix="/admin")
 
     _static_dir = os.path.join(os.path.dirname(__file__), "static")
     _downloads_dir = os.path.join(_static_dir, "downloads")
