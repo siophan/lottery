@@ -1,0 +1,53 @@
+name: Build Windows client
+
+# Builds the Windows (.exe) installer on a Windows runner, since electron-builder
+# cannot produce an NSIS installer on macOS without Wine. The macOS .dmg is built
+# locally (arm64) and is not produced here.
+#
+# Triggers:
+#   - Manual run (Actions tab -> "Build Windows client" -> Run workflow)
+#   - Pushing a tag like v1.0.0 -> also publishes the installer to a GitHub Release
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer (NSIS, x64)
+        run: npm run dist:win
+        env:
+          # The project is unsigned (self-distributed). Skip any auto-publish.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ys-win
+          path: dist/ys-win.exe
+          if-no-files-found: error
+
+      - name: Publish to Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ys-win.exe
+          fail_on_unmatched_files: true
