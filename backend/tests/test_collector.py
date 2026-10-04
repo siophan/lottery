@@ -185,3 +185,135 @@ def test_stop_survives_dead_task_and_closes_client():
         assert col.running_ids() == set()
         assert col.client.is_closed
     asyncio.run(run())
+
+
+# ---------------- 一次性历史回填 ----------------
+
+def backfill_rows(n):
+    return {"msg": "成功！", "code": 0, "data": [
+        {"expect": f"B{i:04d}", "opennumber": "1,2,3,4,5", "openTime": f"2026-10-03 {i // 60:02d}:{i % 60:02d}:00",
+         "lottoId": "x"} for i in range(n)]}
+
+def only_qkltj(conn):
+    db.set_data_source_enabled(conn, 2, False)      # 回填测试只看区块链统计
+
+async def wait_until(cond, spins=2000):
+    """只让出事件循环、不真睡：直到 cond() 成立或转满 spins 次。"""
+    for _ in range(spins):
+        if cond():
+            return True
+        await asyncio.sleep(0)
+    return cond()
+
+async def drain_backfills(col):
+    await asyncio.gather(*list(col._backfills.values()), return_exceptions=True)
+
+def test_backfill_requests_large_rows_and_inserts():
+    seen = []
+    def handler(req):
+        seen.append((req.url.params["code"], req.url.params["rows"]))
+        if req.url.params["rows"] == "1000":
+            return httpx.Response(200, json=backfill_rows(30))
+        return ok_handler(req)
+    conn, col = make(handler)
+    only_qkltj(conn)
+    async def run():
+        await col.start()
+        await drain_backfills(col)
+        await col.stop()
+    asyncio.run(run())
+    assert sorted(c for c, r in seen if r == "1000") == ["5001", "5002", "6001", "6002"]
+    assert sorted(c for c, r in seen if r == "10") == ["5001", "5002", "6001", "6002"]   # 实时轮询照常
+    assert db.count_draws(conn, 1, "6001") == 31          # 回填 30 + 实时 1
+    assert db.latest_draws(conn, 1, "6001", 1)[0].expect == "202610041324"
+
+def test_backfill_skipped_when_enough_history():
+    seen = []
+    def handler(req):
+        seen.append((req.url.params["code"], req.url.params["rows"]))
+        if req.url.params["rows"] == "1000":
+            return httpx.Response(200, json=backfill_rows(5))
+        return ok_handler(req)
+    conn, col = make(handler)
+    only_qkltj(conn)
+    from app.adapters import Draw
+    db.insert_draws(conn, 1, "6001", [Draw(f"H{i:04d}", "0", f"2026-10-02 {i // 60 % 24:02d}:{i % 60:02d}:{i // 1440:02d}")
+                                      for i in range(1000)], 1)
+    async def run():
+        await col.start()
+        await drain_backfills(col)
+        await col.stop()
+    asyncio.run(run())
+    assert sorted(c for c, r in seen if r == "1000") == ["5001", "5002", "6002"]      # 6001 已够 1000 期
+
+def test_backfill_failure_keeps_status_and_live_continues():
+    live = []
+    def handler(req):
+        if req.url.params["rows"] == "1000":
+            raise httpx.ReadTimeout("timed out", request=req)
+        live.append(req.url.params["code"])
+        return ok_handler(req)
+    conn, col = make(handler)
+    only_qkltj(conn)
+    async def run():
+        await col._backfill(1, "6001")                    # 失败不外抛
+        s = db.get_data_source(conn, 1)
+        assert s.status == "unknown" and s.last_error is None      # 状态只反映实时轮询
+        conn.execute("UPDATE data_sources SET interval_sec=0"); conn.commit()
+        await col.start()
+        await drain_backfills(col)
+        n = len(live)
+        assert await wait_until(lambda: len(live) > n + 8)          # 回填失败后实时轮询仍在跑
+        alive = col.running_ids()
+        await col.stop()
+        return alive
+    assert asyncio.run(run()) == {1}
+    s = db.get_data_source(conn, 1)
+    assert s.status == "ok" and s.last_error is None
+    assert db.count_draws(conn, 1, "6001") == 1
+
+def test_backfill_cancelled_by_reload_and_stop_and_not_duplicated():
+    hits = []
+    def handler(req):
+        if req.url.params["rows"] == "1000":
+            async def hang():
+                hits.append(req.url.params["code"])
+                await asyncio.Event().wait()             # 永不返回：模拟慢请求在途
+            return hang()
+        return ok_handler(req)
+    conn, col = make(handler)
+    only_qkltj(conn)
+    async def run():
+        await col.start()
+        assert await wait_until(lambda: len(hits) == 4)
+        first = list(col._backfills.values())
+        col._spawn_backfills(db.get_data_source(conn, 1))   # 在途时重复触发：不应再发请求
+        assert await wait_until(lambda: len(hits) > 4, spins=200) is False
+        await col.reload(1)
+        assert all(t.cancelled() for t in first)            # reload 取消旧回填并重建
+        assert await wait_until(lambda: len(hits) == 8)
+        second = list(col._backfills.values())
+        assert len(second) == 4 and not any(t.done() for t in second)
+        await col.stop()
+        assert all(t.cancelled() for t in second)
+        assert col._backfills == {}
+    asyncio.run(run())
+    assert db.get_data_source(conn, 1).status == "ok"
+
+
+# ---------------- reload 并发与总开关 ----------------
+
+def live_tasks(source_id):
+    return [t for t in asyncio.all_tasks() if t.get_name() == f"collector-{source_id}" and not t.done()]
+
+def test_concurrent_reloads_leave_exactly_one_task():
+    conn, col = make(ok_handler)
+    async def run():
+        await col.start()
+        await asyncio.sleep(0)
+        await asyncio.gather(col.reload(2), col.reload(2), col.reload(2))
+        alive = live_tasks(2)
+        assert len(alive) == 1 and col._tasks[2] is alive[0]      # 没有未被跟踪的孤儿任务
+        await col.stop()
+        assert live_tasks(1) == [] and live_tasks(2) == []
+    asyncio.run(run())

@@ -405,3 +405,8 @@ def latest_draws(conn, source_id: int, lottery_code: str, rows: int) -> list[Dra
         (source_id, lottery_code, rows),
     ).fetchall()
     return [Draw(r["expect"], r["opennumber"], r["open_time"]) for r in rs]
+
+def count_draws(conn, source_id: int, lottery_code: str) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM draws WHERE source_id=? AND lottery_code=?", (source_id, lottery_code),
+    ).fetchone()[0]

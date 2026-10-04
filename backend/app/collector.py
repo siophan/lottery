@@ -1,5 +1,6 @@
 # 多数据源采集：每个启用的源一个 asyncio 循环，互不影响；结果按 source_id 入库并回写状态。
 # 运行在 FastAPI 进程内（lifespan 启停），生产必须单 uvicorn 进程，否则会重复采集。
+# 另外每次（重）建源任务时，对库内不足 BACKFILL_ROWS 期的彩种做一次性历史回填（独立任务，不拖慢实时轮询）。
 import asyncio
 import time
 import httpx
@@ -11,6 +12,8 @@ FETCH_TIMEOUT = 8.0
 MAX_BACKOFF = 60
 KEEP_ROWS = 2000
 DEFAULT_INTERVAL = 5   # 尚未读到配置时的默认轮询间隔（秒）
+BACKFILL_ROWS = 1000   # 区块链统计大 rows 最多给 1000 行；全球统计 trial 仍只给 10 行
+BACKFILL_TIMEOUT = 120.0   # 区块链统计 1000 行约 70s
 
 class FetchError(Exception):
     pass
@@ -27,15 +30,17 @@ class Collector:
         self._owns_client = client is None
         self.client = client or httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=True)
         self._tasks: dict[int, asyncio.Task] = {}
+        self._backfills: dict[tuple[int, str], asyncio.Task] = {}   # (source_id, lottery_code) → 回填任务
+        self._locks: dict[int, asyncio.Lock] = {}                   # 按源串行化 reload，避免并发重建出孤儿任务
 
-    async def _fetch_one(self, src, lot) -> None:
+    async def _fetch_one(self, src, lot, rows: int = FETCH_ROWS, timeout: float = FETCH_TIMEOUT) -> None:
         try:
             resp = await self.client.get(
-                src.base_url, params={"code": lot.remote_code, "rows": FETCH_ROWS},
-                headers=src.headers, timeout=FETCH_TIMEOUT,
+                src.base_url, params={"code": lot.remote_code, "rows": rows},
+                headers=src.headers, timeout=timeout,
             )
         except httpx.TimeoutException:
-            raise FetchError(f"超时 {int(FETCH_TIMEOUT)}s")
+            raise FetchError(f"超时 {int(timeout)}s")
         except httpx.RequestError as e:
             raise FetchError(f"网络错误: {e}")
         if resp.status_code != 200:
@@ -90,35 +95,77 @@ class Collector:
             failures = 0 if ok else failures + 1
             await asyncio.sleep(backoff_delay(interval, failures))
 
-    def _spawn(self, source_id: int) -> None:
-        self._tasks[source_id] = asyncio.create_task(self._run(source_id))
+    async def _backfill(self, source_id: int, lottery_code: str) -> None:
+        """一次性历史回填：库内不足 BACKFILL_ROWS 期时拉一次大 rows。
+        失败只记日志、绝不外抛，也不改源状态（状态只反映实时轮询）。"""
+        try:
+            src = db.get_data_source(self.conn, source_id)
+            if src is None or not src.enabled:
+                return
+            lot = next((l for l in src.lotteries if l.lottery_code == lottery_code), None)
+            if lot is None or db.count_draws(self.conn, source_id, lottery_code) >= BACKFILL_ROWS:
+                return
+            await self._fetch_one(src, lot, BACKFILL_ROWS, BACKFILL_TIMEOUT)
+            print(f"collector source={source_id} lottery={lottery_code} backfill done: "
+                  f"{db.count_draws(self.conn, source_id, lottery_code)} rows")
+        except Exception as e:      # CancelledError 不是 Exception，取消照常生效
+            print(f"collector source={source_id} lottery={lottery_code} backfill failed: {e!r}")
+        finally:
+            key = (source_id, lottery_code)
+            if self._backfills.get(key) is asyncio.current_task():
+                del self._backfills[key]
 
-    async def _cancel(self, source_id: int) -> None:
-        t = self._tasks.pop(source_id, None)
-        if t is None:
-            return
+    def _spawn(self, source_id: int) -> None:
+        self._tasks[source_id] = asyncio.create_task(self._run(source_id), name=f"collector-{source_id}")
+
+    def _spawn_backfills(self, src) -> None:
+        for lot in src.lotteries:
+            key = (src.id, lot.lottery_code)
+            t = self._backfills.get(key)
+            if t is not None and not t.done():      # 同一源×彩种不并发回填
+                continue
+            self._backfills[key] = asyncio.create_task(
+                self._backfill(src.id, lot.lottery_code),
+                name=f"collector-backfill-{src.id}-{lot.lottery_code}")
+
+    async def _await_cancelled(self, t: asyncio.Task, label: str) -> None:
         t.cancel()
         try:
             await t
         except asyncio.CancelledError:
             pass
         except Exception as e:      # 任务早已因意外异常退出：只记录，保证 stop()/reload() 照常完成
-            print(f"collector source={source_id} task ended with error: {e!r}")
+            print(f"collector {label} task ended with error: {e!r}")
+
+    async def _cancel(self, source_id: int) -> None:
+        t = self._tasks.pop(source_id, None)
+        if t is not None:
+            await self._await_cancelled(t, f"source={source_id}")
+        for key in [k for k in self._backfills if k[0] == source_id]:
+            bt = self._backfills.pop(key, None)
+            if bt is not None:
+                await self._await_cancelled(bt, f"source={source_id} lottery={key[1]} backfill")
+
+    def _lock(self, source_id: int) -> asyncio.Lock:
+        return self._locks.setdefault(source_id, asyncio.Lock())
 
     async def start(self) -> None:
         for src in db.list_data_sources(self.conn):
             if src.enabled:
                 self._spawn(src.id)
+                self._spawn_backfills(src)
 
     async def reload(self, source_id: int) -> None:
-        """配置变更后调用：取消旧任务，源仍存在且启用时按新配置重建。"""
-        await self._cancel(source_id)
-        src = db.get_data_source(self.conn, source_id)
-        if src is not None and src.enabled:
-            self._spawn(source_id)
+        """配置变更后调用：取消旧任务，源仍存在且启用时按新配置重建。同一源的 reload 串行执行。"""
+        async with self._lock(source_id):
+            await self._cancel(source_id)
+            src = db.get_data_source(self.conn, source_id)
+            if src is not None and src.enabled:
+                self._spawn(source_id)
+                self._spawn_backfills(src)
 
     async def stop(self) -> None:
-        for sid in list(self._tasks):
+        for sid in dict.fromkeys([*self._tasks, *(k[0] for k in self._backfills)]):
             await self._cancel(sid)
         if self._owns_client:
             await self.client.aclose()

@@ -79,6 +79,16 @@ def test_prune_keeps_latest():
     assert db.prune_draws(conn, 1, "6001", 3) == 7
     assert [x.expect for x in db.latest_draws(conn, 1, "6001", 10)] == ["E009", "E008", "E007"]
 
+def test_count_draws_per_source_and_lottery():
+    conn = fresh()
+    assert db.count_draws(conn, 1, "6001") == 0
+    db.insert_draws(conn, 1, "6001", [Draw(f"E{i}", "0", f"2026-10-04 10:0{i}:00") for i in range(3)], 1)
+    db.insert_draws(conn, 1, "6002", [Draw("E0", "0", "2026-10-04 10:00:00")], 1)
+    db.insert_draws(conn, 2, "6001", [Draw("E0", "0", "2026-10-04 10:00:00")], 1)
+    assert db.count_draws(conn, 1, "6001") == 3
+    assert db.count_draws(conn, 1, "6002") == 1
+    assert db.count_draws(conn, 2, "6001") == 1
+
 def test_delete_cascades():
     conn = fresh()
     db.insert_draws(conn, 2, "6001", [Draw("1", "1", "2026-10-04 00:00:00")], 1)
