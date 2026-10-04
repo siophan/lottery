@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS draws(
   ```
   仅返回 `enabled=1` 的源；按源 `id`、再按 `lottery_code` 排序。
 - `GET /api/ds/{source}/draw-result?code=6001&rows=N`
-  - 返回与区块链统计**同构**：`{"code":0,"msg":"成功","data":[{"expect","opennumber","openTime","lottoId","lottoTypeCn"}]}`，按 `open_time` 倒序，`rows` 默认 1、上限 300。
+  - 返回与区块链统计**同构**：`{"code":0,"msg":"成功","data":[{"expect","opennumber","openTime","lottoId","lottoTypeCn"}]}`，按 `open_time` 倒序，`rows` 默认 1、上限 2000（= 库内保留深度）。
   - 源不存在 / 已停用 / 彩种未映射 / `rows` 非法 → `{"code":1,"msg":"..."}`（HTTP 200）。暂无数据 → `{"code":0,"data":[]}`。
 
 ### `app/routes/admin.py` 扩展 —— 数据源管理接口

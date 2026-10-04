@@ -1,9 +1,10 @@
 # 客户端多数据源接口：下拉列表 + 与区块链统计同构的开奖结果。须带我方用户 token。
 from fastapi import APIRouter, Request
 from .. import db, gate
+from ..collector import KEEP_ROWS
 
 router = APIRouter()
-MAX_ROWS = 300
+MAX_ROWS = KEEP_ROWS      # 上限 = 库内保留深度，客户端遗漏页会请求 rows=3000
 
 def _deny(request: Request):
     ok, err = gate.authorize(request.app.state.db_conn, request.headers.get("token", ""))

@@ -69,11 +69,12 @@ def test_draw_result_isolated_by_source():
     assert tc.get("/api/ds/qkltj/draw-result?code=6001", headers=H).json()["data"][0]["opennumber"] == "1,1,1,1,1"
     assert tc.get("/api/ds/qqtj/draw-result?code=6001", headers=H).json()["data"][0]["opennumber"] == "2,2,2,2,2"
 
-def test_rows_capped_at_300():
+def test_rows_capped_at_keep_rows():
     conn, tc, H, _ = build()
-    db.insert_draws(conn, 1, "6001", [Draw(f"E{i:04d}", "0", f"2026-10-04 {i // 60:02d}:{i % 60:02d}:00")
-                                      for i in range(400)], 1)
-    assert len(tc.get("/api/ds/qkltj/draw-result?code=6001&rows=999", headers=H).json()["data"]) == 300
+    # 上限 = 库内保留深度 KEEP_ROWS（2000）；客户端遗漏页会请求 rows=3000
+    db.insert_draws(conn, 1, "6001", [Draw(f"E{i:05d}", "0", f"2026-10-04 {i // 3600:02d}:{i // 60 % 60:02d}:{i % 60:02d}")
+                                      for i in range(2100)], 1)
+    assert len(tc.get("/api/ds/qkltj/draw-result?code=6001&rows=3000", headers=H).json()["data"]) == 2000
 
 def test_draw_result_business_errors():
     conn, tc, H, _ = build()

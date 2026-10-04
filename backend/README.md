@@ -120,7 +120,7 @@ ADMIN_COOKIE_SECURE=false DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
 
 - 管理：后台「数据源」菜单——增删改、启停、查看状态（正常/异常 + 最后错误 + 最后成功时间）与最新开奖。
 - 客户端接口（需我方 token）：`GET /api/ds/sources?cat=hash`、`GET /api/ds/{key}/draw-result?code=6001&rows=N`
-  （返回格式与区块链统计一致，rows ≤ 300）。
+  （返回格式与区块链统计一致，rows ≤ 2000，即库内保留深度）。
 - `COLLECTOR_ENABLED=false` 可关闭采集（排障用）。
 - **必须单进程运行 uvicorn**（不要加 `--workers`），否则会重复采集。
 - 全球统计 trial 接口每次最多 10 行、无历史翻页：历史从开始采集起累积（300 期分分彩约 5 小时、三分彩约 15 小时）。

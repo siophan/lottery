@@ -17,7 +17,7 @@
 - 统一彩种编码沿用区块链统计数字编码：`6001` 哈希分分彩、`6002` 哈希三分彩、`5001` 波场分分11选5、`5002` 波场三分11选5。
 - 采集：每次请求 `rows=10`，单次超时 8 秒，默认周期 5 秒，最小周期 3 秒，退避 `min(interval × 2^n, 60)`，每个「源 × 彩种」保留 2000 期。
 - 排序一律 `open_time DESC, expect DESC`（三分彩期号不补零，不能按期号排序）。
-- `/api/ds/{source}/draw-result` 返回与区块链统计同构：`{code, msg, data:[{expect, opennumber, openTime, lottoId, lottoTypeCn}]}`，`rows` 上限 300；业务错误一律 HTTP 200 + `{"code":1,"msg":...}`。
+- `/api/ds/{source}/draw-result` 返回与区块链统计同构：`{code, msg, data:[{expect, opennumber, openTime, lottoId, lottoTypeCn}]}`，`rows` 上限 2000；业务错误一律 HTTP 200 + `{"code":1,"msg":...}`。
 - 生产必须保持**单 uvicorn 进程**（不要加 `--workers`），否则会重复采集。
 - 代码注释、提示文案用中文；commit message 用英文，结尾带 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`。
 - 工作分支：`feat/multi-datasource-collector`（已创建）。
