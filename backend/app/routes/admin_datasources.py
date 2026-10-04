@@ -8,8 +8,9 @@ from ..adapters import ADAPTERS
 
 router = APIRouter()
 
-KEY_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
-URL_RE = re.compile(r"^https?://[^\s?]+$")
+# 一律 fullmatch：re.match + $ 会放过结尾的换行符
+KEY_RE = re.compile(r"[a-z0-9_-]{1,32}")
+URL_RE = re.compile(r"https?://[^\s?]+")
 CATS = {"hash", "1105", "animals"}
 MIN_INTERVAL = 3
 MAX_DRAW_ROWS = 300
@@ -29,14 +30,14 @@ def _nonempty(v) -> bool:
 def _parse_source(p: dict):
     """校验并规整提交的数据源，返回 (fields, None) 或 (None, 错误信息)。"""
     key = p.get("key")
-    if not isinstance(key, str) or not KEY_RE.match(key):
+    if not isinstance(key, str) or not KEY_RE.fullmatch(key):
         return None, "key 只能是 1-32 位小写字母、数字、- 或 _"
     if not _nonempty(p.get("name")):
         return None, "名称不能为空"
     if p.get("adapter") not in ADAPTERS:
         return None, "返回格式（adapter）无效"
     base_url = p.get("base_url")
-    if not isinstance(base_url, str) or not URL_RE.match(base_url):
+    if not isinstance(base_url, str) or not URL_RE.fullmatch(base_url):
         return None, "接口地址需以 http(s):// 开头且不含 ? 参数"
     headers = p.get("headers", {})
     if not isinstance(headers, dict) or not all(

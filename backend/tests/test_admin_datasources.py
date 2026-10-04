@@ -70,6 +70,8 @@ def test_create_and_reload():
     ({"lotteries": [{"lottery_code": "6001", "remote_code": "a", "name": "x", "cat": "hash"},
                     {"lottery_code": "6001", "remote_code": "b", "name": "y", "cat": "hash"}]}, "重复"),
     ({"key": "qqtj"}, "已存在"),
+    ({"key": "abc\n"}, "key"),                                   # $ 会放过结尾换行
+    ({"base_url": "https://n.example/api/draw-result\n"}, "接口地址"),
 ])
 def test_create_validation(over, msg):
     _, tc, col = build()
