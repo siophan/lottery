@@ -320,29 +320,39 @@ def _replace_lotteries(conn, source_id: int, lotteries: list[SourceLottery]) -> 
 
 def create_data_source(conn, *, key, name, adapter, base_url, headers, interval_sec,
                        enabled, lotteries) -> DataSource:
-    cur = conn.execute(
-        "INSERT INTO data_sources(key,name,adapter,base_url,headers_json,interval_sec,enabled,created_at)"
-        " VALUES(?,?,?,?,?,?,?,?)",
-        (key, name, adapter, base_url, json.dumps(headers, ensure_ascii=False),
-         interval_sec, int(enabled), int(time.time())),
-    )
-    _replace_lotteries(conn, cur.lastrowid, lotteries)
-    conn.commit()
+    try:
+        cur = conn.execute(
+            "INSERT INTO data_sources(key,name,adapter,base_url,headers_json,interval_sec,enabled,created_at)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (key, name, adapter, base_url, json.dumps(headers, ensure_ascii=False),
+             interval_sec, int(enabled), int(time.time())),
+        )
+        _replace_lotteries(conn, cur.lastrowid, lotteries)
+        conn.commit()
+    except Exception:
+        # 连接被多处共享：中途失败必须回滚，否则半写入状态会被其他写入方的 commit 带出去
+        conn.rollback()
+        raise
     return get_data_source(conn, cur.lastrowid)
 
 def update_data_source(conn, source_id: int, *, key, name, adapter, base_url, headers,
                        interval_sec, enabled, lotteries) -> bool:
-    cur = conn.execute(
-        "UPDATE data_sources SET key=?,name=?,adapter=?,base_url=?,headers_json=?,interval_sec=?,enabled=?"
-        " WHERE id=?",
-        (key, name, adapter, base_url, json.dumps(headers, ensure_ascii=False),
-         interval_sec, int(enabled), source_id),
-    )
-    if cur.rowcount == 0:
+    try:
+        cur = conn.execute(
+            "UPDATE data_sources SET key=?,name=?,adapter=?,base_url=?,headers_json=?,interval_sec=?,enabled=?"
+            " WHERE id=?",
+            (key, name, adapter, base_url, json.dumps(headers, ensure_ascii=False),
+             interval_sec, int(enabled), source_id),
+        )
+        if cur.rowcount == 0:
+            conn.rollback()
+            return False
+        _replace_lotteries(conn, source_id, lotteries)
+        conn.commit()
+    except Exception:
+        # 映射替换中途失败（如 lottery_code 重复）：回滚，保留旧字段与旧映射
         conn.rollback()
-        return False
-    _replace_lotteries(conn, source_id, lotteries)
-    conn.commit()
+        raise
     return True
 
 def set_data_source_enabled(conn, source_id: int, enabled: bool) -> bool:

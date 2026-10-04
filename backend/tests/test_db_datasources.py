@@ -1,3 +1,7 @@
+import sqlite3
+
+import pytest
+
 from app import db
 from app.adapters import Draw
 
@@ -83,3 +87,25 @@ def test_delete_cascades():
     assert conn.execute("SELECT COUNT(*) FROM source_lotteries WHERE source_id=2").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM draws WHERE source_id=2").fetchone()[0] == 0
     assert db.delete_data_source(conn, 2) is False
+
+def test_create_duplicate_lottery_rolls_back():
+    conn = fresh()
+    dup = [db.SourceLottery("6001", "a", "哈希分分彩", "hash"), db.SourceLottery("6001", "b", "哈希分分彩", "hash")]
+    with pytest.raises(sqlite3.IntegrityError):
+        db.create_data_source(conn, key="dup", name="D", adapter="qkltj", base_url="https://d/api",
+                              headers={}, interval_sec=5, enabled=True, lotteries=dup)
+    conn.commit()                         # 模拟其他写入方随后提交：不应带出半写入的数据源行
+    assert db.get_data_source_by_key(conn, "dup") is None
+    assert [s.id for s in db.list_data_sources(conn)] == [1, 2]
+
+def test_update_duplicate_lottery_rolls_back():
+    conn = fresh()
+    before = [(l.lottery_code, l.remote_code) for l in db.get_data_source(conn, 2).lotteries]
+    dup = [db.SourceLottery("6001", "a", "哈希分分彩", "hash"), db.SourceLottery("6001", "b", "哈希分分彩", "hash")]
+    with pytest.raises(sqlite3.IntegrityError):
+        db.update_data_source(conn, 2, key="qqtj", name="改名", adapter="qqtj", base_url="https://y/api",
+                              headers={}, interval_sec=9, enabled=True, lotteries=dup)
+    conn.commit()                         # 模拟其他写入方随后提交：旧映射与旧字段都应保持不变
+    s = db.get_data_source(conn, 2)
+    assert [(l.lottery_code, l.remote_code) for l in s.lotteries] == before
+    assert s.name == "全球统计" and s.interval_sec == 5
