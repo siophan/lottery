@@ -227,3 +227,9 @@ test('needsReselect：仍在列表中 / 本地源 / 后端默认源 / 列表为�
   assert.strictEqual(ds.needsReselect([], '6001', kept.requestUrl), false);
   assert.strictEqual(ds.needsReselect(undefined, '6001', kept.requestUrl), false);
 });
+
+test('needsReselect：codeId 为数字时按字符串比较（与 optKey 一致）', () => {
+  const kept = ds.toOption(ITEM, API);                 // value 为字符串 '6001'
+  assert.strictEqual(ds.needsReselect([kept], 6001, kept.requestUrl), false);
+  assert.strictEqual(ds.needsReselect([kept], 6002, kept.requestUrl), true);
+});

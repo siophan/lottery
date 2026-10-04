@@ -442,7 +442,6 @@ function topRowsSource(raw) {
 
 test('app chunk: topRows 仅在 requestUrl 分支套用 normalizeDraws，且已打补丁', () => {
   const raw = fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8');
-  assert.ok(raw.includes(APP_MARK));
   const src = topRowsSource(raw);
   assert.ok(src.includes(APP_MARK));
   assert.ok(src.includes('window.dsSources.normalizeDraws(res, params.code)'));
@@ -520,12 +519,10 @@ function requestHarness(token = 'TOK') {
   return { ic, alerts, sent, send };
 }
 
-test('app chunk: request 模块已打 auth 补丁，幂等，源码语法有效', () => {
-  const raw = fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8');
-  const src = appModuleSource(raw, REQ_LOCATOR);
+test('app chunk: request 模块含 auth 补丁，源码语法有效（幂等见「app chunk: 补丁幂等」）', () => {
+  const src = appModuleSource(fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8'), REQ_LOCATOR);
   assert.ok(src.includes(AUTH_MARK));
   new vm.Script(src);
-  assert.strictEqual(patchApp(raw), raw);
 });
 
 test('app chunk: 自家接口（apiURL 前缀 / 相对地址）带 token 与 fromId', () => {
