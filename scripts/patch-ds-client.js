@@ -159,6 +159,30 @@ const TREND_REPLACEMENTS = [
   },
 ];
 
+// reselect 切走时同 switchCode 一样关闭子窗口：走势/遗漏/K线窗口打开时绑定了旧 requestUrl，
+// 主进程按 id 复用窗口只 show()，不关会一直停在已停用的源上。首次自动选择不关。
+// 子窗口 id 与各 chunk 自己的 switchCode 一致：哈希、11选5 用 typeId，运动会用 pageId
+const CLOSE_MARK = '/* ds-patch close v1 */';
+const CLOSE_CHILD_ID = {
+  'chunk-b7e0f68a.59391aa2.js': 'typeId',
+  'chunk-50732e0a.702f76ce.js': 'typeId',
+  'chunk-60235acf.b3ce76aa.js': 'pageId',
+};
+const SWITCH_BODY = '          const o = this.options[0];\n          this.codeId = o.value;\n          this.codeName = o.label;\n' +
+  "          this.requestUrl = o.requestUrl;\n          this.num = '';\n          this.showOpenNum();\n";
+function closeReplacements(name) {
+  if (!(name in CLOSE_CHILD_ID)) throw new Error(`未知 chunk：${name}（close 层需要按文件名确定子窗口 id）`);
+  return [{
+    find: `        if ((first && hadNone && items.length > 0) || ` +
+      `(!first && ${DS}.needsReselect(this.options, this.codeId, this.requestUrl))) {\n` + SWITCH_BODY + '        }',
+    repl: `        ${CLOSE_MARK}\n        const dsPick = first && hadNone && items.length > 0;\n` +
+      `        if (dsPick || (!first && ${DS}.needsReselect(this.options, this.codeId, this.requestUrl))) {\n` + SWITCH_BODY +
+      `          if (!dsPick) {\n            ipcRenderer.send('closeChildWindow', {\n              id: this.${CLOSE_CHILD_ID[name]}\n` +
+      '            });\n          }\n        }',
+    count: 1,
+  }];
+}
+
 // 工作台 chunk 的补丁层（顺序即叠加顺序）。replacements 可以是按 chunk 文件名生成锚点的函数
 const CHUNK_LAYERS = [
   { mark: MARK, replacements: REPLACEMENTS },
@@ -166,6 +190,7 @@ const CHUNK_LAYERS = [
   { mark: RESELECT_MARK, replacements: RESELECT_REPLACEMENTS },
   { mark: RACE_MARK, replacements: raceReplacements },
   { mark: TREND_MARK, replacements: TREND_REPLACEMENTS },
+  { mark: CLOSE_MARK, replacements: closeReplacements },
 ];
 
 // 走势页 chunk（src/views/trend/trend.vue）：给外部走势 iframe 的 window.topRows 在「非 dm / 非 code_id」分支里
@@ -282,7 +307,7 @@ function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CHUNK_LAYERS, APP_LAYERS,
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS };
 
 if (require.main === module) {

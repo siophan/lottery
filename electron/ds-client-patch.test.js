@@ -49,6 +49,8 @@ function loadComponent(src, { modules = {}, window = {}, globals = {} } = {}) {
 }
 const pageSource = (name) => evalSources(fs.readFileSync(path.join(DIR, name), 'utf8')).find((s) => s.includes('switchCode(index) {'));
 const tick = () => new Promise((r) => setImmediate(r));
+// vm 里创建的对象/数组原型属于另一个 realm，比较前转成本 realm 的普通 JSON 值
+const plain = (x) => JSON.parse(JSON.stringify(x));
 const API_URL = 'https://lottery.jh8.ai/api';
 const SRV = (key) => `${API_URL}/ds/${key}/draw-result`;
 
@@ -95,20 +97,28 @@ test('锚点不匹配时报错，而不是静默跳过', () => {
 
 // ---- keep v1：服务端列表拉取失败（null）时保留现有下拉项与选中项 ----
 function dsLoadHarness(name, fetchResult) {
+  const sent = [];
+  const h = { result: fetchResult };
   const comp = loadComponent(pageSource(name), {
     modules: { f121: { apiURL: API_URL } },
-    window: { dsSources: Object.assign({}, dsSources, { fetchServer: async () => fetchResult }) },
+    window: {
+      dsSources: Object.assign({}, dsSources, { fetchServer: async () => h.result }),
+      electron: { ipcRenderer: { send: (...a) => sent.push(a), on() {} } },
+    },
     globals: { localStorage: { getItem: () => 'TOK' }, setInterval: () => 0, clearInterval() {} },
   });
   const local = { value: '9', label: '我的源', requestUrl: 'https://x.example/api' };
   const server = dsSources.toOption({ source: 'qqtj', sourceName: '全球统计', code: '6001', name: '哈希分分彩', status: 'ok' }, API_URL);
   const vmThis = {
     options: [server, local], codeId: server.value, codeName: server.label, requestUrl: server.requestUrl, catId: 'hash',
-    num: { expect: '1' }, opened: 0,
+    typeId: 'TYPE', pageId: 'PAGE', num: { expect: '1' }, opened: 0,
     showOpenNum() { this.opened++; },
   };
-  return { comp, vmThis, server, local };
+  return Object.assign(h, { comp, vmThis, server, local, sent });
 }
+// 关闭子窗口（走势/遗漏/K线）时用的 id：运动会按 pageId，其余按 typeId（与各自 switchCode 一致）
+const CHILD_ID = { 'chunk-b7e0f68a.59391aa2.js': 'TYPE', 'chunk-50732e0a.702f76ce.js': 'TYPE', 'chunk-60235acf.b3ce76aa.js': 'PAGE' };
+const closes = (sent) => sent.filter((a) => a[0] === 'closeChildWindow').map((a) => plain(a[1]));
 
 for (const name of CHUNKS) {
   test(`${name}: dsLoad 在 fetchServer 失败（null）时保留下拉项与选中项`, async () => {
@@ -168,6 +178,29 @@ for (const name of CHUNKS) {
     await h.comp.methods.dsLoad.call(h.vmThis, false);
     assert.strictEqual(h.vmThis.requestUrl, h.local.requestUrl);
     assert.strictEqual(h.vmThis.opened, 0);
+  });
+}
+
+// ---- close v1：reselect 切走时关闭绑定旧源的子窗口（首次自动选择不关）----
+for (const name of CHUNKS) {
+  test(`${name}: reselect 切走时发送 closeChildWindow（id 与 switchCode 一致）`, async () => {
+    const h = dsLoadHarness(name, [ITEM2]);
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.strictEqual(h.vmThis.requestUrl, dsSources.toOption(ITEM2, API_URL).requestUrl);
+    assert.deepStrictEqual(closes(h.sent), [{ id: CHILD_ID[name] }]);
+  });
+
+  test(`${name}: 首次加载自动选择 / 无需切换时不发送 closeChildWindow`, async () => {
+    let h = dsLoadHarness(name, [ITEM2]);
+    Object.assign(h.vmThis, { options: [], codeId: null, codeName: '', requestUrl: null });
+    await h.comp.methods.dsLoad.call(h.vmThis, true);
+    assert.strictEqual(h.vmThis.requestUrl, dsSources.toOption(ITEM2, API_URL).requestUrl);
+    assert.strictEqual(h.vmThis.opened, 1);
+    assert.deepStrictEqual(closes(h.sent), []);
+    h = dsLoadHarness(name, [ITEM2, { ...ITEM2, source: 'qqtj', sourceName: '全球统计' }]);
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.strictEqual(h.vmThis.opened, 0);
+    assert.deepStrictEqual(closes(h.sent), []);
   });
 }
 
@@ -246,8 +279,6 @@ test('trend chunk: 锚点不匹配时报错', () => {
   assert.throws(() => patchTrend('nothing'), /topRows\(res, callback\)/);
 });
 
-// vm 里创建的对象/数组原型属于另一个 realm，比较前转成本 realm 的普通 JSON 值
-const plain = (x) => JSON.parse(JSON.stringify(x));
 function trendHarness(data, reply) {
   const calls = [];
   const softNum = { t: (p) => { calls.push(p); return Promise.resolve(reply); } };
