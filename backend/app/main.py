@@ -24,7 +24,10 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         if app.state.settings.collector_enabled:
-            await app.state.collector.start()
+            try:
+                await app.state.collector.start()
+            except Exception as e:      # 采集起不来（如库里 headers_json 损坏）只记日志，代理照常启动
+                print(f"collector start failed: {e!r}")
         try:
             yield
         finally:

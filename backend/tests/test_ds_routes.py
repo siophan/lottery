@@ -104,3 +104,18 @@ def test_lifespan_respects_collector_disabled():
     with TestClient(app):
         pass
     assert col.events == ["stop"]
+
+def test_lifespan_survives_collector_start_error():
+    class BrokenCollector(FakeCollector):
+        async def start(self):
+            self.events.append("start")
+            raise ValueError("headers_json 损坏")
+    conn = db.connect(":memory:"); db.init_db(conn)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    col = BrokenCollector()
+    app = create_app(Settings(), client=client, conn=conn,
+                     dayys=DataYsSession(client, "S", "p", "d", "1004"), collector=col)
+    tok = db.create_session(conn, db.create_user(conn, "U1", "pw", None).id, 3600)
+    with TestClient(app) as tc:                      # 采集起不来也不能拖垮代理
+        assert tc.get("/api/ds/sources?cat=hash", headers={"token": tok}).json()["code"] == 0
+    assert col.events == ["start", "stop"]
