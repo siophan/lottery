@@ -6,7 +6,9 @@ from .. import admin_auth
 
 router = APIRouter()
 
-_ADMIN_HTML = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "admin.html")
+_ADMIN_INDEX = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "static", "admin-dist", "index.html"
+)
 
 def _check(request: Request):
     return admin_auth.cookie_or_key_ok(request)
@@ -16,7 +18,8 @@ def _forbidden():
 
 @router.get("/")
 async def admin_index():
-    return FileResponse(_ADMIN_HTML)
+    # Ant Design Pro（Vite 构建）单页应用入口；静态资源由 main.py 挂在 /admin/assets。
+    return FileResponse(_ADMIN_INDEX)
 
 @router.post("/users")
 async def create_user(request: Request, payload: dict = Body(...)):
