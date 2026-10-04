@@ -50,3 +50,24 @@ test('fetchServer：业务错误或网络失败返回空数组', async () => {
   assert.deepStrictEqual(await ds.fetchServer(API, 'hash', 'T', async () => ({ json: async () => ({ code: 10020 }) })), []);
   assert.deepStrictEqual(await ds.fetchServer(API, 'hash', 'T', async () => { throw new Error('offline'); }), []);
 });
+
+test('Electron nodeIntegration 环境（module 和 window 共存）', () => {
+  const fs = require('fs');
+  const vm = require('vm');
+  const code = fs.readFileSync(__dirname + '/../client/ds-sources.js', 'utf8');
+
+  // 模拟 Electron nodeIntegration:true, contextIsolation:false 的环境
+  // 同时有 module（Node.js）和 window（浏览器）全局对象
+  const sandbox = {
+    module: { exports: {} },
+    window: {}
+  };
+
+  vm.runInNewContext(code, sandbox);
+
+  // 验证两边都被设置了
+  assert(typeof sandbox.module.exports.merge === 'function', 'module.exports 应该有 merge 函数');
+  assert(typeof sandbox.window.dsSources.merge === 'function', 'window.dsSources 应该有 merge 函数');
+  // 验证它们是同一个对象
+  assert.strictEqual(sandbox.module.exports, sandbox.window.dsSources, 'module.exports 和 window.dsSources 应该是同一对象');
+});

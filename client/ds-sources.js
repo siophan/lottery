@@ -2,8 +2,9 @@
 // 浏览器里挂到 window.dsSources（由 index.html 先于业务脚本加载），Node 测试里 require。
 (function (root, factory) {
   var api = factory();
+  // Electron nodeIntegration 同时暴露 module 和 window，必须两边都赋值
   if (typeof module === 'object' && module.exports) module.exports = api;
-  else root.dsSources = api;
+  if (typeof window !== 'undefined') window.dsSources = api;
 })(typeof window !== 'undefined' ? window : this, function () {
   var COLORS = { ok: '#19be6b', error: '#ed4014' };
   var UNKNOWN = '#c5c8ce';
