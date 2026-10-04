@@ -255,6 +255,31 @@ for (const name of CHUNKS) {
   });
 }
 
+// ---- autopick-once v1：首次成功拉取（无论是否选中）即用掉自动选择机会；失败（null）不算 ----
+for (const name of CHUNKS) {
+  test(`${name}: 首次成功拉取为空列表 → 之后有了服务端源也不自动选`, async () => {
+    const h = emptyHarness(name, []);
+    await h.comp.methods.dsLoad.call(h.vmThis, true);
+    h.result = [ITEM2];
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.strictEqual(h.vmThis.requestUrl, null);
+    assert.strictEqual(h.vmThis.opened, 0);
+    assert.deepStrictEqual(closes(h.sent), []);
+  });
+
+  test(`${name}: 首次成功拉取时有本地源 → 之后本地源没了、停在内置源上也不自动选`, async () => {
+    const h = emptyHarness(name, [ITEM2]);
+    h.vmThis.options = [h.local];
+    await h.comp.methods.dsLoad.call(h.vmThis, true);
+    assert.strictEqual(h.vmThis.opened, 0);
+    h.vmThis.options = h.vmThis.options.filter((o) => o.server);   // 用户删掉了全部本地源
+    Object.assign(h.vmThis, { codeId: '6003', requestUrl: null });
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.strictEqual(h.vmThis.requestUrl, null);
+    assert.strictEqual(h.vmThis.opened, 0);
+  });
+}
+
 // ---- race v1：showOpenNum 的响应回来时若已切换数据源，丢弃旧响应 ----
 function openNumHarness(name) {
   const pending = [];

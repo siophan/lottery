@@ -202,6 +202,18 @@ const AUTOPICK_REPLACEMENTS = [
   },
 ];
 
+// 自动选择机会由「首次成功拉取」用掉（无论这次是否选中）；拉取失败（null）在 keep v1 处已提前 return，不算。
+// 否则首次成功时没选（有本地源 / 服务端列表为空），之后某次轮询会把停在内置源上的用户突然切走
+const AUTOPICK_ONCE_MARK = '/* ds-patch autopick-once v1 */';
+const AUTOPICK_ONCE_REPLACEMENTS = [
+  {
+    find: '        const dsPick = !this.dsAutoPicked && hadNone && this.requestUrl == null && items.length > 0;',
+    repl: '        const dsPick = !this.dsAutoPicked && hadNone && this.requestUrl == null && items.length > 0;\n' +
+      `        ${AUTOPICK_ONCE_MARK}\n        this.dsAutoPicked = true;`,
+    count: 1,
+  },
+];
+
 // 运动会 showOpenNum 的尾数分支（qitwId 非空，走 mantissaTopRows）同样丢弃切换彩种后的旧响应。
 // 只有运动会 chunk 有这个分支（only），后端接口不看 requestUrl，所以只比对 codeId
 const RACE_MANTISSA_MARK = '/* ds-patch race-mantissa v1 */';
@@ -226,6 +238,7 @@ const CHUNK_LAYERS = [
   { mark: CLOSE_MARK, replacements: closeReplacements },
   { mark: AUTOPICK_MARK, replacements: AUTOPICK_REPLACEMENTS },
   { mark: RACE_MANTISSA_MARK, replacements: RACE_MANTISSA_REPLACEMENTS, only: ['chunk-60235acf.b3ce76aa.js'] },
+  { mark: AUTOPICK_ONCE_MARK, replacements: AUTOPICK_ONCE_REPLACEMENTS },
 ];
 
 // 走势页 chunk（src/views/trend/trend.vue）：给外部走势 iframe 的 window.topRows 在「非 dm / 非 code_id」分支里
@@ -355,7 +368,7 @@ function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, CHUNK_LAYERS, APP_LAYERS,
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS };
 
 if (require.main === module) {
