@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK } = require('../scripts/patch-ds-client.js');
+const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS } = require('../scripts/patch-ds-client.js');
 const dsSources = require('../client/ds-sources.js');
 
 const DIR = path.join(__dirname, '..', 'client', 'js');
@@ -208,6 +208,102 @@ for (const name of CHUNKS) {
     assert.strictEqual(vmThis.numArr.join(','), '1,2,3,4,5');   // numArr 由 vm 内的 split 产生，跨 realm 不能 deepStrictEqual
   });
 }
+
+// ---- trend v1：走势图带上当前数据源（工作台 openTrend 传 requestUrl，走势页 topRows 按它取数）----
+for (const name of CHUNKS) {
+  test(`${name}: openTrend 打开的走势页参数带 requestUrl`, () => {
+    const comp = loadComponent(pageSource(name), { modules: { f121: { apiURL: API_URL } } });
+    for (const [id, type] of [['zs1', undefined], ['zs1', 'dm1'], ['dmzs', 'dm2']]) {
+      const routes = [];
+      const vmThis = {
+        typeId: 'hash5', pageId: 'p', qitwId: null, codeId: 'trxbhffc', catId: 'hash', requestUrl: SRV('qqtj'),
+        $router: { resolve: (r) => { routes.push(r); return { href: '#/trend/trend' }; } },
+      };
+      comp.methods.openTrend.call(vmThis, id, type);
+      assert.strictEqual(routes.length, 1);
+      assert.strictEqual(routes[0].path, '/trend/trend');
+      const data = JSON.parse(routes[0].query.data);
+      assert.strictEqual(data.requestUrl, SRV('qqtj'), `${id}/${type}`);
+      assert.strictEqual(data.code, 'trxbhffc');
+    }
+  });
+}
+
+const TREND = path.join(DIR, TREND_CHUNK);
+const trendSource = () => evalSources(fs.readFileSync(TREND, 'utf8')).find((s) => s.includes('topRows(res, callback) {'));
+
+test('trend chunk: 已打补丁且再次运行不变（幂等），全部模块源码语法有效', () => {
+  const raw = fs.readFileSync(TREND, 'utf8');
+  for (const l of TREND_LAYERS) assert.ok(raw.includes(l.mark), `缺少补丁层 ${l.mark}`);
+  assert.strictEqual(patchTrend(raw), raw);
+  const srcs = evalSources(raw);
+  assert.ok(srcs.length > 3);
+  for (const s of srcs) new vm.Script(s);
+});
+
+test('trend chunk: 锚点不匹配时报错', () => {
+  assert.throws(() => patchTrend("eval('topRows(res, callback) {')"), /命中 0 次/);
+  assert.throws(() => patchTrend('nothing'), /topRows\(res, callback\)/);
+});
+
+// vm 里创建的对象/数组原型属于另一个 realm，比较前转成本 realm 的普通 JSON 值
+const plain = (x) => JSON.parse(JSON.stringify(x));
+function trendHarness(data, reply) {
+  const calls = [];
+  const softNum = { t: (p) => { calls.push(p); return Promise.resolve(reply); } };
+  const comp = loadComponent(trendSource(), { modules: { b456: softNum, f121: {} } });
+  const got = [];
+  const vmThis = {
+    data, code_id: null, topid: 't', htmlCallback: '',
+    $store: { getters: { num_101: JSON.stringify([{ expect: 's1', opennumber: '9,9,9' }, { expect: 's2' }]) } },
+  };
+  const run = (res) => comp.methods.topRows.call(vmThis, res, (arr) => got.push(arr));
+  return { calls, got, run };
+}
+const ROWS = () => ({ code: 0, data: [{ expect: '1', opennumber: '1,2,3,4,5' }, { expect: '2', opennumber: '6,7,8,9,0' }] });
+
+test('trend: 选了数据源（requestUrl）时按该源取数；哈希只保留前 3 位且不改原对象', async () => {
+  const reply = ROWS();
+  const { calls, got, run } = trendHarness({ cat: 'hash', requestUrl: SRV('qqtj') }, reply);
+  run({ code: 'trxbhffc', rows: 30 });
+  await tick();
+  assert.deepStrictEqual(plain(calls), [{ code: 'trxbhffc', rows: 30, requestUrl: SRV('qqtj') }]);
+  assert.strictEqual(got.length, 1);
+  assert.deepStrictEqual(plain(got[0].map((x) => x.opennumber)), ['1,2,3', '6,7,8']);
+  assert.strictEqual(reply.data[0].opennumber, '1,2,3,4,5');
+  assert.strictEqual(got[0][0].expect, '1');
+});
+
+test('trend: 6001 也走所选数据源；非哈希原样回传；失败不回调', async () => {
+  let h = trendHarness({ cat: 'hash', requestUrl: SRV('qkltj') }, ROWS());
+  h.run({ code: 6001, rows: 2 });
+  await tick();
+  assert.strictEqual(h.calls[0].requestUrl, SRV('qkltj'));
+  assert.deepStrictEqual(plain(h.got[0].map((x) => x.opennumber)), ['1,2,3', '6,7,8']);
+  const reply = ROWS();
+  h = trendHarness({ cat: '1105', requestUrl: 'https://x.example/api' }, reply);
+  h.run({ code: 'c1', rows: 2 });
+  await tick();
+  assert.deepStrictEqual(plain(h.got[0].map((x) => x.opennumber)), ['1,2,3,4,5', '6,7,8,9,0']);
+  h = trendHarness({ cat: 'hash', requestUrl: SRV('qqtj') }, { code: 10020, msg: 'x' });
+  h.run({ code: 'trxbhffc', rows: 2 });
+  await tick();
+  assert.strictEqual(h.got.length, 0);
+});
+
+test('trend: 没有 requestUrl 时保持原逻辑（600x 走后端、其他走 store）', async () => {
+  let h = trendHarness({ cat: 'hash', requestUrl: null }, ROWS());
+  h.run({ code: 6002, rows: 2 });
+  await tick();
+  assert.deepStrictEqual(plain(h.calls), [{ code: 6002, rows: 2 }]);
+  assert.deepStrictEqual(plain(h.got[0].map((x) => x.opennumber)), ['1,2,3', '6,7,8']);
+  h = trendHarness({ cat: 'hash' }, ROWS());
+  h.run({ code: 101, rows: 1 });
+  await tick();
+  assert.strictEqual(h.calls.length, 0);
+  assert.strictEqual(h.got[0].length, 1);
+  assert.strictEqual(h.got[0][0].expect, 's1');
+});
 
 // ---- app 入口 chunk：topRows 的第三方请求分支归一化返回体 ----
 // app.9ba1133b.js 是 webpack 入口 chunk，evalSources 不适用；直接用正则抠出 topRows 模块的 eval('...') 字面量求值

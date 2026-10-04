@@ -147,13 +147,60 @@ function raceReplacements(name) {
   }];
 }
 
+// 走势图：openTrend 把当前数据源 requestUrl 一并传给走势页（trendData 对象字面量每个 chunk 仅 1 处）
+const TREND_MARK = '/* ds-patch trend v1 */';
+const TREND_REPLACEMENTS = [
+  {
+    find: 'let trendData = {\n        play_id: this.typeId,\n        code: this.codeId,\n        chart_id: id,\n' +
+      '        pid: pid,\n        cat: this.catId\n      };',
+    repl: 'let trendData = {\n        play_id: this.typeId,\n        code: this.codeId,\n        chart_id: id,\n' +
+      `        pid: pid,\n        cat: this.catId,\n        ${TREND_MARK}\n        requestUrl: this.requestUrl\n      };`,
+    count: 1,
+  },
+];
+
 // 工作台 chunk 的补丁层（顺序即叠加顺序）。replacements 可以是按 chunk 文件名生成锚点的函数
 const CHUNK_LAYERS = [
   { mark: MARK, replacements: REPLACEMENTS },
   { mark: KEEP_MARK, replacements: KEEP_REPLACEMENTS },
   { mark: RESELECT_MARK, replacements: RESELECT_REPLACEMENTS },
   { mark: RACE_MARK, replacements: raceReplacements },
+  { mark: TREND_MARK, replacements: TREND_REPLACEMENTS },
 ];
+
+// 走势页 chunk（src/views/trend/trend.vue）：给外部走势 iframe 的 window.topRows 在「非 dm / 非 code_id」分支里
+// 优先按工作台传来的 requestUrl 取数（app chunk 的 topRows 已归一化第三方字段）；哈希只保留前 3 位（同 600x 分支）。
+// 没有 requestUrl 时落回原逻辑（600x 走后端，其余读 store；自定义彩种无 store 项会抛错，有了 requestUrl 就不再走到那里）
+const TREND_CHUNK = 'chunk-525406bb.807b7b4e.js';
+const TREND_SRC_FIND = '      } else {\n        if (res.code == 6001 || res.code == 6002 || res.code == 6003) {\n' +
+  '          Object(softNum["t" /* topRows */])({\n            code: res.code,\n            rows: res.rows\n          }).then(res => {';
+const TREND_SRC_REPLACEMENTS = [
+  {
+    find: TREND_SRC_FIND,
+    repl: [
+      `      } else {`,
+      `        ${TREND_MARK}`,
+      `        if (this.data.requestUrl) {`,
+      `          const dsHash = this.data.cat == "hash";`,
+      `          Object(softNum["t" /* topRows */])({`,
+      `            code: res.code,`,
+      `            rows: res.rows,`,
+      `            requestUrl: this.data.requestUrl`,
+      `          }).then(res2 => {`,
+      `            if (res2 && res2.code == 0 && Array.isArray(res2.data) && res2.data.length > 0) {`,
+      `              this.htmlCallback(res2.data.map(item => {`,
+      `                if (!dsHash || !item || typeof item.opennumber != "string") return item;`,
+      `                return Object.assign({}, item, { opennumber: item.opennumber.split(",").slice(0, 3).join(",") });`,
+      `              }));`,
+      `            }`,
+      `          });`,
+      `          return;`,
+      `        }`,
+    ].join('\n') + TREND_SRC_FIND.slice('      } else {'.length),
+    count: 1,
+  },
+];
+const TREND_LAYERS = [{ mark: TREND_MARK, replacements: TREND_SRC_REPLACEMENTS }];
 
 const APP_LAYERS = [
   { locator: 'function topRows(params)', layers: [{ mark: APP_MARK, replacements: APP_REPLACEMENTS }] },
@@ -188,12 +235,17 @@ function patchApp(raw) {
   return out;
 }
 
+function patchTrend(raw) {
+  return applyLayers(raw, 'topRows(res, callback) {', TREND_LAYERS);
+}
+
 // name：chunk 文件名（CHUNKS 之一），部分层的锚点因 chunk 而异
 function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, CHUNK_LAYERS, APP_LAYERS };
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, CHUNK_LAYERS, APP_LAYERS,
+  patchTrend, TREND_CHUNK, TREND_LAYERS };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');
@@ -207,6 +259,15 @@ if (require.main === module) {
       fs.writeFileSync(file, out);
       console.log(`patched ${name}`);
     }
+  }
+  const trendFile = path.join(dir, TREND_CHUNK);
+  const trendRaw = fs.readFileSync(trendFile, 'utf8');
+  const trendOut = patchTrend(trendRaw);
+  if (trendOut === trendRaw) {
+    console.log(`skip    ${TREND_CHUNK}（已打过补丁）`);
+  } else {
+    fs.writeFileSync(trendFile, trendOut);
+    console.log(`patched ${TREND_CHUNK}`);
   }
   const appFile = path.join(dir, APP_CHUNK);
   const appRaw = fs.readFileSync(appFile, 'utf8');
