@@ -113,10 +113,11 @@ var k_util = function() {
 		requestA : function(url, successRes) {
 			var ption="";
 			$.ajax({
-				headers: {
+				// 服务端下发的数据源接口需要 token，第三方地址返回 {}
+				headers: $.extend({
 					"Content-Type": "application/json",
 					"Access-Control-Allow-Origin": "*"
-				},
+				}, window.dsSources ? window.dsSources.serverHeaders(url) : {}),
 				timeout : 1000 * 30,
 				cache : false,
 				type : "GET",
@@ -126,7 +127,12 @@ var k_util = function() {
 				success : function(response) {
 					// 第三方源（requestUrl）字段名各异，按 url 里的 code 归一化成 expect/opennumber/openTime/lottoId
 					var codeM = /[?&]code=([^&]*)/.exec(url || "");
-					response = window.dsSources ? window.dsSources.normalizeDraws(response, codeM ? decodeURIComponent(codeM[1]) : null) : response;
+					var codeV = null;
+					if (codeM) {
+						// code 里有非法 % 序列时 decodeURIComponent 会抛错，回退成原始字符串
+						try { codeV = decodeURIComponent(codeM[1]); } catch (e) { codeV = codeM[1]; }
+					}
+					response = window.dsSources ? window.dsSources.normalizeDraws(response, codeV) : response;
 					if (response && response.result == -1) {
 						clearInterval(isLoginObj);
 						if (setIntervalArray) { //主页面获取最新开奖号的定时方法对象，要是没用就不用管

@@ -72,6 +72,21 @@
     return out;
   }
 
+  // 静态页（遗漏查询 / K线）直接 $.ajax 请求 requestUrl，需要自己带 token。
+  // 只对自家数据源接口 /api/ds/<key>/draw-result 返回 token，绝不发给第三方域名
+  var SERVER_RE = /\/api\/ds\/[^\/?#]+\/draw-result$/;
+  function serverHeaders(url) {
+    // 只匹配 path 部分（去掉 query/hash），避免第三方地址把该路径塞进 query 骗取 token
+    if (typeof url !== 'string' || !SERVER_RE.test(url.split(/[?#]/)[0])) return {};
+    try {
+      var token = typeof localStorage !== 'undefined' && localStorage ? localStorage.getItem('token') : null;
+      return token ? { token: token } : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
   return { optKey: optKey, toOption: toOption, persistable: persistable, merge: merge,
-           dotColor: dotColor, fetchServer: fetchServer, normalizeDraws: normalizeDraws };
+           dotColor: dotColor, fetchServer: fetchServer, normalizeDraws: normalizeDraws,
+           serverHeaders: serverHeaders };
 });

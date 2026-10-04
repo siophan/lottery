@@ -115,3 +115,65 @@ test('normalizeDraws：幂等，且不修改入参', () => {
   assert.notStrictEqual(once.data[0], input.data[0]);
   assert.deepStrictEqual(ds.normalizeDraws(once, 'c1'), once);
 });
+
+// ---- serverHeaders：只对自家 /api/ds/<key>/draw-result 带 token ----
+function withLocalStorage(stub, fn) {
+  const had = Object.prototype.hasOwnProperty.call(globalThis, 'localStorage');
+  const old = globalThis.localStorage;
+  if (stub === undefined) delete globalThis.localStorage;
+  else Object.defineProperty(globalThis, 'localStorage', { value: stub, configurable: true, writable: true });
+  try { return fn(); } finally {
+    if (had) Object.defineProperty(globalThis, 'localStorage', { value: old, configurable: true, writable: true });
+    else delete globalThis.localStorage;
+  }
+}
+const lsWith = (tok) => ({ getItem: (k) => (k === 'token' ? tok : null) });
+
+test('serverHeaders：服务端 draw-result 地址（含 query）带 token', () => {
+  withLocalStorage(lsWith('T123'), () => {
+    assert.deepStrictEqual(ds.serverHeaders(API + '/ds/qqtj/draw-result?code=6001&rows=50'), { token: 'T123' });
+    assert.deepStrictEqual(ds.serverHeaders(API + '/ds/qkltj/draw-result'), { token: 'T123' });
+  });
+});
+
+test('serverHeaders：第三方地址不带 token', () => {
+  withLocalStorage(lsWith('T123'), () => {
+    assert.deepStrictEqual(ds.serverHeaders('https://evil.example.com/qqtj/draw-result?code=1'), {});
+    assert.deepStrictEqual(ds.serverHeaders('https://soft-api.bajiaoxing-tech.com/api/lotteryNumber/topRows'), {});
+    assert.deepStrictEqual(ds.serverHeaders('https://evil.com/?u=/api/ds/x/draw-result'), {});
+    assert.deepStrictEqual(ds.serverHeaders(''), {});
+    assert.deepStrictEqual(ds.serverHeaders(undefined), {});
+  });
+});
+
+test('serverHeaders：无 localStorage / 无 token / getItem 抛错 时返回 {}', () => {
+  const url = API + '/ds/qqtj/draw-result?code=1';
+  withLocalStorage(undefined, () => assert.deepStrictEqual(ds.serverHeaders(url), {}));
+  withLocalStorage(lsWith(null), () => assert.deepStrictEqual(ds.serverHeaders(url), {}));
+  withLocalStorage(lsWith(''), () => assert.deepStrictEqual(ds.serverHeaders(url), {}));
+  withLocalStorage({ getItem: () => { throw new Error('denied'); } }, () => assert.deepStrictEqual(ds.serverHeaders(url), {}));
+});
+
+test('serverHeaders：withLocalStorage 还原全局状态', () => {
+  const before = Object.prototype.hasOwnProperty.call(globalThis, 'localStorage');
+  withLocalStorage(lsWith('x'), () => {});
+  withLocalStorage(undefined, () => {});
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(globalThis, 'localStorage'), before);
+});
+
+// ---- 静态页（omit / kline）的 requestUrl ajax 必须合并 serverHeaders ----
+test('ylcx.js / k_Util.js 的 requestUrl ajax 调用了 serverHeaders(', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const ylcx = fs.readFileSync(path.join(__dirname, '../client/omit/js/ylcx.js'), 'utf8');
+  const kutil = fs.readFileSync(path.join(__dirname, '../client/kline/js/k_Util.js'), 'utf8');
+  assert.match(ylcx, /dsSources\.serverHeaders\(\s*requestUrl/);
+  assert.match(kutil, /dsSources\.serverHeaders\(\s*url\s*\)/);
+});
+
+test('k_Util.js：decodeURIComponent 有 try/catch 兜底', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const kutil = fs.readFileSync(path.join(__dirname, '../client/kline/js/k_Util.js'), 'utf8');
+  assert.match(kutil, /try\s*\{[^}]*decodeURIComponent\(codeM\[1\]\)[^}]*\}\s*catch/);
+});

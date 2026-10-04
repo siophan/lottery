@@ -70,10 +70,11 @@ var ylcx = function() {
 				}else{
 		
 					$.ajax({
-						headers: {
+						headers: $.extend({
 							"Content-Type": "application/json",
 							"Access-Control-Allow-Origin": "*"
-						},
+						// 服务端下发的数据源接口需要 token，第三方地址返回 {}
+						}, window.dsSources ? window.dsSources.serverHeaders(requestUrl) : {}),
 						timeout: 1000 * 30,
 						type: "GET",
 						dataType: "json",
