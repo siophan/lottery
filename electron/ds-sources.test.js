@@ -138,12 +138,12 @@ test('normalizeDraws：幂等，且不修改入参', () => {
 
 // ---- serverHeaders：只对自家 /api/ds/<key>/draw-result 带 token ----
 function withLocalStorage(stub, fn) {
-  const had = Object.prototype.hasOwnProperty.call(globalThis, 'localStorage');
-  const old = globalThis.localStorage;
+  // 按属性描述符保存/还原：Node 22+ 的全局 localStorage 是 getter，直接读取会打出 ExperimentalWarning
+  const desc = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   if (stub === undefined) delete globalThis.localStorage;
   else Object.defineProperty(globalThis, 'localStorage', { value: stub, configurable: true, writable: true });
   try { return fn(); } finally {
-    if (had) Object.defineProperty(globalThis, 'localStorage', { value: old, configurable: true, writable: true });
+    if (desc) Object.defineProperty(globalThis, 'localStorage', desc);
     else delete globalThis.localStorage;
   }
 }
