@@ -119,3 +119,69 @@ def test_start_reload_stop():
     asyncio.run(run())
     assert hosts == {"api.qkltj.com", "qqtj666.com"}
     assert db.get_data_source(conn, 1).status == "ok"
+
+
+def test_run_survives_config_read_error(monkeypatch):
+    reqs = []
+    def handler(req):
+        reqs.append(req.url.params.get("code"))
+        return ok_handler(req)
+    conn, col = make(handler)
+    conn.execute("UPDATE data_sources SET interval_sec=0"); conn.commit()
+    real = db.get_data_source
+    state = {"calls": 0, "raised_at_reqs": None}
+    def flaky(c, sid):
+        state["calls"] += 1
+        # 第 3 次读配置（第二轮循环开头，此时间隔已知为 0）抛错一次
+        if state["calls"] == 3:
+            state["raised_at_reqs"] = len(reqs)
+            raise RuntimeError("database is locked")
+        return real(c, sid)
+    monkeypatch.setattr("app.collector.db.get_data_source", flaky)
+    async def run():
+        col._spawn(2)
+        for _ in range(2000):            # 最多约 2s，满足条件即退出
+            await asyncio.sleep(0.001)
+            if state["raised_at_reqs"] is not None and len(reqs) > state["raised_at_reqs"]:
+                break
+        alive = col.running_ids()
+        await col.stop()
+        return alive
+    assert asyncio.run(run()) == {2}                   # 任务没有因读配置异常而死
+    assert len(reqs) > state["raised_at_reqs"] > 0     # 抛错之后仍继续采集
+    assert db.get_data_source(conn, 2).status == "ok"
+
+
+def test_run_first_config_read_error_uses_default_backoff(monkeypatch):
+    conn, col = make(ok_handler)
+    def boom(c, sid):
+        raise RuntimeError("database is locked")
+    monkeypatch.setattr("app.collector.db.get_data_source", boom)
+    async def run():
+        col._spawn(2)
+        await asyncio.sleep(0.01)
+        alive = col.running_ids()      # 首次读配置就失败：任务仍在（睡默认 5s×2 的退避）
+        await col.stop()
+        return alive
+    assert asyncio.run(run()) == {2}
+
+
+def test_stop_survives_dead_task_and_closes_client():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    conn.execute("UPDATE data_sources SET interval_sec=0"); conn.commit()
+    col = Collector(conn)           # 自有 client，stop 必须关闭它
+    async def run():
+        async def boom():
+            raise RuntimeError("died")
+        async def forever():
+            await asyncio.sleep(3600)
+        dead = asyncio.create_task(boom())
+        await asyncio.sleep(0)       # 让 dead 先因异常结束
+        alive = asyncio.create_task(forever())
+        col._tasks[1] = dead         # dict 顺序：先取消已死任务
+        col._tasks[2] = alive
+        await col.stop()
+        assert alive.cancelled()
+        assert col.running_ids() == set()
+        assert col.client.is_closed
+    asyncio.run(run())

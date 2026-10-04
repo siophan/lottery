@@ -10,6 +10,7 @@ FETCH_ROWS = 10        # 全球统计 trial 接口最多返回 10 行
 FETCH_TIMEOUT = 8.0
 MAX_BACKOFF = 60
 KEEP_ROWS = 2000
+DEFAULT_INTERVAL = 5   # 尚未读到配置时的默认轮询间隔（秒）
 
 class FetchError(Exception):
     pass
@@ -74,17 +75,20 @@ class Collector:
 
     async def _run(self, source_id: int) -> None:
         failures = 0
+        interval = DEFAULT_INTERVAL      # 读配置失败时沿用最近一次已知的间隔
         while True:
-            src = db.get_data_source(self.conn, source_id)
-            if src is None or not src.enabled:
-                return
             try:
+                # 读配置也在保护区内：数据库被锁、headers_json 损坏等都只算一次失败，循环不死
+                src = db.get_data_source(self.conn, source_id)
+                if src is None or not src.enabled:
+                    return
+                interval = src.interval_sec
                 ok = await self.tick(source_id)
             except Exception as e:      # CancelledError 不是 Exception，取消照常生效
                 ok = False
-                print(f"collector source={source_id} tick crashed: {e!r}")
+                print(f"collector source={source_id} loop error: {e!r}")
             failures = 0 if ok else failures + 1
-            await asyncio.sleep(backoff_delay(src.interval_sec, failures))
+            await asyncio.sleep(backoff_delay(interval, failures))
 
     def _spawn(self, source_id: int) -> None:
         self._tasks[source_id] = asyncio.create_task(self._run(source_id))
@@ -98,6 +102,8 @@ class Collector:
             await t
         except asyncio.CancelledError:
             pass
+        except Exception as e:      # 任务早已因意外异常退出：只记录，保证 stop()/reload() 照常完成
+            print(f"collector source={source_id} task ended with error: {e!r}")
 
     async def start(self) -> None:
         for src in db.list_data_sources(self.conn):
