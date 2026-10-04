@@ -204,6 +204,54 @@ for (const name of CHUNKS) {
   });
 }
 
+// ---- autopick v1：首次自动选择改由组件标记控制，首次拉取失败后后续成功的刷新仍会补做 ----
+function emptyHarness(name, result) {
+  const h = dsLoadHarness(name, result);
+  Object.assign(h.vmThis, { options: [], codeId: null, codeName: '请选择', requestUrl: null });
+  return h;
+}
+for (const name of CHUNKS) {
+  test(`${name}: 首次拉取失败 → 之后 dsLoad(false) 成功时补做首次自动选择，且只做一次`, async () => {
+    const h = emptyHarness(name, null);
+    await h.comp.methods.dsLoad.call(h.vmThis, true);
+    assert.strictEqual(h.vmThis.requestUrl, null);
+    h.result = [ITEM2];
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    const first = dsSources.toOption(ITEM2, API_URL);
+    assert.strictEqual(h.vmThis.codeId, first.value);
+    assert.strictEqual(h.vmThis.requestUrl, first.requestUrl);
+    assert.strictEqual(h.vmThis.opened, 1);
+    assert.deepStrictEqual(closes(h.sent), []);                // 自动选择不关子窗口
+    h.result = [{ ...ITEM2, source: 'qqtj', sourceName: '全球统计' }, ITEM2];
+    await h.comp.methods.dsLoad.call(h.vmThis, false);         // 已自动选过、选中项仍在 → 不再动
+    assert.strictEqual(h.vmThis.requestUrl, first.requestUrl);
+    assert.strictEqual(h.vmThis.opened, 1);
+  });
+
+  test(`${name}: 首次加载成功照常自动选择；之后用户回到「未选择」也不会再自动选`, async () => {
+    const h = emptyHarness(name, [ITEM2]);
+    await h.comp.methods.dsLoad.call(h.vmThis, true);
+    assert.strictEqual(h.vmThis.opened, 1);
+    Object.assign(h.vmThis, { codeId: null, requestUrl: null });
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.strictEqual(h.vmThis.requestUrl, null);
+    assert.strictEqual(h.vmThis.opened, 1);
+  });
+
+  test(`${name}: 有本地源或已有选中项时 dsLoad(false) 不做首次自动选择`, async () => {
+    let h = emptyHarness(name, [ITEM2]);
+    h.vmThis.options = [h.local];
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.strictEqual(h.vmThis.requestUrl, null);
+    assert.strictEqual(h.vmThis.opened, 0);
+    h = emptyHarness(name, [ITEM2]);
+    h.vmThis.requestUrl = 'https://other.example/api';         // 已选了某个（非服务端）源
+    await h.comp.methods.dsLoad.call(h.vmThis, false);
+    assert.strictEqual(h.vmThis.requestUrl, 'https://other.example/api');
+    assert.strictEqual(h.vmThis.opened, 0);
+  });
+}
+
 // ---- race v1：showOpenNum 的响应回来时若已切换数据源，丢弃旧响应 ----
 function openNumHarness(name) {
   const pending = [];

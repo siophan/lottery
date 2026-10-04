@@ -183,6 +183,25 @@ function closeReplacements(name) {
   }];
 }
 
+// 首次自动选择不再依赖 first 参数，改由组件标记 dsAutoPicked 控制：首次拉取失败时，之后某次成功的
+// dsLoad(false) 仍会补做（前提仍是没有本地源、且当前未选中任何源 requestUrl == null），且只做一次。
+// reselect（!first && needsReselect）语义不变
+const AUTOPICK_MARK = '/* ds-patch autopick v1 */';
+const AUTOPICK_REPLACEMENTS = [
+  {
+    find: '        const dsPick = first && hadNone && items.length > 0;',
+    repl: `        ${AUTOPICK_MARK}\n` +
+      '        const dsPick = !this.dsAutoPicked && hadNone && this.requestUrl == null && items.length > 0;',
+    count: 1,
+  },
+  {
+    find: "          this.showOpenNum();\n          if (!dsPick) {\n            ipcRenderer.send('closeChildWindow', {",
+    repl: "          this.showOpenNum();\n          if (dsPick) this.dsAutoPicked = true;\n" +
+      "          if (!dsPick) {\n            ipcRenderer.send('closeChildWindow', {",
+    count: 1,
+  },
+];
+
 // 工作台 chunk 的补丁层（顺序即叠加顺序）。replacements 可以是按 chunk 文件名生成锚点的函数
 const CHUNK_LAYERS = [
   { mark: MARK, replacements: REPLACEMENTS },
@@ -191,6 +210,7 @@ const CHUNK_LAYERS = [
   { mark: RACE_MARK, replacements: raceReplacements },
   { mark: TREND_MARK, replacements: TREND_REPLACEMENTS },
   { mark: CLOSE_MARK, replacements: closeReplacements },
+  { mark: AUTOPICK_MARK, replacements: AUTOPICK_REPLACEMENTS },
 ];
 
 // 走势页 chunk（src/views/trend/trend.vue）：给外部走势 iframe 的 window.topRows 在「非 dm / 非 code_id」分支里
@@ -307,7 +327,7 @@ function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, CHUNK_LAYERS, APP_LAYERS,
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS };
 
 if (require.main === module) {
