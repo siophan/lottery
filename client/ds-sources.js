@@ -37,16 +37,18 @@
     return COLORS[o && o.status] || UNKNOWN;
   }
 
+  // 成功时返回服务端列表（可能是 []，表示服务端确实没有源）；任何失败（无 fetch、网络错误、
+  // 非 JSON、code != 0、data 非数组）都返回 null，调用方据此保留现有下拉项，避免一次抖动清空服务端源
   function fetchServer(apiURL, cat, token, fetchImpl) {
     var f = fetchImpl || (typeof fetch !== 'undefined' ? fetch : null);
-    if (!f) return Promise.resolve([]);
+    if (!f) return Promise.resolve(null);
     var headers = {};
     if (token) headers.token = token;
     return Promise.resolve()
       .then(function () { return f(apiURL + '/ds/sources?cat=' + encodeURIComponent(cat), { headers: headers }); })
       .then(function (r) { return r.json(); })
-      .then(function (d) { return d && d.code === 0 && Array.isArray(d.data) ? d.data : []; })
-      .catch(function () { return []; });
+      .then(function (d) { return d && d.code === 0 && Array.isArray(d.data) ? d.data : null; })
+      .catch(function () { return null; });
   }
 
   // 全球统计等源返回 issue/drawResult/drawTime，客户端统一按区块链统计的
@@ -75,9 +77,13 @@
   // 静态页（遗漏查询 / K线）直接 $.ajax 请求 requestUrl，需要自己带 token。
   // 只对自家数据源接口 /api/ds/<key>/draw-result 返回 token，绝不发给第三方域名
   var SERVER_RE = /\/api\/ds\/[^\/?#]+\/draw-result$/;
+  // 只匹配 path 部分（去掉 query/hash），避免第三方地址把该路径塞进 query 冒充
+  function isServerUrl(url) {
+    return typeof url === 'string' && SERVER_RE.test(url.split(/[?#]/)[0]);
+  }
+
   function serverHeaders(url) {
-    // 只匹配 path 部分（去掉 query/hash），避免第三方地址把该路径塞进 query 骗取 token
-    if (typeof url !== 'string' || !SERVER_RE.test(url.split(/[?#]/)[0])) return {};
+    if (!isServerUrl(url)) return {};
     try {
       var token = typeof localStorage !== 'undefined' && localStorage ? localStorage.getItem('token') : null;
       return token ? { token: token } : {};
@@ -86,7 +92,15 @@
     }
   }
 
+  // 刷新服务端列表后：当前选中的是服务端源（requestUrl 指向自家 draw-result）且新列表里已没有它
+  // （后台停用/删除）→ 需要切到 options[0]。本地（用户添加）源、内置后端源、空列表一律不切
+  function needsReselect(options, codeId, requestUrl) {
+    if (!isServerUrl(requestUrl) || !Array.isArray(options) || options.length === 0) return false;
+    var key = optKey({ value: codeId, requestUrl: requestUrl });
+    return !options.some(function (o) { return optKey(o) === key; });
+  }
+
   return { optKey: optKey, toOption: toOption, persistable: persistable, merge: merge,
            dotColor: dotColor, fetchServer: fetchServer, normalizeDraws: normalizeDraws,
-           serverHeaders: serverHeaders };
+           serverHeaders: serverHeaders, isServerUrl: isServerUrl, needsReselect: needsReselect };
 });

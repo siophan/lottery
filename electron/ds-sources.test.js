@@ -46,9 +46,29 @@ test('fetchServer：带 token 请求并返回 data', async () => {
   assert.strictEqual(seen.opts.headers.token, 'TOK');
 });
 
-test('fetchServer：业务错误或网络失败返回空数组', async () => {
-  assert.deepStrictEqual(await ds.fetchServer(API, 'hash', 'T', async () => ({ json: async () => ({ code: 10020 }) })), []);
-  assert.deepStrictEqual(await ds.fetchServer(API, 'hash', 'T', async () => { throw new Error('offline'); }), []);
+test('fetchServer：任何失败都返回 null（与「服务端确实没有源」的 [] 区分）', async () => {
+  const bad = (body) => async () => ({ json: async () => body });
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', bad({ code: 10020 })), null);            // 业务错误
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', bad({ code: 0, data: { a: 1 } })), null); // data 非数组
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', bad({ code: 0 })), null);
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', bad(null)), null);
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', async () => { throw new Error('offline'); }), null); // 网络错误
+  assert.strictEqual(await ds.fetchServer(API, 'hash', 'T', async () => ({ json: async () => { throw new SyntaxError('not json'); } })), null);
+});
+
+test('fetchServer：服务端确实返回空列表时是 []', async () => {
+  assert.deepStrictEqual(await ds.fetchServer(API, 'hash', 'T', async () => ({ json: async () => ({ code: 0, data: [] }) })), []);
+});
+
+test('fetchServer：没有 fetch 实现时返回 null', async () => {
+  const had = Object.prototype.hasOwnProperty.call(globalThis, 'fetch');
+  const old = globalThis.fetch;
+  delete globalThis.fetch;
+  try {
+    assert.strictEqual(await ds.fetchServer(API, 'hash', 'T'), null);
+  } finally {
+    if (had) globalThis.fetch = old;
+  }
 });
 
 test('Electron nodeIntegration 环境（module 和 window 共存）', () => {
@@ -118,12 +138,12 @@ test('normalizeDraws：幂等，且不修改入参', () => {
 
 // ---- serverHeaders：只对自家 /api/ds/<key>/draw-result 带 token ----
 function withLocalStorage(stub, fn) {
-  const had = Object.prototype.hasOwnProperty.call(globalThis, 'localStorage');
-  const old = globalThis.localStorage;
+  // 按属性描述符保存/还原：Node 22+ 的全局 localStorage 是 getter，直接读取会打出 ExperimentalWarning
+  const desc = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   if (stub === undefined) delete globalThis.localStorage;
   else Object.defineProperty(globalThis, 'localStorage', { value: stub, configurable: true, writable: true });
   try { return fn(); } finally {
-    if (had) Object.defineProperty(globalThis, 'localStorage', { value: old, configurable: true, writable: true });
+    if (desc) Object.defineProperty(globalThis, 'localStorage', desc);
     else delete globalThis.localStorage;
   }
 }
@@ -176,4 +196,40 @@ test('k_Util.js：decodeURIComponent 有 try/catch 兜底', () => {
   const path = require('node:path');
   const kutil = fs.readFileSync(path.join(__dirname, '../client/kline/js/k_Util.js'), 'utf8');
   assert.match(kutil, /try\s*\{[^}]*decodeURIComponent\(codeM\[1\]\)[^}]*\}\s*catch/);
+});
+
+// ---- isServerUrl / needsReselect：选中的服务端源被停用/删除后自动切走 ----
+test('isServerUrl：只认自家 /api/ds/<key>/draw-result 路径（忽略 query/hash）', () => {
+  assert.strictEqual(ds.isServerUrl(API + '/ds/qqtj/draw-result'), true);
+  assert.strictEqual(ds.isServerUrl(API + '/ds/qqtj/draw-result?code=1#x'), true);
+  assert.strictEqual(ds.isServerUrl('https://evil.com/?u=/api/ds/x/draw-result'), false);
+  assert.strictEqual(ds.isServerUrl('https://x.example/api'), false);
+  assert.strictEqual(ds.isServerUrl(''), false);
+  assert.strictEqual(ds.isServerUrl(null), false);
+  assert.strictEqual(ds.isServerUrl(undefined), false);
+});
+
+test('needsReselect：当前选中的服务端源已不在列表中 → true', () => {
+  const kept = ds.toOption(ITEM, API);
+  const gone = ds.toOption({ ...ITEM, source: 'qkltj', sourceName: '区块链统计' }, API);
+  const local = { value: '9', label: '我的源', requestUrl: 'https://x.example/api' };
+  assert.strictEqual(ds.needsReselect([kept, local], gone.value, gone.requestUrl), true);
+  // 同源不同彩种也算消失
+  assert.strictEqual(ds.needsReselect([kept, local], '6002', kept.requestUrl), true);
+});
+
+test('needsReselect：仍在列表中 / 本地源 / 后端默认源 / 列表为空 → false', () => {
+  const kept = ds.toOption(ITEM, API);
+  const local = { value: '9', label: '我的源', requestUrl: 'https://x.example/api' };
+  assert.strictEqual(ds.needsReselect([kept, local], kept.value, kept.requestUrl), false);
+  assert.strictEqual(ds.needsReselect([kept], local.value, local.requestUrl), false);   // 不从本地源切走
+  assert.strictEqual(ds.needsReselect([kept], '11001', null), false);                   // requestUrl 为空的内置项
+  assert.strictEqual(ds.needsReselect([], '6001', kept.requestUrl), false);
+  assert.strictEqual(ds.needsReselect(undefined, '6001', kept.requestUrl), false);
+});
+
+test('needsReselect：codeId 为数字时按字符串比较（与 optKey 一致）', () => {
+  const kept = ds.toOption(ITEM, API);                 // value 为字符串 '6001'
+  assert.strictEqual(ds.needsReselect([kept], 6001, kept.requestUrl), false);
+  assert.strictEqual(ds.needsReselect([kept], 6002, kept.requestUrl), true);
 });
