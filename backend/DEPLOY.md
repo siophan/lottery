@@ -151,6 +151,23 @@ curl -i -X POST https://lottery.jh8.ai/admin/login \
 
 浏览器访问 `https://lottery.jh8.ai/admin/` 登录，应能看到用户管理界面。
 
+## 管理后台前端（Ant Design Pro）
+
+后台是一个 Vite + React + antd Pro 组件的单页应用，源码在 `backend/admin-ui/`，
+构建产物在 `backend/app/static/admin-dist/`（**已随仓库提交**）。后端的 `GET /admin/`
+返回该目录的 `index.html`，哈希资源由 `/admin/assets` 挂载提供。
+
+**服务器无需安装 Node**：直接用仓库里已构建好的产物。只有改动后台界面时才需要在
+本地重新构建并提交：
+
+```bash
+cd backend/admin-ui
+npm ci            # 首次用 npm install 生成 lock 后，后续用 npm ci
+npm run build     # 产物输出到 ../app/static/admin-dist/
+git add ../app/static/admin-dist admin-ui
+git commit -m "chore(admin-ui): rebuild"
+```
+
 ## 升级
 
 ```bash

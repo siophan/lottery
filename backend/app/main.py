@@ -51,6 +51,13 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None) ->
 
     app.mount("/download", StaticFiles(directory=_downloads_dir), name="download")
 
+    # 管理后台（Ant Design Pro / Vite 构建）的哈希资源。页面入口 GET /admin/ 由
+    # admin 路由返回 index.html；其引用的 /admin/assets/*.js|css 由此挂载提供。
+    # 目录随构建产物提交，存在才挂（未构建时后台不可用，但不影响其余服务）。
+    _admin_assets = os.path.join(_static_dir, "admin-dist", "assets")
+    if os.path.isdir(_admin_assets):
+        app.mount("/admin/assets", StaticFiles(directory=_admin_assets), name="admin-assets")
+
     @app.api_route("/api/{path:path}", methods=METHODS)
     async def proxy(path: str, request: Request):
         import time
