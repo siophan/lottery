@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { PageContainer, ProLayout } from '@ant-design/pro-components'
 import { App, Dropdown } from 'antd'
-import { DashboardOutlined, LogoutOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons'
+import { ApiOutlined, DashboardOutlined, LogoutOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons'
 import { logout } from './api'
 import { BRAND, Logo } from './branding'
 import Dashboard from './pages/Dashboard'
+import DataSources from './pages/DataSources'
 import UsersTable from './pages/UsersTable'
 
 const ROUTE = {
@@ -12,10 +13,11 @@ const ROUTE = {
   routes: [
     { path: '/dashboard', name: '概览', icon: <DashboardOutlined /> },
     { path: '/users', name: '用户管理', icon: <TeamOutlined /> },
+    { path: '/data-sources', name: '数据源', icon: <ApiOutlined /> },
   ],
 }
 
-const TITLES: Record<string, string> = { '/dashboard': '概览', '/users': '用户管理' }
+const TITLES: Record<string, string> = { '/dashboard': '概览', '/users': '用户管理', '/data-sources': '数据源' }
 
 export default function MainLayout({
   username,
@@ -68,7 +70,7 @@ export default function MainLayout({
       }}
     >
       <PageContainer header={{ title: TITLES[pathname] }}>
-        {pathname === '/dashboard' ? <Dashboard /> : <UsersTable />}
+        {pathname === '/dashboard' ? <Dashboard /> : pathname === '/users' ? <UsersTable /> : <DataSources />}
       </PageContainer>
     </ProLayout>
   )

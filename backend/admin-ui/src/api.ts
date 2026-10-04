@@ -74,3 +74,78 @@ export async function deleteUser(code: string): Promise<boolean> {
   const r = await req('/users/' + encodeURIComponent(code), { method: 'DELETE' })
   return r.status === 200
 }
+
+// ---------------- 数据源 ----------------
+
+export interface SourceLottery {
+  lottery_code: string
+  remote_code: string
+  name: string
+  cat: string
+}
+
+export interface DataSourceRow {
+  id: number
+  key: string
+  name: string
+  adapter: string
+  base_url: string
+  headers: Record<string, string>
+  interval_sec: number
+  enabled: boolean
+  status: string
+  last_error: string | null
+  last_ok_at: number | null
+  created_at: number
+  lotteries: SourceLottery[]
+}
+
+export type DataSourceInput = Omit<
+  DataSourceRow,
+  'id' | 'status' | 'last_error' | 'last_ok_at' | 'created_at'
+>
+
+export interface DrawRow {
+  expect: string
+  opennumber: string
+  open_time: string
+}
+
+export async function listDataSources(): Promise<DataSourceRow[]> {
+  const r = await req('/data-sources')
+  if (r.status !== 200) throw new Error('list data sources failed: ' + r.status)
+  const d = await r.json()
+  return d.sources as DataSourceRow[]
+}
+
+export async function saveDataSource(
+  id: number | null,
+  input: DataSourceInput,
+): Promise<{ ok: boolean; error?: string }> {
+  const r = await req(id == null ? '/data-sources' : '/data-sources/' + id, {
+    method: id == null ? 'POST' : 'PUT',
+    body: JSON.stringify(input),
+  })
+  const d = await r.json().catch(() => ({}))
+  return { ok: r.status === 200 && d.ok === true, error: d.error }
+}
+
+export async function setDataSourceEnabled(id: number, enabled: boolean): Promise<boolean> {
+  const r = await req(`/data-sources/${id}/enabled`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  })
+  return r.status === 200
+}
+
+export async function deleteDataSource(id: number): Promise<boolean> {
+  const r = await req(`/data-sources/${id}`, { method: 'DELETE' })
+  return r.status === 200
+}
+
+export async function listDraws(id: number, code: string, rows = 20): Promise<DrawRow[]> {
+  const r = await req(`/data-sources/${id}/draws?code=${encodeURIComponent(code)}&rows=${rows}`)
+  if (r.status !== 200) return []
+  const d = await r.json()
+  return d.draws as DrawRow[]
+}
