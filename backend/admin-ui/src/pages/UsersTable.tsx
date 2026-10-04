@@ -1,64 +1,49 @@
 import { useRef } from 'react'
 import {
+  ActionType,
   ModalForm,
-  PageContainer,
   ProColumns,
   ProFormDatePicker,
   ProFormText,
-  ProLayout,
   ProTable,
-  ActionType,
 } from '@ant-design/pro-components'
-import { App, Button, Popconfirm, Space, Tag } from 'antd'
-import { LogoutOutlined, PlusOutlined } from '@ant-design/icons'
+import { App, Button, Popconfirm } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import {
-  createUser,
-  deleteUser,
-  listUsers,
-  logout,
-  patchUser,
-  UserRow,
-} from './api'
-import { fmtDate, fmtDateTime, toEpoch } from './util'
+import { createUser, deleteUser, listUsers, patchUser, UserRow } from '../api'
+import { fmtDate, fmtDateTime, toEpoch } from '../util'
 
-export default function UsersPage({
-  username,
-  onLoggedOut,
-}: {
-  username: string
-  onLoggedOut: () => void
-}) {
+export default function UsersTable() {
   const { message } = App.useApp()
   const actionRef = useRef<ActionType>()
   const reload = () => actionRef.current?.reload()
 
-  const handleLogout = async () => {
-    await logout()
-    message.success('已退出登录')
-    onLoggedOut()
-  }
-
   const columns: ProColumns<UserRow>[] = [
-    { title: '编号', dataIndex: 'code', copyable: true },
+    {
+      title: '编号',
+      dataIndex: 'code',
+      copyable: true,
+      fieldProps: { placeholder: '按编号搜索' },
+    },
     {
       title: '状态',
       dataIndex: 'status',
-      render: (_, r) =>
-        r.status === 'active' ? (
-          <Tag color="green">启用</Tag>
-        ) : (
-          <Tag color="red">停用</Tag>
-        ),
+      valueType: 'select',
+      valueEnum: {
+        active: { text: '启用', status: 'Success' },
+        disabled: { text: '停用', status: 'Error' },
+      },
     },
     {
       title: '到期',
       dataIndex: 'expires_at',
+      hideInSearch: true,
       render: (_, r) => fmtDate(r.expires_at),
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
+      hideInSearch: true,
       render: (_, r) => fmtDateTime(r.created_at),
     },
     {
@@ -153,89 +138,74 @@ export default function UsersPage({
   ]
 
   return (
-    <ProLayout
-      title="lottery mao"
-      logo={false}
-      layout="top"
-      fixedHeader
-      contentWidth="Fluid"
-      menuRender={false}
-      location={{ pathname: '/' }}
-      actionsRender={() => [
-        <span key="user" style={{ color: 'rgba(0,0,0,0.65)' }}>
-          {username}
-        </span>,
-        <a key="logout" onClick={handleLogout}>
-          <Space size={4}>
-            <LogoutOutlined />
-            退出登录
-          </Space>
-        </a>,
-      ]}
-    >
-      <PageContainer header={{ title: '用户管理' }}>
-        <ProTable<UserRow>
-          rowKey="code"
-          actionRef={actionRef}
-          columns={columns}
-          search={false}
-          pagination={false}
-          options={{ reload: true, density: false, setting: false }}
-          request={async () => {
-            const users = await listUsers()
-            return { data: users, success: true }
+    <ProTable<UserRow>
+      rowKey="code"
+      actionRef={actionRef}
+      columns={columns}
+      cardBordered
+      search={{ labelWidth: 'auto' }}
+      options={{ reload: true, density: false, setting: true }}
+      pagination={{ pageSize: 10, showSizeChanger: true }}
+      request={async (params) => {
+        const all = await listUsers()
+        let rows = all
+        if (params.code) {
+          const kw = String(params.code).toLowerCase()
+          rows = rows.filter((u) => u.code.toLowerCase().includes(kw))
+        }
+        if (params.status) {
+          rows = rows.filter((u) => u.status === params.status)
+        }
+        const current = params.current ?? 1
+        const pageSize = params.pageSize ?? 10
+        const start = (current - 1) * pageSize
+        return { data: rows.slice(start, start + pageSize), total: rows.length, success: true }
+      }}
+      toolBarRender={() => [
+        <ModalForm
+          key="create"
+          title="新增用户"
+          width={400}
+          modalProps={{ destroyOnClose: true }}
+          trigger={
+            <Button type="primary" icon={<PlusOutlined />}>
+              新增用户
+            </Button>
+          }
+          onFinish={async (v: { code: string; password: string; expires?: unknown }) => {
+            const ok = await createUser(
+              (v.code || '').toUpperCase(),
+              v.password,
+              toEpoch(v.expires),
+            )
+            if (ok) {
+              message.success('已新增用户')
+              reload()
+            } else {
+              message.error('新增失败（编号可能已存在）')
+            }
+            return ok
           }}
-          toolBarRender={() => [
-            <ModalForm
-              key="create"
-              title="新增用户"
-              width={400}
-              modalProps={{ destroyOnClose: true }}
-              trigger={
-                <Button type="primary" icon={<PlusOutlined />}>
-                  新增用户
-                </Button>
-              }
-              onFinish={async (v: {
-                code: string
-                password: string
-                expires?: unknown
-              }) => {
-                const ok = await createUser(
-                  (v.code || '').toUpperCase(),
-                  v.password,
-                  toEpoch(v.expires),
-                )
-                if (ok) {
-                  message.success('已新增用户')
-                  reload()
-                } else {
-                  message.error('新增失败（编号可能已存在）')
-                }
-                return ok
-              }}
-            >
-              <ProFormText
-                name="code"
-                label="编号"
-                placeholder="如 USER01（自动转大写）"
-                rules={[{ required: true, message: '请输入编号' }]}
-              />
-              <ProFormText.Password
-                name="password"
-                label="初始密码"
-                rules={[{ required: true, message: '请输入初始密码' }]}
-              />
-              <ProFormDatePicker
-                name="expires"
-                label="到期日"
-                extra="留空表示永久"
-                fieldProps={{ style: { width: '100%' } }}
-              />
-            </ModalForm>,
-          ]}
-        />
-      </PageContainer>
-    </ProLayout>
+        >
+          <ProFormText
+            name="code"
+            label="编号"
+            placeholder="如 USER01（自动转大写）"
+            rules={[{ required: true, message: '请输入编号' }]}
+          />
+          <ProFormText.Password
+            name="password"
+            label="初始密码"
+            rules={[{ required: true, message: '请输入初始密码' }]}
+          />
+          <ProFormDatePicker
+            name="expires"
+            label="到期日"
+            extra="留空表示永久"
+            fieldProps={{ style: { width: '100%' } }}
+          />
+        </ModalForm>,
+      ]}
+    />
   )
 }

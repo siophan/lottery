@@ -2,6 +2,7 @@ import { LoginForm, ProFormText } from '@ant-design/pro-components'
 import { LockOutlined, UserOutlined } from '@ant-design/icons'
 import { App } from 'antd'
 import { login } from './api'
+import { BRAND, Logo, SUBTITLE } from './branding'
 
 export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
   const { message } = App.useApp()
@@ -9,26 +10,29 @@ export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
   return (
     <div
       style={{
+        minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: '100vh',
-        background: '#f0f2f5',
+        padding: 24,
+        background: 'linear-gradient(160deg,#eef3ff 0%,#f5f7fb 55%,#f0f2f5 100%)',
       }}
     >
       <div
         style={{
-          width: 360,
+          width: '100%',
+          maxWidth: 380,
           background: '#fff',
-          padding: '36px 28px 12px',
-          borderRadius: 8,
-          boxShadow: '0 2px 16px rgba(0,0,0,0.08)',
+          padding: '40px 32px 8px',
+          borderRadius: 12,
+          boxShadow: '0 10px 40px rgba(22,119,255,0.10)',
         }}
       >
         <LoginForm
-          title="lottery mao"
-          subTitle="管理后台"
-          submitter={{ searchConfig: { submitText: '登录' } }}
+          logo={<Logo size={44} />}
+          title={BRAND}
+          subTitle={SUBTITLE}
+          submitter={{ searchConfig: { submitText: '登 录' } }}
           onFinish={async (values: { username: string; password: string }) => {
             const ok = await login(values.username, values.password)
             if (ok) {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Spin } from 'antd'
 import { getMe } from './api'
 import LoginPage from './LoginPage'
-import UsersPage from './UsersPage'
+import MainLayout from './MainLayout'
 
 export default function App() {
   const [loading, setLoading] = useState(true)
@@ -30,5 +30,5 @@ export default function App() {
     return <LoginPage onSuccess={refreshMe} />
   }
 
-  return <UsersPage username={username} onLoggedOut={() => setUsername(null)} />
+  return <MainLayout username={username} onLoggedOut={() => setUsername(null)} />
 }
