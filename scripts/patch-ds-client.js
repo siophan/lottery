@@ -202,7 +202,21 @@ const AUTOPICK_REPLACEMENTS = [
   },
 ];
 
-// 工作台 chunk 的补丁层（顺序即叠加顺序）。replacements 可以是按 chunk 文件名生成锚点的函数
+// 运动会 showOpenNum 的尾数分支（qitwId 非空，走 mantissaTopRows）同样丢弃切换彩种后的旧响应。
+// 只有运动会 chunk 有这个分支（only），后端接口不看 requestUrl，所以只比对 codeId
+const RACE_MANTISSA_MARK = '/* ds-patch race-mantissa v1 */';
+const MANTISSA_CALL = '        Object(softNum["j" /* mantissaTopRows */])({\n          code: this.codeId,\n          rows: 1,\n' +
+  '          mantissa: this.qitwId\n        }).then(res => {\n';
+const RACE_MANTISSA_REPLACEMENTS = [
+  {
+    find: '      if (this.qitwId != null) {\n' + MANTISSA_CALL + '          if (res.code == 0 && res.data.length > 0) {',
+    repl: `      if (this.qitwId != null) {\n        ${RACE_MANTISSA_MARK}\n        const dsReqCode = this.codeId;\n` + MANTISSA_CALL +
+      '          if (dsReqCode !== this.codeId) return;\n          if (res.code == 0 && res.data.length > 0) {',
+    count: 1,
+  },
+];
+
+// 工作台 chunk 的补丁层（顺序即叠加顺序）。only：仅对列出的 chunk 生效。replacements 可以是按 chunk 文件名生成锚点的函数
 const CHUNK_LAYERS = [
   { mark: MARK, replacements: REPLACEMENTS },
   { mark: KEEP_MARK, replacements: KEEP_REPLACEMENTS },
@@ -211,6 +225,7 @@ const CHUNK_LAYERS = [
   { mark: TREND_MARK, replacements: TREND_REPLACEMENTS },
   { mark: CLOSE_MARK, replacements: closeReplacements },
   { mark: AUTOPICK_MARK, replacements: AUTOPICK_REPLACEMENTS },
+  { mark: RACE_MANTISSA_MARK, replacements: RACE_MANTISSA_REPLACEMENTS, only: ['chunk-60235acf.b3ce76aa.js'] },
 ];
 
 // 走势页 chunk（src/views/trend/trend.vue）：给外部走势 iframe 的 window.topRows 在「非 dm / 非 code_id」分支里
@@ -298,6 +313,7 @@ function applyLayers(raw, locator, layers, name) {
   const q = raw[e + 5];
   let out = raw;
   for (const layer of layers) {
+    if (layer.only && !layer.only.includes(name)) continue;
     const mark = enc(layer.mark, q);
     if (out.includes(mark)) continue;
     const reps = typeof layer.replacements === 'function' ? layer.replacements(name) : layer.replacements;
@@ -327,7 +343,7 @@ function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, CHUNK_LAYERS, APP_LAYERS,
+module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS };
 
 if (require.main === module) {

@@ -71,7 +71,10 @@ for (const name of CHUNKS) {
 
   test(`${name}: 已打补丁且再次运行不变（幂等）`, () => {
     const raw = fs.readFileSync(file, 'utf8');
-    for (const l of CHUNK_LAYERS) assert.ok(raw.includes(l.mark), `缺少补丁层 ${l.mark}`);
+    for (const l of CHUNK_LAYERS) {
+      if (l.only && !l.only.includes(name)) assert.ok(!raw.includes(l.mark), `不应有补丁层 ${l.mark}`);
+      else assert.ok(raw.includes(l.mark), `缺少补丁层 ${l.mark}`);
+    }
     assert.strictEqual(patchChunk(raw, name), raw);
   });
 
@@ -255,7 +258,8 @@ for (const name of CHUNKS) {
 // ---- race v1：showOpenNum 的响应回来时若已切换数据源，丢弃旧响应 ----
 function openNumHarness(name) {
   const pending = [];
-  const softNum = { t: (params) => new Promise((resolve) => pending.push({ params, resolve })) };
+  const call = (api) => (params) => new Promise((resolve) => pending.push({ api, params, resolve }));
+  const softNum = { t: call('topRows'), j: call('mantissaTopRows') };
   const comp = loadComponent(pageSource(name), { modules: { b456: softNum, f121: { apiURL: API_URL } } });
   const vmThis = {
     codeId: '6001', requestUrl: SRV('qqtj'), qitwId: null, num: {}, numList: [], numArr: [],
@@ -289,6 +293,27 @@ for (const name of CHUNKS) {
     assert.strictEqual(vmThis.numArr.join(','), '1,2,3,4,5');   // numArr 由 vm 内的 split 产生，跨 realm 不能 deepStrictEqual
   });
 }
+
+// ---- race mantissa v1：运动会按尾数取开奖（qitwId 非空）同样丢弃切换后的旧响应 ----
+const SPORTS = 'chunk-60235acf.b3ce76aa.js';
+test(`${SPORTS}: 尾数分支 mantissaTopRows 请求期间切换了彩种 → 丢弃旧响应；未切换照常写入`, async () => {
+  let h = openNumHarness(SPORTS);
+  h.vmThis.qitwId = 3;
+  h.comp.methods.showOpenNum.call(h.vmThis);
+  assert.strictEqual(h.pending.length, 1);
+  assert.strictEqual(h.pending[0].api, 'mantissaTopRows');
+  h.vmThis.codeId = '6002';
+  h.pending[0].resolve(h.DRAW);
+  await tick();
+  assert.deepStrictEqual(h.vmThis.num, {});
+  assert.deepStrictEqual(h.vmThis.numList, []);
+  h = openNumHarness(SPORTS);
+  h.vmThis.qitwId = 3;
+  h.comp.methods.showOpenNum.call(h.vmThis);
+  h.pending[0].resolve(h.DRAW);
+  await tick();
+  assert.strictEqual(h.vmThis.num, h.DRAW.data[0]);
+});
 
 // ---- trend v1：走势图带上当前数据源（工作台 openTrend 传 requestUrl，走势页 topRows 按它取数）----
 for (const name of CHUNKS) {
