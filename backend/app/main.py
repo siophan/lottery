@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,12 +12,24 @@ from .db import connect, init_db
 from .dayys_session import DataYsSession
 from .routes import auth as auth_routes
 from .routes import admin as admin_routes
+from .collector import Collector
+from .routes import ds as ds_routes
 
 METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 
-def create_app(settings: Settings = None, client=None, conn=None, dayys=None) -> FastAPI:
+def create_app(settings: Settings = None, client=None, conn=None, dayys=None, collector=None) -> FastAPI:
     settings = settings or load_settings(os.environ)
-    app = FastAPI()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        if app.state.settings.collector_enabled:
+            await app.state.collector.start()
+        try:
+            yield
+        finally:
+            await app.state.collector.stop()
+
+    app = FastAPI(lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
@@ -36,8 +49,10 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None) ->
         app.state.client, settings.dayys_code, settings.dayys_password,
         settings.dayys_device_id, settings.from_id, settings.dayys_token_ttl,
     )
+    app.state.collector = collector or Collector(app.state.db_conn)
 
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all
+    app.include_router(ds_routes.router, prefix="/api")     # 多数据源，先于 catch-all
     app.include_router(local_router, prefix="/api")
     app.include_router(admin_routes.router, prefix="/admin")
 

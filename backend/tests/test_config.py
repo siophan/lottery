@@ -55,3 +55,9 @@ def test_admin_console_settings_from_env():
     assert s.admin_session_ttl == 60
     assert s.admin_cookie_secure is False
     assert s.admin_cookie_name == "ac"
+
+
+def test_collector_enabled_flag():
+    from app.config import load_settings
+    assert load_settings({}).collector_enabled is True
+    assert load_settings({"COLLECTOR_ENABLED": "false"}).collector_enabled is False
