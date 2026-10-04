@@ -86,6 +86,10 @@ sudo systemctl enable --now ys-backend
 sudo systemctl status ys-backend --no-pager
 ```
 
+> 多数据源采集运行在 uvicorn 进程内：保持上面的单进程 `ExecStart`，**不要**加 `--workers N`。
+> 升级到含采集器的版本后，首次启动会自动建表并写入两个默认数据源，无需手工迁移。
+> 部署后在后台「数据源」页确认两个源在 10 秒内变为「正常」。
+
 ## 6. nginx 反代 + TLS
 
 ```nginx

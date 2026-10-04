@@ -112,6 +112,19 @@ ADMIN_COOKIE_SECURE=false DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
 相关环境变量：`ADMIN_SESSION_TTL`（默认 86400）、`ADMIN_COOKIE_SECURE`（默认 true）、
 `ADMIN_COOKIE_NAME`（默认 admin_session）。
 
+## 多数据源采集
+
+服务启动后，进程内为每个启用的数据源单独定时拉取开奖号（默认 5 秒，`rows=10`），按数据源隔离存入 SQLite
+（`data_sources / source_lotteries / draws`），某个源异常不影响其他源。首次建表时自动写入两个默认源：
+区块链统计（qkltj，6001/6002/5001/5002）与全球统计（qqtj，6001→trxbhffc、6002→trxbh3fc）。
+
+- 管理：后台「数据源」菜单——增删改、启停、查看状态（正常/异常 + 最后错误 + 最后成功时间）与最新开奖。
+- 客户端接口（需我方 token）：`GET /api/ds/sources?cat=hash`、`GET /api/ds/{key}/draw-result?code=6001&rows=N`
+  （返回格式与区块链统计一致，rows ≤ 300）。
+- `COLLECTOR_ENABLED=false` 可关闭采集（排障用）。
+- **必须单进程运行 uvicorn**（不要加 `--workers`），否则会重复采集。
+- 全球统计 trial 接口每次最多 10 行、无历史翻页：历史从开始采集起累积（300 期分分彩约 5 小时、三分彩约 15 小时）。
+
 ### 官网落地页与下载
 
 - 根路径 `https://lottery.jh8.ai/` 返回官网落地页（`backend/app/static/index.html`），含 Windows / macOS 下载按钮。
