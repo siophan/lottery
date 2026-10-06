@@ -38,6 +38,7 @@ export interface UserRow {
   agent_name: string | null
   number_status: string // pending 待激活 | activated 已激活 | arrears 已欠费 | to_recycle 待回收 | unassigned 未分配
   points: number // 积分余额
+  nickname: string // 实际显示昵称（未设置时为默认昵称）
 }
 
 export interface ApiResult {
@@ -141,6 +142,24 @@ export async function resetUserPassword(code: string): Promise<ApiResult> {
 
 export async function deleteUser(code: string): Promise<ApiResult> {
   return result(await req('/users/' + encodeURIComponent(code), { method: 'DELETE' }))
+}
+
+export interface UserProfile {
+  code: string
+  nickname: string
+  avatar: string // data URL（未设置时为默认几何图案头像）
+  nickname_is_default: boolean
+  avatar_is_default: boolean
+}
+
+export async function getUserProfile(code: string): Promise<UserProfile> {
+  const r = await req('/users/' + encodeURIComponent(code) + '/profile')
+  if (r.status !== 200) throw new Error('get profile failed: ' + r.status)
+  return (await r.json()) as UserProfile
+}
+
+export async function resetUserProfile(code: string): Promise<ApiResult> {
+  return result(await req('/users/' + encodeURIComponent(code) + '/profile/reset', { method: 'POST' }))
 }
 
 // ---------------- 操作日志 ----------------

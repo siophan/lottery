@@ -3,7 +3,7 @@ import sqlite3
 import time
 from fastapi import APIRouter, Request, Body, Response, Depends
 from fastapi.responses import JSONResponse, FileResponse
-from .. import db
+from .. import db, profile
 from .. import admin_auth, db_agents
 from ..admin_auth import Principal
 from ..throttle import LOCKED_MSG, client_ip
@@ -91,9 +91,34 @@ async def list_users(request: Request, p: Principal = ANY_ROLE):
          "onboarded": u.onboarded_at is not None,
          "agent_id": u.agent_id, "agent_name": agent_name,
          "number_status": db.number_status(u, agent_status),
-         "points": u.points}
+         "points": u.points,
+         "nickname": profile.display_nickname(u)}
         for u, agent_name, agent_status in db.list_users_with_agent(conn, agent_id)
     ]}
+
+@router.get("/users/{code}/profile")
+async def user_profile(code: str, request: Request, p: Principal = ANY_ROLE):
+    conn = request.app.state.db_conn
+    u = db.get_user_by_code(conn, code)
+    # 代理只能查看本人名下账号（他人账号按不存在处理）
+    if u is None or (p.role == "agent" and u.agent_id != p.agent_id):
+        return _not_found()
+    avatar = db.get_user_avatar(conn, u.id)
+    return {"ok": True, "code": u.code, "nickname": profile.display_nickname(u),
+            "avatar": avatar if avatar is not None else profile.default_avatar(u.code),
+            "nickname_is_default": u.nickname is None, "avatar_is_default": avatar is None}
+
+@router.post("/users/{code}/profile/reset")
+async def reset_user_profile(code: str, request: Request, p: Principal = STAFF_ONLY):
+    conn = request.app.state.db_conn
+    u = db.get_user_by_code(conn, code)
+    if u is None:
+        return _not_found()
+    detail = {"nickname_custom": u.nickname is not None,
+              "avatar_custom": db.get_user_avatar(conn, u.id) is not None}
+    db.set_user_profile(conn, u.id, nickname=None, avatar=None)
+    _audit(request, p, "user.profile_reset", u.code, detail)
+    return {"ok": True}
 
 @router.post("/users/{code}/activate")
 async def activate_user(code: str, request: Request, p: Principal = ANY_ROLE):

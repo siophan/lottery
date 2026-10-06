@@ -39,6 +39,7 @@ import {
   toEpoch,
   toValueEnum,
 } from '../util'
+import UserProfileLink from './UserProfileLink'
 
 const AMOUNT_RULES = [{ required: true, message: '请输入积分数量' }]
 
@@ -94,6 +95,15 @@ export default function UsersTable({ me }: { me: Me }) {
       dataIndex: 'code',
       copyable: true,
       fieldProps: { placeholder: '按编号搜索' },
+    },
+    {
+      title: '昵称',
+      dataIndex: 'nickname',
+      ellipsis: true,
+      fieldProps: { placeholder: '按昵称搜索' },
+      render: (_, r) => (
+        <UserProfileLink code={r.code} nickname={r.nickname} canReset={!isAgent} onReset={reload} />
+      ),
     },
     {
       title: '编号状态',
@@ -345,6 +355,10 @@ export default function UsersTable({ me }: { me: Me }) {
         if (params.code) {
           const kw = String(params.code).toLowerCase()
           rows = rows.filter((u) => u.code.toLowerCase().includes(kw))
+        }
+        if (params.nickname) {
+          const kw = String(params.nickname).trim().toLowerCase()
+          rows = rows.filter((u) => u.nickname.toLowerCase().includes(kw))
         }
         if (params.status) {
           rows = rows.filter((u) => u.status === params.status)

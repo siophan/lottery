@@ -11,6 +11,7 @@ const ACTION_LABEL: Record<string, string> = {
   'user.reset_password': '重置密码',
   'user.delete': '删除',
   'user.onboard': '首登改密绑定',
+  'user.profile_reset': '重置头像昵称',
   'agent.create': '新建代理',
   'agent.update': '修改代理',
   'agent.status': '代理资格变更',
@@ -58,6 +59,10 @@ function fmtDetail(r: AuditLogRow): string {
   }
   if (r.action === 'user.expires') {
     return `${fmtExpire(d.from)} → ${fmtExpire(d.to)}`
+  }
+  if (r.action === 'user.profile_reset') {
+    const parts = [d.nickname_custom ? '自定义昵称' : null, d.avatar_custom ? '自定义头像' : null].filter(Boolean)
+    return parts.length ? `重置前：${parts.join('、')}` : '重置前已是默认'
   }
   if (r.action === 'points.resumed') {
     return `余额 ${String(d.balance)}`
