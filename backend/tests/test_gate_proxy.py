@@ -151,3 +151,18 @@ def test_onboard_ticket_is_not_a_session_token_10020():
     r = tc.get("/api/ds/sources?cat=hash", headers={"token": ticket})
     assert r.json()["code"] == 10020
     assert seen == []
+
+def test_proxy_blocks_shared_upstream_account_changes():
+    # 共用上游账号的改资料 / 改密 / 改手机 / 实名 / 找回密码一律不转发，任何写法都不行
+    calls = []
+    conn, tc = build(lambda r: calls.append(r.url.path) or httpx.Response(200, json={"code": 0}))
+    tok = _session_for(conn)
+    for p in ("user/updatePwd", "user/updateMobile", "user/updateInfo", "user/realName",
+              "user/forgotPwd", "auth/forgetPwd", "auth/checkUserInfo", "sms/send",
+              "USER/UPDATEPWD", "user//updatePwd", "user/updatePwd/", "x/../user/updatePwd"):
+        r = tc.post("/api/" + p, json={"password": "x"}, headers={"token": tok})
+        assert r.json() == {"code": 1, "msg": "该功能暂不可用"}, p
+    r = tc.post("/api/user/updatePwd", json={})                       # 未登录同样拦截
+    assert r.json() == {"code": 1, "msg": "该功能暂不可用"}
+    assert tc.get("/api/user/info", headers={"token": tok}).json() == {"code": 0}
+    assert calls == ["/api/user/info"]

@@ -131,6 +131,8 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
         from fastapi.responses import JSONResponse
         from . import gate
 
+        if gate.is_blocked(path):
+            return JSONResponse(gate.BLOCKED)
         body = await request.body()
         headers = dict(request.headers)
 

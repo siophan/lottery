@@ -1,10 +1,21 @@
 import json
+import posixpath
 import time
 from . import db
 
 PREAUTH_PATHS = {"auth/login", "version"}
 INVALID_TOKEN_CODES = {10020, 10021}
 POINTS_EMPTY = {"code": 10025, "msg": "无积分，无权操作，请充值积分后自动恢复使用！"}
+# 所有用户共用一个上游账号：会改动该账号资料、密码、手机号、实名的接口一律不转发，
+# 否则任一用户在旧客户端「个人信息 / 修改密码」里的操作会改掉全体共用的上游账号。
+BLOCKED_PATHS = {"user/updatepwd", "user/updatemobile", "user/updateinfo", "user/realname",
+                 "user/forgotpwd", "auth/forgetpwd", "auth/checkuserinfo", "sms/send"}
+BLOCKED = {"code": 1, "msg": "该功能暂不可用"}
+
+def is_blocked(path: str) -> bool:
+    """按规范化后的路径匹配：忽略大小写、多余的斜杠和 . / .. 段，防止换个写法绕过。"""
+    norm = posixpath.normpath("/" + path).strip("/").lower()
+    return norm in BLOCKED_PATHS
 
 def authorize_user(conn, token_header: str):
     """与 authorize 相同的校验；通过 → (User, None)，否则 (None, 错误响应)。"""
