@@ -140,6 +140,12 @@ export async function resetUserPassword(code: string): Promise<ApiResult> {
   )
 }
 
+export async function unbindUserPhone(code: string): Promise<ApiResult> {
+  return result(
+    await req('/users/' + encodeURIComponent(code) + '/unbind-phone', { method: 'POST' }),
+  )
+}
+
 export async function deleteUser(code: string): Promise<ApiResult> {
   return result(await req('/users/' + encodeURIComponent(code), { method: 'DELETE' }))
 }

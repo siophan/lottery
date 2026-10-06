@@ -28,6 +28,7 @@ import {
   PointsResult,
   rechargeUser,
   resetUserPassword,
+  unbindUserPhone,
   UserRow,
 } from '../api'
 import {
@@ -236,6 +237,19 @@ export default function UsersTable({ me }: { me: Me }) {
                 okText: '确认重置',
                 cancelText: '取消',
                 onOk: () => run(resetUserPassword(record.code), '密码已重置为初始密码', '重置失败'),
+              }),
+          },
+          record.phone && {
+            key: 'unbind',
+            label: '解绑手机',
+            onClick: () =>
+              modal.confirm({
+                title: `解绑账号 ${record.code} 的手机号（${record.phone}）？`,
+                content:
+                  '用于手机号被他人绑定的情况。解绑后请再「重置密码」，用户重新首登时即可绑定自己的手机号。',
+                okText: '确认解绑',
+                cancelText: '取消',
+                onOk: () => run(unbindUserPhone(record.code), '已解绑手机号', '解绑失败'),
               }),
           },
           {

@@ -144,6 +144,16 @@ async def reset_password(code: str, request: Request, p: Principal = STAFF_ONLY)
     _audit(request, p, "user.reset_password", code.upper(), {})
     return {"ok": True}
 
+@router.post("/users/{code}/unbind-phone")
+async def unbind_phone(code: str, request: Request, p: Principal = STAFF_ONLY):
+    res = db.unbind_user_phone(request.app.state.db_conn, code,
+                               actor_type=p.actor_type, actor=p.username)
+    if res == "not_found":
+        return _not_found()
+    if res == "unbound":
+        return _err("未绑定手机号", 409)
+    return {"ok": True}
+
 @router.patch("/users/{code}")
 async def patch_user(code: str, request: Request, payload: dict = Body(...),
                      p: Principal = STAFF_ONLY):

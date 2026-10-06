@@ -9,6 +9,7 @@ const ACTION_LABEL: Record<string, string> = {
   'user.status': '状态变更',
   'user.expires': '改到期',
   'user.reset_password': '重置密码',
+  'user.unbind_phone': '解绑手机',
   'user.delete': '删除',
   'user.onboard': '首登改密绑定',
   'user.profile_reset': '重置头像昵称',

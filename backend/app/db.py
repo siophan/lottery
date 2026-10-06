@@ -461,6 +461,29 @@ def reset_user_password(conn, code: str) -> str:
         raise
     return "ok"
 
+def unbind_user_phone(conn, code: str, *, actor_type: str, actor: str) -> str:
+    """后台解绑手机号（账号被他人抢先首登时的恢复手段，配合重置密码使用）。
+    清空绑定手机号与该账号未用的验证码，审计同一事务提交。返回 ok / not_found / unbound。"""
+    u = get_user_by_code(conn, code)
+    if not u:
+        return "not_found"
+    if not u.phone:
+        return "unbound"
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.execute("UPDATE users SET phone=NULL WHERE id=? AND phone=?", (u.id, u.phone))
+        if cur.rowcount != 1:            # 并发下已被改动
+            conn.rollback()
+            return "unbound"
+        conn.execute("DELETE FROM sms_codes WHERE user_id=?", (u.id,))
+        _audit_nocommit(conn, actor_type, actor, "user.unbind_phone", u.code,
+                        {"phone": mask_phone(u.phone)})
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return "ok"
+
 def complete_onboarding(conn, user_id: int, new_password: str, phone: str, now: int,
                         *, audit_detail: dict | None = None) -> None:
     h, salt = hash_password(new_password)
