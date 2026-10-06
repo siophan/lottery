@@ -145,6 +145,48 @@ def test_paused_banned_or_expired_accounts_stop_and_resume_from_scratch(change):
     assert run(conn, NOW + 3 * DAY + 5)["started"] == 1
     assert user(conn, "U1").next_charge_at == NOW + 4 * DAY + 5 and points_of(conn, "U1") == 5
 
+def test_revoke_to_zero_then_quick_recharge_restarts_cycle_without_a_worker_round():
+    conn, _ = build_app()
+    activated_user(conn, "U1", 5)
+    run(conn, NOW)                                                  # started：下次 NOW+DAY
+    db_points.staff_adjust(conn, "user", "U1", "revoke", 5, "扣回", actor_type="admin", actor="root", now=NOW + 100)
+    u = user(conn, "U1")
+    assert (u.points, u.next_charge_at, u.charge_anchor_at) == (0, None, NOW)    # 事务内即停扣，保留 anchor
+    db_points.staff_adjust(conn, "user", "U1", "grant", 3, None, actor_type="admin", actor="root", now=NOW + 200)
+    assert user(conn, "U1").next_charge_at is None                  # 恢复后仍等 Worker 重新起算
+    assert run(conn, NOW + 300)["started"] == 1
+    assert user(conn, "U1").next_charge_at == NOW + 300 + DAY
+    assert run(conn, NOW + DAY + 10)["charged"] == 0                # 旧周期不再生效
+    assert points_of(conn, "U1") == 3
+    assert run(conn, NOW + 300 + DAY)["charged"] == 1 and points_of(conn, "U1") == 2
+
+@pytest.mark.parametrize("change,restore", [
+    ({"status": "disabled"}, {"status": "active"}),
+    ({"status": "banned"}, {"status": "active"}),
+    ({"expires_at": NOW + 50}, {"expires_at": None}),
+])
+def test_pause_ban_expire_then_quick_restore_restarts_cycle_without_a_worker_round(change, restore):
+    conn, _ = build_app()
+    activated_user(conn, "U1", 5)
+    run(conn, NOW)                                                  # started：下次 NOW+DAY
+    db.apply_user_changes(conn, user(conn, "U1"), actor_type="admin", actor="root", now=NOW + 100, **change)
+    u = user(conn, "U1")
+    assert (u.next_charge_at, u.charge_anchor_at) == (None, NOW)
+    db.apply_user_changes(conn, u, actor_type="admin", actor="root", now=NOW + 200, **restore)
+    assert run(conn, NOW + 300)["started"] == 1
+    assert user(conn, "U1").next_charge_at == NOW + 300 + DAY
+    assert run(conn, NOW + DAY + 10)["charged"] == 0
+    assert points_of(conn, "U1") == 5
+
+def test_extending_an_expired_account_restarts_cycle_too():
+    conn, _ = build_app()
+    activated_user(conn, "U1", 5)
+    run(conn, NOW)
+    conn.execute("UPDATE users SET expires_at=? WHERE code='U1'", (NOW + 50,)); conn.commit()
+    db.apply_user_changes(conn, user(conn, "U1"), actor_type="admin", actor="root", now=NOW + 100, expires_at=None)
+    assert user(conn, "U1").next_charge_at is None                  # 已过期期间不计费，延期后重新起算
+    assert run(conn, NOW + 110)["started"] == 1
+
 def test_pending_accounts_are_never_charged():
     conn, _ = build_app()
     db.create_user(conn, "P1", "pw", None, pending=True)

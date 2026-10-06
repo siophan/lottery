@@ -491,6 +491,8 @@ def update_user(conn, code: str, *, expires_at=_UNSET, status=_UNSET, password=_
         sets.append("expires_at=?"); vals.append(expires_at)
     if status is not _UNSET:
         sets.append("status=?"); vals.append(status)
+    if (status is not _UNSET and status != "active") or (expires_at is not _UNSET and _expired(expires_at, time.time())):
+        sets.append("next_charge_at=NULL")        # 不可计费 → 同写入停扣（保留 charge_anchor_at）
     if password is not _UNSET:
         h, salt = hash_password(password)
         sets.append("password_hash=?"); vals.append(h)
@@ -502,13 +504,22 @@ def update_user(conn, code: str, *, expires_at=_UNSET, status=_UNSET, password=_
     conn.commit()
     return True
 
+def _expired(expires_at, now) -> bool:
+    return expires_at is not None and expires_at < now
+
 def apply_user_changes(conn, u: User, *, actor_type: str, actor: str, now: int,
                        status=_UNSET, expires_at=_UNSET) -> None:
     """管理员改状态/到期：更新与审计在同一事务里一次提交，失败整体回滚。
     只对真实变化的字段写审计；值没变则什么都不写。
     暂停/封禁不删会话：gate 每次请求都按状态拒绝（封禁 10024、暂停 10022），
-    客户端据此踢下线并显示对应提示；删掉会话只会得到笼统的 10020「登录已失效」。"""
+    客户端据此踢下线并显示对应提示；删掉会话只会得到笼统的 10020「登录已失效」。
+    积分计费：改动使账号变为不可计费（暂停/封禁/到期时间已过），或让已到期账号重新有效时，同一事务里清空
+    next_charge_at（保留 charge_anchor_at），这样即使 Worker 一轮之内就恢复，也会重新起算 24 小时，不沿用旧周期。"""
     try:
+        if ((status is not _UNSET and status != "active")
+                or (expires_at is not _UNSET and _expired(expires_at, now))
+                or (expires_at is not _UNSET and expires_at != u.expires_at and _expired(u.expires_at, now))):
+            conn.execute("UPDATE users SET next_charge_at=NULL WHERE id=?", (u.id,))
         if status is not _UNSET and status != u.status:
             conn.execute("UPDATE users SET status=? WHERE id=?", (status, u.id))
             _audit_nocommit(conn, actor_type, actor, "user.status", u.code,
