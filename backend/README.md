@@ -226,6 +226,16 @@ ADMIN_COOKIE_SECURE=false DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
   body `{"amount"}`）；`POST /admin/points/batch-recharge`（body `{"codes": [...], "amount", "reason"}`）；
   `GET /admin/points/ledger?holder_type=&holder_id=&kind=&since=&until=&limit=&offset=`；`GET/PUT /admin/settings/trial`。
 
+### 用户信息区（头像、昵称、余额）
+
+客户端首页左上角显示头像、昵称与积分余额（子项目 D）。接口均以请求头 `token` 认证，拦截与其他业务请求一致（余额为 0 → 10025）：
+
+- `GET /api/user/profile`：`nickname`/`avatar` 为实际显示值（未设置时为按账号编号生成的默认昵称与几何图案头像），另含 `defaultAvatar`、`points`、`nicknameIsDefault`、`avatarIsDefault`。
+- `GET /api/user/points`：只返回余额，客户端每 60 秒刷新一次。
+- `POST /api/user/profile`：`{"nickname": "...", "avatar": "data:image/jpeg;base64,..."}`，字段可省略；`avatar: null` 恢复默认头像。昵称 1–12 字；头像仅 JPEG/PNG/WebP、≤ 100KB（客户端已缩放为 128×128）。
+
+头像存于 `user_avatars` 表，昵称存于 `users.nickname`；后台可在账号列表点击昵称查看，并由最高权限者 / 管理员重置为默认（审计 `user.profile_reset`）。
+
 ## 多数据源采集
 
 服务启动后，进程内为每个启用的数据源单独定时拉取开奖号（默认 5 秒，`rows=10`），按数据源隔离存入 SQLite

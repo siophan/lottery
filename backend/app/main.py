@@ -21,6 +21,7 @@ from .admin_auth import AdminDenied
 from .maintenance import run_maintenance, maintenance_loop
 from .points_worker import charge_loop
 from .routes import ds as ds_routes
+from .routes import user as user_routes
 from .routes import admin_datasources as admin_ds_routes
 from .routes import admin_agents as admin_agents_routes
 from .routes import admin_staff as admin_staff_routes
@@ -97,6 +98,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
 
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all
     app.include_router(ds_routes.router, prefix="/api")     # 多数据源，先于 catch-all
+    app.include_router(user_routes.router, prefix="/api")   # 用户信息区，先于 catch-all
     app.include_router(local_router, prefix="/api")
     app.include_router(admin_routes.router, prefix="/admin")
     app.include_router(admin_ds_routes.router, prefix="/admin")
