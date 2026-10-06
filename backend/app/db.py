@@ -485,11 +485,21 @@ def unbind_user_phone(conn, code: str, *, actor_type: str, actor: str) -> str:
     return "ok"
 
 def complete_onboarding(conn, user_id: int, new_password: str, phone: str, now: int,
-                        *, audit_detail: dict | None = None) -> None:
-    h, salt = hash_password(new_password)
+                        *, audit_detail: dict | None = None, hashed: tuple[str, str] | None = None,
+                        expect_hash: str | None = None) -> bool:
+    """完成首登。hashed：调用方已在线程池里算好的 (hash, salt)。
+    expect_hash：调用方校验旧密码时看到的哈希；只有账号仍未首登且密码没变时才写入，
+    否则（并发的另一个请求已完成首登、后台已重置密码）返回 False，什么都不改。"""
+    h, salt = hashed if hashed is not None else hash_password(new_password)
     try:
-        conn.execute("UPDATE users SET password_hash=?, salt=?, phone=?, onboarded_at=? WHERE id=?",
-                     (h, salt, phone, now, user_id))
+        sql = "UPDATE users SET password_hash=?, salt=?, phone=?, onboarded_at=? WHERE id=?"
+        args = [h, salt, phone, now, user_id]
+        if expect_hash is not None:
+            sql += " AND onboarded_at IS NULL AND password_hash=?"
+            args.append(expect_hash)
+        if conn.execute(sql, args).rowcount != 1:
+            conn.rollback()
+            return False
         conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM onboard_tickets WHERE user_id=?", (user_id,))
         if audit_detail is not None:
@@ -503,6 +513,7 @@ def complete_onboarding(conn, user_id: int, new_password: str, phone: str, now: 
     except Exception:
         conn.rollback()
         raise
+    return True
 
 def delete_user_sessions(conn, user_id: int) -> None:
     conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))

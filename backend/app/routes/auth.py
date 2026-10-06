@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from .. import db
-from ..security import verify_password
+from ..security import hash_password, verify_password
 from ..throttle import LOCKED_MSG, client_ip
 from ..dayys_session import DataYsLoginError
 from ..gate import POINTS_EMPTY
@@ -96,11 +96,16 @@ async def login(request: Request):
 
     user = db.get_user_by_code(conn, username)
     # PBKDF2 放到线程池：不阻塞事件循环（线程里只做哈希，不碰共享的数据库连接）
-    if user is None or not await run_in_threadpool(verify_password, password, user.salt, user.password_hash):
+    ok = user is not None and await run_in_threadpool(verify_password, password, user.salt, user.password_hash)
+    if ok:
+        # 哈希期间账号可能被改（重置密码、完成首登、删除）：重新读取，密码已变就按密码错误处理
+        fresh = db.get_user_by_code(conn, username)
+        ok = fresh is not None and (fresh.password_hash, fresh.salt) == (user.password_hash, user.salt)
+        user = fresh
+    if not ok:
         throttle.failed(username, ip)
         return JSONResponse({"code": 1, "msg": "账号或密码错误"})
     throttle.succeeded(username)        # 密码正确即清零该账号的失败计数
-    user = db.get_user_by_code(conn, username) or user     # 哈希期间状态可能已变，重新读取
 
     def deny(body: dict) -> JSONResponse:
         # 密码对但不发会话（未激活/封禁/暂停/首登/无积分）也计入该 IP 的尝试次数：
@@ -204,6 +209,9 @@ async def onboard(request: Request):
     if result != "ok":
         return _fail(_SMS_CHECK_MSG[result])
 
-    db.complete_onboarding(conn, user.id, new, phone, now,
-                           audit_detail={"phone": db.mask_phone(phone)})
+    hashed = await run_in_threadpool(hash_password, new)
+    # 带条件写入：验密 / 哈希期间另一个请求已完成首登（或后台重置了密码）时不覆盖，按票据失效处理
+    if not db.complete_onboarding(conn, user.id, new, phone, now, hashed=hashed, expect_hash=user.password_hash,
+                                  audit_detail={"phone": db.mask_phone(phone)}):
+        return JSONResponse(_TICKET_INVALID)
     return JSONResponse({"code": 0, "msg": "密码修改与手机号绑定成功，请使用新密码重新登录"})

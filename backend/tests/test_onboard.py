@@ -511,3 +511,26 @@ def test_code_requested_by_one_account_unusable_by_another(monkeypatch):
     # B 取码没有覆盖 A 的码：两者各自可用
     assert submit(tc, ta, smsCode=code_a)["code"] == 0
     assert submit(tc, tb, smsCode=code_b)["code"] == 0
+
+def test_concurrent_onboarding_only_first_wins(monkeypatch):
+    # 两个请求同时提交：后到的那个在验旧密码（线程池）期间，先到的已完成首登 → 后到的必须失败，不能覆盖手机号
+    from app.routes import auth as auth_routes
+    conn, tc, _ = build()
+    u = fresh_user(conn)
+    t_late = ticket_for(conn, u)
+    issue_code(conn, phone="13900005678", code="135790", user_id=u.id)
+    real = auth_routes.run_in_threadpool
+    state = {"raced": False}
+    async def racing(fn, *a, **kw):
+        if not state["raced"]:
+            state["raced"] = True
+            db.complete_onboarding(conn, u.id, "Winner123", PHONE, int(time.time()),
+                                   audit_detail={"phone": db.mask_phone(PHONE)})
+        return await real(fn, *a, **kw)
+    monkeypatch.setattr(auth_routes, "run_in_threadpool", racing)
+    r = submit(tc, t_late, phone="13900005678", smsCode="135790", newPassword="Loser1234", confirmPassword="Loser1234")
+    assert r["code"] == 10031, r
+    after = db.get_user_by_code(conn, "USER01")
+    assert after.phone == PHONE
+    assert verify_password("Winner123", after.salt, after.password_hash)
+    assert conn.execute("SELECT COUNT(*) FROM audit_logs WHERE action='user.onboard'").fetchone()[0] == 1

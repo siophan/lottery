@@ -43,7 +43,11 @@ async def authenticate(conn, username: str, password: str):
     # PBKDF2 放到线程池，不阻塞事件循环；线程里只做哈希，数据库读取留在事件循环线程
     if not await run_in_threadpool(security.verify_password, password, admin.salt, admin.password_hash):
         return None
-    return admin
+    # 哈希期间密码可能被改（改密、删除）：重新读取，已变就拒绝
+    fresh = db.get_admin_by_id(conn, admin.id)
+    if fresh is None or (fresh.password_hash, fresh.salt) != (admin.password_hash, admin.salt):
+        return None
+    return fresh
 
 def issue_session(conn, settings, admin) -> str:
     token = security.new_token()

@@ -26,3 +26,16 @@ def test_current_admin_rejects_expired():
     s = Settings(admin_session_ttl=-5)   # 立即过期
     tok = admin_auth.issue_session(conn, s, a)
     assert admin_auth.current_admin(conn, tok) is None
+
+def test_authenticate_rejects_password_changed_while_hashing(monkeypatch):
+    import asyncio
+    from app import admin_auth, security
+    conn = db.connect(":memory:"); db.init_db(conn)
+    db.upsert_admin(conn, "boss", "oldpw1")
+    real = admin_auth.run_in_threadpool
+    async def racing(fn, *a, **kw):
+        h, salt = security.hash_password("newpw1")
+        conn.execute("UPDATE admins SET password_hash=?, salt=? WHERE username='boss'", (h, salt)); conn.commit()
+        return await real(fn, *a, **kw)
+    monkeypatch.setattr(admin_auth, "run_in_threadpool", racing)
+    assert asyncio.run(admin_auth.authenticate(conn, "boss", "oldpw1")) is None

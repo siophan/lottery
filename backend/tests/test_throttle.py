@@ -236,3 +236,20 @@ def test_malformed_login_bodies_are_plain_failures():
         assert tc.post("/api/auth/login", json=body).json() == {"code": 1, "msg": "账号或密码错误"}
     r = tc.post("/api/auth/login", content=b"not json", headers={"content-type": "application/json"})
     assert r.json() == {"code": 1, "msg": "账号或密码错误"}
+
+def test_password_changed_while_hashing_rejects_the_old_password(monkeypatch):
+    # 验密（线程池）期间密码被改（后台重置 / 首登完成）：旧密码不能再拿到会话
+    from app.routes import auth as auth_routes
+    from app.security import hash_password
+    conn, tc, _ = build()
+    db.create_user(conn, "ZED", "oldpw1", None)
+    set_points_raw(conn, "ZED", 10)
+    real = auth_routes.run_in_threadpool
+    async def racing(fn, *a, **kw):
+        h, salt = hash_password("newpw1")
+        conn.execute("UPDATE users SET password_hash=?, salt=? WHERE code='ZED'", (h, salt)); conn.commit()
+        return await real(fn, *a, **kw)
+    monkeypatch.setattr(auth_routes, "run_in_threadpool", racing)
+    r = tc.post("/api/auth/login", json={"username": "ZED", "password": "oldpw1"}).json()
+    assert r == {"code": 1, "msg": "账号或密码错误"}
+    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
