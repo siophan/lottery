@@ -46,6 +46,11 @@
     Object.keys(style).forEach(function (k) { el.style[k] = style[k]; });
   }
 
+  function noDrag(el) {
+    if (typeof el.style.setProperty === 'function') el.style.setProperty('-webkit-app-region', 'no-drag');
+    else el.style['-webkit-app-region'] = 'no-drag';
+  }
+
   function open(options) {
     options = options || {};
     var doc = options.doc || (typeof document !== 'undefined' ? document : null);
@@ -67,14 +72,15 @@
       return e;
     }
 
+    // 登录窗口只有 690×470（不可缩放）：输入框间距压缩，字段分左右两栏，整张卡片不超过约 400px 高
     var INPUT_STYLE = {
-      display: 'block', width: '100%', boxSizing: 'border-box', margin: '8px 0', padding: '8px 10px',
+      display: 'block', width: '100%', boxSizing: 'border-box', margin: '4px 0', padding: '7px 10px',
       fontSize: '14px', border: '1px solid #dcdee2', borderRadius: '4px', outline: 'none',
     };
 
     // 每个输入框上方的可见标签（预填的旧密码只是一串圆点，必须标明含义）
     function label(role, text) {
-      return el('label', 'label-' + role, { display: 'block', marginTop: '8px', fontSize: '12px', color: '#515a6e' }, text);
+      return el('label', 'label-' + role, { display: 'block', marginTop: '6px', fontSize: '12px', color: '#515a6e' }, text);
     }
 
     function input(role, type, placeholder, maxlength) {
@@ -90,13 +96,16 @@
       zIndex: '2147483000', background: 'rgba(0,0,0,0.55)', display: 'flex',
       alignItems: 'center', justifyContent: 'center', fontSize: '14px',
     });
+    // 登录页顶部整行是窗口拖动区：遮罩与卡片都要 no-drag，否则落在拖动区上的输入框点不中
+    noDrag(overlay);
     var card = el('div', 'card', {
-      width: '380px', maxWidth: '92%', maxHeight: '92%', overflowY: 'auto', boxSizing: 'border-box',
-      background: '#fff', borderRadius: '8px', padding: '24px', color: '#17233d',
+      width: '600px', maxWidth: '94%', maxHeight: '94%', overflowY: 'auto', boxSizing: 'border-box',
+      background: '#fff', borderRadius: '8px', padding: '16px 20px', color: '#17233d',
       boxShadow: '0 8px 32px rgba(0,0,0,0.3)', fontSize: '14px',
     });
-    var title = el('div', 'title', { fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }, '首次登录 - 修改密码并绑定手机号');
-    var note = el('div', 'note', { fontSize: '12px', color: '#808695', lineHeight: '1.5', marginBottom: '8px' },
+    noDrag(card);
+    var title = el('div', 'title', { fontSize: '16px', fontWeight: 'bold', marginBottom: '4px' }, '首次登录 - 修改密码并绑定手机号');
+    var note = el('div', 'note', { fontSize: '12px', color: '#808695', lineHeight: '1.5', marginBottom: '2px' },
       '为保障账号安全，首次登录需修改初始密码并绑定实名手机号，完成后请使用新密码重新登录。');
     var oldI = input('old', 'password', '旧密码', 20);
     oldI.value = INITIAL_PASSWORD;
@@ -124,14 +133,21 @@
     }, '确认提交');
     submitBtn.setAttribute('type', 'button');
 
-    [title, note, label('old', '旧密码（初始密码）'), oldI, label('new', '新密码'), newI, hint,
-      label('confirm', '确认新密码'), confirmI, label('phone', '实名手机号'), phoneI,
-      label('code', '短信验证码'), codeRow, errorBox, submitBtn].forEach(function (n) { card.appendChild(n); });
+    var columns = el('div', 'columns', { display: 'flex' });
+    var leftCol = el('div', 'col-password', { flex: '1', minWidth: '0' });
+    var rightCol = el('div', 'col-phone', { flex: '1', minWidth: '0', marginLeft: '16px' });
+    [label('old', '旧密码（初始密码）'), oldI, label('new', '新密码'), newI, hint,
+      label('confirm', '确认新密码'), confirmI].forEach(function (n) { leftCol.appendChild(n); });
+    [label('phone', '实名手机号'), phoneI, label('code', '短信验证码'), codeRow]
+      .forEach(function (n) { rightCol.appendChild(n); });
+    columns.appendChild(leftCol);
+    columns.appendChild(rightCol);
+    [title, note, columns, errorBox, submitBtn].forEach(function (n) { card.appendChild(n); });
 
     var exitBtn = null;
     if (typeof options.onExit === 'function') {
       exitBtn = el('button', 'exit', {
-        display: 'block', margin: '12px auto 0', padding: '0', fontSize: '12px', cursor: 'pointer',
+        display: 'block', margin: '8px auto 0', padding: '0', fontSize: '12px', cursor: 'pointer',
         border: 'none', background: 'none', color: '#808695', textDecoration: 'underline',
       }, '退出程序');
       exitBtn.setAttribute('type', 'button');

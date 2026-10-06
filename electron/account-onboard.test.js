@@ -160,6 +160,13 @@ test('open 构建弹窗：文案、预填旧密码、输入属性、遮罩样式
   assert.strictEqual(overlay.style.position, 'fixed');
   assert.strictEqual(overlay.style.zIndex, '2147483000');
   assert.strictEqual(overlay.style.background, 'rgba(0,0,0,0.55)');
+  // 登录页顶部是窗口拖动区：遮罩与卡片必须 no-drag，否则落在拖动区上的输入框点不中
+  assert.strictEqual(overlay.style['-webkit-app-region'], 'no-drag');
+  assert.strictEqual(q('card').style['-webkit-app-region'], 'no-drag');
+  // 登录窗口仅 690×470：密码与手机号分左右两栏，卡片才放得下（实测高约 375px）
+  assert.strictEqual(q('old').parentNode, q('col-password'));
+  assert.strictEqual(q('phone').parentNode, q('col-phone'));
+  assert.strictEqual(q('submit').parentNode, q('card'));
   assert.strictEqual(q('title').textContent, '首次登录 - 修改密码并绑定手机号');
   assert.strictEqual(q('note').textContent, '为保障账号安全，首次登录需修改初始密码并绑定实名手机号，完成后请使用新密码重新登录。');
   assert.strictEqual(q('hint').textContent, '8-20位，须同时包含字母和数字');
