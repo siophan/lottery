@@ -2,17 +2,27 @@
 // 鉴权、cookie、字段形状全部沿用既有后端，不做任何改动。
 const BASE = '/admin'
 
+// 403 时的回调（App 注册为「重新读取 /me」）：代理被暂停/取消、管理员被删除后，已有会话在后端已失效，
+// 刷新身份后若 /me 返回 401 则自动回到登录页；仍是登录状态（只是无权限）则保持原页面。
+let onForbidden: (() => void) | null = null
+export function setForbiddenHandler(fn: (() => void) | null): void {
+  onForbidden = fn
+}
+
 async function req(path: string, options: RequestInit = {}): Promise<Response> {
   // 仅在有请求体时附带 JSON 头，避免无 body 的 GET/DELETE 带上多余的 Content-Type。
   const headers: Record<string, string> = { ...(options.headers as Record<string, string>) }
   if (options.body != null && headers['Content-Type'] == null) {
     headers['Content-Type'] = 'application/json'
   }
-  return fetch(BASE + path, {
+  const r = await fetch(BASE + path, {
     credentials: 'same-origin',
     ...options,
     headers,
   })
+  // 登录接口自己的 403（代理资格暂停/取消）带具体文案，不触发身份刷新
+  if (r.status === 403 && path !== '/login') onForbidden?.()
+  return r
 }
 
 export interface UserRow {
@@ -37,7 +47,9 @@ export interface ApiResult {
 // 统一解析 {ok, error}：HTTP 200 且 ok !== false 视为成功，否则带回后端的 error 文案。
 async function result(r: Response): Promise<ApiResult> {
   const d = await r.json().catch(() => ({}))
-  return { ok: r.status === 200 && d.ok !== false, error: d.error }
+  // 后端无权限响应是 {"error":"forbidden"}，不要把英文原文展示给用户
+  const error = r.status === 403 && d.error === 'forbidden' ? '无权限或登录已失效' : d.error
+  return { ok: r.status === 200 && d.ok !== false, error }
 }
 
 export type Role = 'super' | 'admin' | 'agent'

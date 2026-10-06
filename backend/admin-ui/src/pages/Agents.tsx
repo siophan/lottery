@@ -127,6 +127,8 @@ export default function Agents({ me }: { me: Me }) {
             extra="留空表示无上级"
           />
         </ModalForm>,
+        // 已回收的代理不能再恢复，也没有其他可变更的资格，不提供入口
+        !r.recycled_at && (
         <ModalForm
           key="status"
           title={`资格变更 · ${r.name}`}
@@ -140,8 +142,9 @@ export default function Agents({ me }: { me: Me }) {
           <ProFormSelect
             name="status"
             label="新资格状态"
+            // 已取消的代理只能恢复为激活；激活/暂停之间可互转，也可取消
             options={Object.entries(AGENT_STATUS_LABEL)
-              .filter(([k]) => k !== r.status)
+              .filter(([k]) => k !== r.status && (r.status !== 'cancelled' || k === 'active'))
               .map(([value, label]) => ({ value, label }))}
             rules={[{ required: true, message: '请选择资格状态' }]}
             extra="暂停/取消后该代理不能登录后台；取消后名称保留一年，回收前可恢复"
@@ -151,7 +154,8 @@ export default function Agents({ me }: { me: Me }) {
             label="原因"
             rules={[{ required: true, whitespace: true, message: '请填写变更原因' }, { max: 200 }]}
           />
-        </ModalForm>,
+        </ModalForm>
+        ),
         canRename && r.status !== 'cancelled' && (
           <ModalForm
             key="rename"
