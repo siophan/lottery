@@ -177,8 +177,7 @@ def test_proxy_blocks_upstream_orders():
               "ORDER/NEWCREATE", "order//create", "x/../order/create", "order"):
         r = tc.post("/api/" + p, json={"productId": 1}, headers={"token": tok})
         assert r.json() == {"code": 1, "msg": "该功能暂不可用"}, p
-    assert tc.post("/api/orders/list", headers={"token": tok}).json() == {"code": 0}   # 前缀按段匹配
-    assert calls == ["/api/orders/list"]
+    assert calls == []
 
 def test_proxy_rejects_path_tricks_that_upstream_frameworks_may_normalise():
     # 上游若按 Servlet / Spring 规则去掉 ;参数、匹配后缀，这些写法到上游就是被拦的接口；
@@ -209,3 +208,23 @@ def test_proxy_does_not_forward_rewrite_or_override_headers():
     assert seen["token"] == "DYTOK" and seen["fromid"]
     assert not {"x-original-url", "x-rewrite-url", "x-http-method-override",
                 "x-forwarded-for", "forwarded"} & set(seen)
+
+def test_proxy_forwards_only_allowlisted_upstream_paths():
+    # 上游可能有客户端没用到的扣费 / 改账号接口：放行清单外的一律不转发，未登录同样拦截
+    from app import gate
+    calls = []
+    conn, tc = build(lambda r: calls.append(r.url.path) or httpx.Response(200, json={"code": 0}))
+    tok = _session_for(conn)
+    for p in ("pay/create", "orders/list", "score/deduct", "user/delete", "user/info/x", "user"):
+        assert tc.post("/api/" + p, json={}, headers={"token": tok}).json() == gate.BLOCKED, p
+    assert tc.post("/api/pay/create", json={}).json() == gate.BLOCKED
+    assert tc.get("/api/auth/login").json() == gate.BLOCKED        # 登录只走本地 POST 路由，不再转发
+    for p in ("lotteryNumber/topRows", "LOTTERYNUMBER/TOPROWS", "vipplan/list", "user/isVip"):
+        assert tc.post("/api/" + p, json={}, headers={"token": tok}).json() == {"code": 0}, p
+    assert calls == ["/api/lotteryNumber/topRows", "/api/LOTTERYNUMBER/TOPROWS", "/api/vipplan/list", "/api/user/isVip"]
+
+def test_allowlist_never_contains_blocked_paths():
+    from app import gate
+    assert not gate.ALLOWED_PATHS & gate.BLOCKED_PATHS
+    assert not {p for p in gate.ALLOWED_PATHS if p.split("/", 1)[0] in gate.BLOCKED_PREFIXES}
+    assert all(gate.SAFE_PATH.fullmatch(p) for p in gate.ALLOWED_PATHS)

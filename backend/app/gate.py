@@ -18,13 +18,59 @@ BLOCKED = {"code": 1, "msg": "该功能暂不可用"}
 # 上游若按 Servlet / Spring 规则处理路径，「user/updatePwd;x」「user/updatePwd.json」「user/updatePwd.」
 # 都会落到被拦的接口上，所以 ; . 空白 控制字符 反斜杠 空段 一律不转发，不去猜上游怎么规范化
 SAFE_PATH = re.compile(r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*")
+# 放行清单：客户端（client/js）实际调用的上游接口，去掉上面拦截的那些。上游可能还有客户端没用到的
+# 扣费 / 改账号接口，清单外的一律不转发。客户端更新用到新接口时，要先把它加进来
+ALLOWED_PATHS = frozenset(p.lower() for p in """
+version
+averagePlan/del averagePlan/info averagePlan/list averagePlan/save
+basketballGameInfoJc/historySchedule basketballGameInfoJc/matchDetailData basketballGameInfoJc/meetingList
+basketballGameInfoJc/schedule basketballGameInfoJc/scheduleChart basketballGameInfoJc/searchOdds
+codeTrend/animalsDm codeTrend/chart
+core/serviceAi
+coursemsg/info coursemsg/save
+crawler/getList crawler/numList
+dantuo/getHot dantuo/getList
+doublePlan/del doublePlan/info doublePlan/list doublePlan/save
+expertFavorites/del expertFavorites/list expertFavorites/save
+footballHistoryClash/schedule footballHistoryMeetingJc/schedule
+footballHistorySchedule/historySchedule footballHistorySchedule/schedule
+footballHistoryScheduleJc/historySchedule footballHistoryScheduleJc/schedule
+footballLeague/info footballLeague/schedule footballLeague/standingBs footballLeague/standingLs footballLeague/team
+footballZqszsc/schedule
+footballgameinfo/chart footballgameinfo/live footballgameinfo/schedule
+footballgameinfojc/getChang footballgameinfojc/jc2c1 footballgameinfojc/schedule footballgameinfojc/scheduleChart
+footballgameinfojc/scheduleChart2c1 footballgameinfojc/scheduleLive footballgameinfojc/searchOdds
+footballplanjc/history footballplanjc/info footballplanjc/list
+footballplanttg/history footballplanttg/info footballplanttg/list
+hisData/getHistoryDataList hisData/getOddsList
+lotteryNumber/getOpenNum lotteryNumber/mantissaDate lotteryNumber/mantissaTopRows lotteryNumber/topRows
+lotterynumberplan/info lotterynumberplan/list lotterynumberplan/page
+miss3dp3/list missanimal/list misshash/list
+misscontrol/del misscontrol/list misscontrol/save
+numExpert/rankingAll numExpertPlan/expect numExpertPlan/list
+omission/getOpenNumber
+planFixed/list
+product/list
+sjb/getJf sjb/getQd sjb/getSchedule
+softnotice/getNotice softnotice/list
+softproductzc/showVip
+sportExpert/infoList sportExpert/rankingAll
+sportExpertPlan/basketballJc/plan sportExpertPlan/chartJc sportExpertPlan/football/plan
+sportExpertPlan/footballJc/expert sportExpertPlan/footballJc/plan sportExpertPlan/footballJc/planInfo
+sportExpertPlan/kLink
+user/info user/init user/isExpire user/isVip
+userNumPlan/del userNumPlan/info userNumPlan/list userNumPlan/save
+video/list videodirectory/list
+vipplan/history vipplan/list vipplan/profit vipplan/statistics
+""".split())
 
 def is_blocked(path: str) -> bool:
-    """形状不合规的路径一律拦截；合规的再按小写匹配拦截清单与前缀（normpath 留作兜底）。"""
+    """形状不合规、不在放行清单、或命中拦截清单与前缀（按小写比较）的路径一律拦截。"""
     if not SAFE_PATH.fullmatch(path):
         return True
     norm = posixpath.normpath("/" + path).strip("/").lower()
-    return norm in BLOCKED_PATHS or norm.split("/", 1)[0] in BLOCKED_PREFIXES
+    return (norm not in ALLOWED_PATHS or norm in BLOCKED_PATHS
+            or norm.split("/", 1)[0] in BLOCKED_PREFIXES)
 
 def authorize_user(conn, token_header: str):
     """与 authorize 相同的校验；通过 → (User, None)，否则 (None, 错误响应)。"""

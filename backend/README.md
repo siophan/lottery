@@ -119,7 +119,8 @@ DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
   `auth/checkUserInfo`、`sms/send`）不转发，直接返回 `{"code":1,"msg":"该功能暂不可用"}`。
   上游下单同样记在共用账号上（续费、买方案、VIP、培训报名，含「积分支付」直接扣共用账号余额，订单列表人人可见），
   整个 `order/`（`order/newCreate`、`order/create`、`order/createPlanNum`、`order/createPlanJc`、`order/createVipPlanJc`、
-  `order/page`、`order/info` 等）一律不转发。转发层只接受由字母、数字、下划线、连字符组成的非空路径段，
+  `order/page`、`order/info` 等）一律不转发。除此之外，转发层只放行客户端实际调用的上游接口（`app/gate.py` 的 `ALLOWED_PATHS`），
+  清单外的路径（上游可能存在的其他扣费 / 改账号接口）一律不转发；客户端更新用到新接口时，要先把它加进清单。转发层只接受由字母、数字、下划线、连字符组成的非空路径段，
   带 `;`、`.`、空白、控制字符、反斜杠或空段的路径一律不转发（防止上游按 `;参数` / 后缀规则把它们解析成被拦的接口）。
   请求头只转发 `Content-Type`、`Accept`、`Accept-Language`、`User-Agent` 和改写后的 `token`、`fromId`，
   `X-Original-URL`、`X-HTTP-Method-Override`、`X-Forwarded-*`、`Cookie` 等一律丢弃（防止上游网关按这些头改写路径或方法）。
