@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS audit_logs(
 - `scripts/patch-ds-client.js` 新增一层 `onboard v1`，`only: ['chunk-4dffb567.9e3cf4c5.js']`（登录页）：
   1. `login()` 的 `res.code == 0` 分支后插入 `else if (res.code == 10030 && window.dsOnboard)` → `window.dsOnboard.open({ apiURL, onboardToken: res.data.onboardToken, onDone })`。
   2. 密码校验规则 `max: 12` / 「请输入6-12位密码」→ `max: 20` /「请输入6-20位密码」。
+  3. `login()` 失败提示（`res.msg`）的 `duration: 800` → `3000`，让 10023/10024/10022 等较长文案看得清（只改 `login()`，忘记密码等其他提示不动）。
   锚点命中次数精确校验，幂等；测试用现有 `loadComponent` 夹具跑补丁后的真实模块。
 
 ## 7 管理后台

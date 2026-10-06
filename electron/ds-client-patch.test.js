@@ -811,3 +811,19 @@ test('login: 密码校验规则放宽到 6-20 位；忘记密码的提示文案�
   assert.ok(!src.includes('请输入6-12位密码'));
   assert.strictEqual(src.split('请输入6-12位新密码').length - 1, 1);
 });
+
+test('login: 登录失败提示停留 3 秒（10023/10024/10022 等文案较长）；忘记密码等其他提示仍是 800ms', async () => {
+  for (const reply of [{ code: 10023, msg: '账号未激活' }, { code: 10024, msg: '账号已封禁' },
+    { code: 10022, msg: '账号已停用' }, { code: 1, msg: '账号或密码错误' }]) {
+    const h = loginHarness(reply);
+    await h.run();
+    assert.strictEqual(h.messages.length, 1);
+    assert.strictEqual(h.messages[0].message, reply.msg);
+    assert.strictEqual(h.messages[0].type, 'error');
+    assert.strictEqual(h.messages[0].duration, 3000, String(reply.code));
+  }
+  const src = loginSource();
+  const login = src.slice(src.indexOf('    login() {'));
+  assert.ok(!login.slice(0, login.indexOf('\n    }\n')).includes('duration: 800'));
+  assert.ok(src.slice(src.indexOf('    forgotPwd() {'), src.indexOf('    login() {')).includes('duration: 800'));
+});

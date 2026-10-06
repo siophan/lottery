@@ -362,12 +362,13 @@ const APP_LAYERS = [
 
 // 登录页 chunk（src/views/login/index.vue）：login() 收到 10030（首次登录需改密并绑定手机）时打开首登弹窗
 // window.dsOnboard（client/account-onboard.js）；弹窗脚本未加载或响应缺 onboardToken 时仍走原来的错误提示（res.msg）；
+// 登录失败提示从 800ms 延长到 3 秒（10023/10024/10022 等文案较长，800ms 来不及看清；仅 login()）；
 // 密码校验规则从 6-12 位放宽到 6-20 位（新密码最长 20 位）。忘记密码的「请输入6-12位新密码」不在本层范围内
 const ONBOARD_MARK = '/* ds-patch onboard v1 */';
 const LOGIN_CHUNK = 'chunk-4dffb567.9e3cf4c5.js';
 const LOGIN_REPLACEMENTS = [
   { // 带上 else 后两行才能与注释掉的 // this.$router.push("/index"); 区分开，命中 1 次
-    find: '              this.$router.push("/index");\n            } else {\n              this.$message({',
+    find: '              this.$router.push("/index");\n            } else {\n              this.$message({\n                message: res.msg,\n                type: \'error\',\n                duration: 800,',
     repl: [
       `              this.$router.push("/index");`,
       `            } else if (res.code == 10030 && res.data && res.data.onboardToken && window.dsOnboard) {`,
@@ -396,6 +397,9 @@ const LOGIN_REPLACEMENTS = [
       `              });`,
       `            } else {`,
       `              this.$message({`,
+      `                message: res.msg,`,
+      `                type: 'error',`,
+      `                duration: 3000,`,
     ].join('\n'),
     count: 1,
   },
