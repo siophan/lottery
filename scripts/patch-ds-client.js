@@ -525,6 +525,63 @@ const LOGIN_LAYERS = [
   { mark: PROFILE_MARK, replacements: PROFILE_LOGIN_REPLACEMENTS },
 ];
 
+// 上游购买入口（后端已拦截 order/ 接口，见 backend/app/gate.py）：所有用户共用一个上游账号，下单、续费、积分支付
+// 都记在这个共用账号上，入口一律隐藏。续费页 / 订单列表页由主进程拦截建窗（electron/page-guard.js）。
+//   竞彩方案（/jc/football/plan）：每条方案的「购买 X 元」按钮去掉；查看未购买方案（1099）不再弹支付，提示不可用
+//   进球方案（/jc/football/planTtg）：查看未购买方案（1099）不再弹购买协议，提示不可用
+//   竞彩 VIP 方案：未开通时只显示提示，不显示「立即购买」
+//   职业培训（/person/peixunshi）：去掉「立即报名(¥…)」按钮；已报名时的禁用按钮保留
+const SHOP_MARK = '/* ds-patch shop v1 */';
+const SHOP_BLOCKED_MSG = '该功能暂不可用';
+const SHOP_1099 = (call) => ({
+  find: `        } else if (res.code == 1099) {\n          ${call}\n        } else {`,
+  repl: `        } else if (res.code == 1099) {\n          ${SHOP_MARK}\n          this.$message.error("${SHOP_BLOCKED_MSG}");\n        } else {`,
+  count: 1,
+});
+const SHOP_CHUNKS = {
+  'chunk-ba2a8512.60d0503d.js': {
+    locator: 'openPsy() {',
+    replacements: [
+      {
+        find: "!item.isShow ? _c('el-button', {\n      attrs: {\n        \"type\": \"primary\",\n        \"size\": \"medium \"\n      },\n" +
+          "      on: {\n        \"click\": function ($event) {\n          return _vm.openXy(item);\n        }\n      }\n" +
+          "    }, [_c('span', [_vm._v(\"购买\" + _vm._s(item.product.money) + \"元\")])]) : _vm._e()",
+        repl: `${SHOP_MARK} _vm._e()`,
+        count: 1,
+      },
+      SHOP_1099('this.openPsy();'),
+    ],
+  },
+  'chunk-5e6f233e.2da4fd7d.js': {
+    locator: 'openPsy() {',
+    replacements: [SHOP_1099('this.openXy(obj);')],
+  },
+  'chunk-dd332f00.01278b4e.js': {
+    locator: 'openXy(item) {',
+    replacements: [
+      {
+        find: "      \"title\": \"您未购买竞彩vip服务,请前往购买\"\n    }\n  }, [_c('template', {\n    slot: \"extra\"\n  }, [_c('el-button', {\n" +
+          "    attrs: {\n      \"type\": \"primary\",\n      \"size\": \"medium\"\n    },\n    on: {\n      \"click\": function ($event) {\n" +
+          "        _vm.centerDialogVisible1 = true;\n      }\n    }\n  }, [_vm._v(\"立即购买\")])], 1)], 2)",
+        repl: `      "title": "您未开通竞彩VIP服务"\n    }\n  }) ${SHOP_MARK}`,
+        count: 1,
+      },
+    ],
+  },
+  'chunk-85ffefb8.7fcad18b.js': {
+    locator: 'openPsy() {',
+    replacements: [
+      {
+        find: "[_vm._v(\"已报名\")]) : _c('el-button', {\n    staticStyle: {\n      \"width\": \"300px\",\n      \"height\": \"35px\"\n    },\n" +
+          "    attrs: {\n      \"type\": \"primary\"\n    },\n    on: {\n      \"click\": _vm.openPsy\n    }\n" +
+          "  }, [_vm._v(\"立即报名(¥\" + _vm._s(_vm.money) + \")\")])",
+        repl: `[_vm._v("已报名")]) : ${SHOP_MARK} _vm._e()`,
+        count: 1,
+      },
+    ],
+  },
+};
+
 // 在 locator 所在模块的 eval 字符串编码下，依次叠加尚未打过的层
 function applyLayers(raw, locator, layers, name) {
   const p = raw.indexOf(locator);
@@ -563,6 +620,12 @@ function patchTrend(raw) {
   return applyLayers(raw, 'topRows(res, callback) {', TREND_LAYERS);
 }
 
+// name：SHOP_CHUNKS 的键之一
+function patchShop(raw, name) {
+  const c = SHOP_CHUNKS[name];
+  return applyLayers(raw, c.locator, [{ mark: SHOP_MARK, replacements: c.replacements }]);
+}
+
 // name：chunk 文件名（CHUNKS 之一），部分层的锚点因 chunk 而异
 function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
@@ -570,7 +633,8 @@ function patchChunk(raw, name) {
 
 module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
-  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR };
+  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
+  patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');
@@ -602,6 +666,17 @@ if (require.main === module) {
   } else {
     fs.writeFileSync(loginFile, loginOut);
     console.log(`patched ${LOGIN_CHUNK}`);
+  }
+  for (const name of Object.keys(SHOP_CHUNKS)) {
+    const file = path.join(dir, name);
+    const raw = fs.readFileSync(file, 'utf8');
+    const out = patchShop(raw, name);
+    if (out === raw) {
+      console.log(`skip    ${name}（已打过补丁）`);
+    } else {
+      fs.writeFileSync(file, out);
+      console.log(`patched ${name}`);
+    }
   }
   const appFile = path.join(dir, APP_CHUNK);
   const appRaw = fs.readFileSync(appFile, 'utf8');

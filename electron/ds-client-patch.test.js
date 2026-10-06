@@ -5,7 +5,8 @@ const path = require('path');
 const vm = require('vm');
 const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS, AUTH_MARK, KICK_MARK,
   patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
-  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR } = require('../scripts/patch-ds-client.js');
+  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
+  patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG } = require('../scripts/patch-ds-client.js');
 const dsSources = require('../client/ds-sources.js');
 
 const DIR = path.join(__dirname, '..', 'client', 'js');
@@ -990,3 +991,65 @@ test('首页：dsProfile 脚本未加载时不报错', () => {
   h.comp.destroyed.call(h.vmThis);
   assert.strictEqual(h.vmThis.dsProfileCtl, undefined);
 });
+
+// ---- 上游购买入口（shop v1）----
+const shopRaw = (name) => fs.readFileSync(path.join(DIR, name), 'utf8');
+const shopSource = (name) => evalSources(shopRaw(name)).find((src) => src.includes(SHOP_CHUNKS[name].locator));
+
+test('shop: 4 个页面 chunk 已打补丁且再次运行不变（幂等），全部模块源码语法有效', () => {
+  for (const name of Object.keys(SHOP_CHUNKS)) {
+    const raw = shopRaw(name);
+    assert.strictEqual(patchShop(raw, name), raw, name);
+    const srcs = evalSources(raw);
+    for (const src of srcs) new vm.Script(src);
+    assert.ok(shopSource(name).includes(SHOP_MARK), name);
+  }
+});
+
+test('shop: 锚点不匹配时报错', () => {
+  const name = 'chunk-85ffefb8.7fcad18b.js';
+  assert.throws(() => patchShop("eval('openPsy() {')", name), /命中 0 次/);
+  assert.throws(() => patchShop('nothing', name), /openPsy/);
+});
+
+test('shop: 购买 / 立即购买 / 立即报名按钮从页面模板中去掉', () => {
+  const plan = shopSource('chunk-ba2a8512.60d0503d.js');
+  assert.ok(!plan.includes('return _vm.openXy(item);'));
+  assert.ok(!plan.includes('_vm._v("购买" + _vm._s(item.product.money) + "元")'));
+  assert.ok(plan.includes('_vm._v("查看")'));                         // 查看按钮保留
+  const vip = shopSource('chunk-dd332f00.01278b4e.js');
+  assert.ok(!vip.includes('立即购买'));
+  assert.ok(!vip.includes('请前往购买'));
+  assert.ok(vip.includes('"title": "您未开通竞彩VIP服务"'));
+  const train = shopSource('chunk-85ffefb8.7fcad18b.js');
+  assert.ok(!train.includes('立即报名'));
+  assert.ok(train.includes('_vm._v("已报名")'));
+});
+
+// 查看未购买的方案：上游返回 1099 时原本弹出购买协议 / 支付方式，补丁后只提示不可用
+for (const [name, api, arg, entry] of [
+  ['chunk-ba2a8512.60d0503d.js', 'C', { info: { id: 7 } }, 'openPsy'],
+  ['chunk-5e6f233e.2da4fd7d.js', 'F', { id: 7 }, 'openXy'],
+]) {
+  test(`shop: ${name} 查看未购买方案（1099）只提示「${SHOP_BLOCKED_MSG}」，不进入购买流程`, async () => {
+    const comp = loadComponent(shopSource(name), {
+      modules: { '115c': { [api]: () => Promise.resolve({ code: 1099, msg: 'no' }) } },
+    });
+    const errors = [];
+    const entered = [];
+    const vm = {
+      $loading: () => ({ close() {} }),
+      $message: { error: (m) => errors.push(m), success() {}, closeAll() {} },
+      openPsy: () => entered.push('openPsy'),
+      openXy: () => entered.push('openXy'),
+      formatOption: () => ({}),
+      formatCalculator() {},
+    };
+    comp.methods.info.call(vm, arg);
+    await tick();
+    assert.deepEqual(errors, [SHOP_BLOCKED_MSG]);
+    assert.deepEqual(entered, []);
+    assert.notEqual(vm.centerDialogVisible1, true);
+    assert.equal(entry in comp.methods, true);                            // 原方法仍在，只是不再被调用
+  });
+}

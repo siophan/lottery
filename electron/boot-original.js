@@ -6,8 +6,9 @@
 // 之所以还需要代理：原版 shipped bundle 的 apiURL 就是 127.0.0.1:8000，
 // 说明原 Windows 版同样依赖一个本地代理把 /api/* 转发到上游 soft-api.data-ys.com。
 const path = require('path');
-const { ipcMain } = require('electron');
+const { ipcMain, dialog, BrowserWindow } = require('electron');
 const { startServer, UPSTREAM_DEFAULT } = require('./server');
+const { guardNewPage, BLOCKED_MSG } = require('./page-guard');
 
 // 原生插件 shim：必须在 require 原版主进程之前挂到 global。
 // background.js 里的 a(131)("*.node") 已被改写为 global.__ys_native("*.node")。
@@ -31,6 +32,17 @@ ipcMain.on = function (channel, listener) {
       }
       console.log('[update-stub] checkForUpdate 已拦截 -> 无需更新 (mac)');
     });
+  }
+  if (channel === 'newPage') {
+    // 续费页、订单列表页（上游下单入口）不建窗，提示功能暂不可用；见 page-guard.js
+    return _ipcOn(channel, guardNewPage(listener, (event) => {
+      // 「到期请续费」对话框会先 subclose 当前窗口再请求续费页，发送方可能已销毁
+      let parent = null;
+      try { parent = BrowserWindow.fromWebContents(event.sender); } catch (e) { parent = null; }
+      if (parent && parent.isDestroyed()) parent = null;
+      const opts = { type: 'info', title: '提示', message: BLOCKED_MSG, buttons: ['确定'] };
+      (parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts)).catch(() => {});
+    }));
   }
   return _ipcOn(channel, listener);
 };
