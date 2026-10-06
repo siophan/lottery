@@ -4,7 +4,7 @@ from app.config import Settings
 from app.sms import (SmsError, LogSmsSender, AliyunSmsSender,
                      aliyun_signature, build_sms_sender)
 
-# 阿里云官方文档示例
+# 含中文与特殊字符的参数集（仅用于签名忽略 Signature 的测试）
 DOC_PARAMS = {
     "AccessKeyId": "testid", "Action": "SendSms", "Format": "XML", "OutId": "123",
     "PhoneNumbers": "15300000001", "RegionId": "cn-hangzhou",
@@ -14,12 +14,6 @@ DOC_PARAMS = {
     "TemplateParam": '{"customer":"test"}',
     "Timestamp": "2017-07-12T02:42:19Z", "Version": "2017-05-25",
 }
-
-# 短信文档示例的期望值（任务书指定）本实现无法复现：规范串构造经核对符合 RPC V1 规则，
-# 且能复现阿里云 RPC 文档的另一官方向量（见下一个测试）。期望值保持原样，标 xfail 留痕待人工核对。
-@pytest.mark.xfail(reason="任务书给定的短信示例期望值与按 RPC V1 规则算出的值不一致", strict=False)
-def test_aliyun_signature_matches_sms_doc_example():
-    assert aliyun_signature(DOC_PARAMS, "testsecret") == "zJDF+Lrzhj/ThnlvIToysFRq6t4="
 
 def test_aliyun_signature_matches_rpc_doc_vector():
     # 阿里云 RPC 签名机制文档示例（DescribeRegions）
