@@ -372,7 +372,8 @@ const KICK2_REPLACEMENTS = [
 ];
 
 // 用户信息区（子项目 D）：登录成功时把 data.points 存入 localStorage.dsPoints（首页先显示、再向后台刷新）；
-// 首页 index.vue（在 app chunk 里）在背景与 .card 之间加挂载点 ref="dsProfile"（不放进 opacity .74 的 .card），
+// 首页 index.vue（在 app chunk 里）在 .card 之后（#content 之前）加挂载点 ref="dsProfile"（不放进 opacity .74 的 .card；
+// 必须排在 .card 里 -webkit-app-region: drag 条之后，no-drag 区域才会覆盖它，点头像/昵称不会拖动窗口），
 // mounted 时交给 window.dsProfile（client/user-profile.js）渲染，activated 时刷新，destroyed 时卸载。
 // 请求用首页同一个 axios 实例（b775），令牌注入与 10025 等拦截由它统一处理。
 const PROFILE_MARK = '/* ds-patch profile v1 */';
@@ -392,8 +393,8 @@ const PROFILE_LOGIN_REPLACEMENTS = [
 const INDEX_LOCATOR = 'var indexvue_type_template_id_d79680f8_scoped_true_render';
 const PROFILE_APP_REPLACEMENTS = [
   {
-    find: "  }, [_c('div', {\n    staticClass: \"bg bodymain\"\n  }), _c('div', {\n    staticClass: \"card\"\n  }, [",
-    repl: "  }, [_c('div', {\n    staticClass: \"bg bodymain\"\n  }), _c('div', {\n    ref: \"dsProfile\"\n  }), _c('div', {\n    staticClass: \"card\"\n  }, [",
+    find: `_vm.username))])])]), _c('div', {\n    staticStyle: {\n      "margin-top": "43px"\n    },\n    attrs: {\n      "id": "content"\n    }`,
+    repl: `_vm.username))])])]), _c('div', {\n    ref: "dsProfile"\n  }), _c('div', {\n    staticStyle: {\n      "margin-top": "43px"\n    },\n    attrs: {\n      "id": "content"\n    }`,
     count: 1,
   },
   {

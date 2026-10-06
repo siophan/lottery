@@ -21,6 +21,8 @@ function makeEl(tag) {
     removeEventListener(t, fn) { this.listeners[t] = (this.listeners[t] || []).filter((f) => f !== fn); },
     dispatch(t, ev) { (this.listeners[t] || []).slice().forEach((f) => f(ev || { target: this })); },
     click() { this.clicks++; },
+    // 沿 parentNode 走到根，根是 attached（挂载点 / body）才算在文档里
+    get isConnected() { let n = this; while (n.parentNode) n = n.parentNode; return n.attached === true; },
   };
 }
 function find(root, role) {
@@ -34,6 +36,7 @@ function find(root, role) {
 function makeDoc() {
   const doc = makeEl('document');
   doc.body = makeEl('body');
+  doc.body.attached = true;
   doc.createElement = (tag) => makeEl(tag);
   return doc;
 }
@@ -42,6 +45,7 @@ function makeDoc() {
 function harness({ points = '5', replies = {}, readImage } = {}) {
   const doc = makeDoc();
   const el = makeEl('div');
+  el.attached = true;                        // 挂载点在文档里
   const calls = [];
   const timers = [];
   const cleared = [];
@@ -126,6 +130,20 @@ test('每 60 秒刷新余额；失败 / 被拦截 / 非 0 时保留上次显示'
     await h.timers[0].fn(); await tick();
     assert.strictEqual(h.q('ds-profile-points').textContent, '积分：4');
   }
+});
+
+test('挂载点离开文档（keep-alive 停用）后轮询不请求，回到文档后恢复', async () => {
+  const h = harness({ replies: { 'get /user/profile': PROFILE, 'get /user/points': { code: 0, data: { points: 4 } } } });
+  await tick();
+  const n = h.calls.length;
+  h.el.attached = false;
+  await h.timers[0].fn(); await tick();
+  assert.strictEqual(h.calls.length, n);
+  assert.strictEqual(h.q('ds-profile-points').textContent, '积分：9');
+  h.el.attached = true;
+  await h.timers[0].fn(); await tick();
+  assert.strictEqual(h.calls.length, n + 1);
+  assert.strictEqual(h.q('ds-profile-points').textContent, '积分：4');
 });
 
 test('编辑：打开弹窗预填昵称；未改动直接关闭不请求', async () => {

@@ -910,7 +910,7 @@ test('login: 返回 10025 → 提示后端文案 3 秒，不跳转、不存 toke
   assert.strictEqual(h.opens.length, 0);
 });
 
-// ---- profile v1：登录保存余额；首页在背景与 .card 之间挂载用户信息区（window.dsProfile） ----
+// ---- profile v1：登录保存余额；首页在 .card 之后挂载用户信息区（window.dsProfile） ----
 test('login: 登录成功把 data.points 存入 localStorage.dsPoints（缺失存空串）', async () => {
   let h = loginHarness({ code: 0, data: { token: 'T', userInfo: {}, points: 12 } });
   await h.run();
@@ -922,13 +922,19 @@ test('login: 登录成功把 data.points 存入 localStorage.dsPoints（缺失�
 
 const indexSource = () => appModuleSource(fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8'), INDEX_LOCATOR);
 
-test('app chunk: 首页模板在背景与 .card 之间加 ref="dsProfile" 挂载点', () => {
+test('app chunk: 首页模板在 .card 之后（#content 之前、不在 .card 内）加 ref="dsProfile" 挂载点', () => {
   const src = indexSource();
   assert.ok(src.includes(PROFILE_MARK));
   const bg = src.indexOf('staticClass: "bg bodymain"');
-  const mountPoint = src.indexOf('ref: "dsProfile"');
   const card = src.indexOf('staticClass: "card"');
-  assert.ok(bg > 0 && bg < mountPoint && mountPoint < card);
+  const cardLast = src.indexOf('软件编号');
+  const mountPoint = src.indexOf('ref: "dsProfile"');
+  const content = src.indexOf('"id": "content"');
+  // bg < card < .card 最后一个子节点 < 挂载点 < #content：挂载点在 drag 条之后（no-drag 才能盖过 drag），且不在 .card 里
+  assert.ok(bg > 0 && bg < card && card < cardLast && cardLast < mountPoint && mountPoint < content);
+  // .card 在挂载点之前已闭合：挂载点紧跟 .card 的结尾 `])])]), ` 且是顶层兄弟节点（2 空格缩进的 `}), _c(`）
+  assert.ok(src.slice(cardLast, mountPoint).includes("_vm.username))])])]), _c('div', {\n    "));
+  assert.strictEqual(src.split('ref: "dsProfile"').length - 1, 1);
   new vm.Script(src);
 });
 

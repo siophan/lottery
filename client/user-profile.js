@@ -174,6 +174,8 @@
     }
 
     function pollPoints() {
+      // 首页被 keep-alive 缓存（deactivated）后挂载点已不在文档里：不再每 60 秒白打一次请求
+      if (!box.isConnected) return Promise.resolve();
       return call('get', '/user/points').then(function (res) {
         if (!destroyed && res && res.code == 0 && res.data && typeof res.data.points === 'number') {
           setPoints(res.data.points);
