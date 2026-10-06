@@ -276,3 +276,38 @@ def list_agents(conn, *, parent_id: int | None = None) -> list[dict]:
                  unactivated=r["total"] - r["activated"], children=r["children"])
         out.append(d)
     return out
+
+# ---------------- 改名 ----------------
+
+def rename_agent(conn, agent_id: int, new_name, *, actor_type: str, actor: str, now: int) -> Agent:
+    """改名：旧名进入一年保留期（仅大小写变化时规范化名称不变，不写保留）；登录名同步改为新名。
+    改回本人保留期内的旧名允许，并解除该保留。已取消资格的代理不能改名。"""
+    new_name = normalize_name(new_name)
+    key = name_key(new_name)
+    begin_write(conn)
+    try:
+        a = get_agent(conn, agent_id)
+        if a is None:
+            raise BizError("代理不存在", 404)
+        if a.status == "cancelled":
+            raise BizError("已取消资格的代理不能改名", 409)
+        if new_name == a.name:
+            raise BizError("名称未变化", 409)
+        if key != a.name_key:
+            ensure_name_available(conn, key, now, a.id)
+            conn.execute("DELETE FROM agent_name_reservations WHERE name_key=? AND agent_id=?",
+                         (key, a.id))
+            conn.execute("INSERT OR REPLACE INTO agent_name_reservations(name_key,agent_id,reserved_until)"
+                         " VALUES(?,?,?)", (a.name_key, a.id, now + NAME_RESERVE_SEC))
+        conn.execute("UPDATE agents SET name=?, name_key=? WHERE id=?", (new_name, key, a.id))
+        conn.execute("UPDATE admins SET username=? WHERE id=?", (new_name, a.admin_id))
+        db._audit_nocommit(conn, actor_type, actor, "agent.rename", new_name,
+                           {"from": a.name, "to": new_name}, now)
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        raise BizError(NAME_TAKEN, 409)
+    except Exception:
+        conn.rollback()
+        raise
+    return get_agent(conn, agent_id)

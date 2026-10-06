@@ -1,8 +1,8 @@
-# 管理后台：代理资料（新建、改地区/级别/上级、资格状态、重置密码、列表与统计）。
+# 管理后台：代理资料（新建、改地区/级别/上级、资格状态、重置密码、改名、列表与统计）。
 import time
 from fastapi import APIRouter, Request, Body, Depends
 from fastapi.responses import JSONResponse
-from .. import admin_auth, db_agents
+from .. import admin_auth, db_agents, db_staff
 from ..admin_auth import Principal
 from ..db_agents import BizError
 
@@ -74,3 +74,17 @@ async def set_password(agent_id: int, request: Request, payload: dict = Body(...
     except BizError as e:
         return _err(e)
     return {"ok": True}
+
+@router.post("/agents/{agent_id}/rename")
+async def rename(agent_id: int, request: Request, payload: dict = Body(...),
+                 p: Principal = STAFF_ONLY):
+    conn = request.app.state.db_conn
+    # 改名：最高权限者（含 X-Admin-Key）直接可用；管理员需持有 agent.rename 授权
+    if p.role != "super" and not db_staff.has_grant(conn, p.admin_id, "agent.rename"):
+        raise admin_auth.AdminDenied()
+    try:
+        a = db_agents.rename_agent(conn, agent_id, payload.get("name"), actor_type=p.actor_type,
+                                   actor=p.username, now=int(time.time()))
+    except BizError as e:
+        return _err(e)
+    return {"ok": True, "agent": db_agents.agent_to_dict(a)}
