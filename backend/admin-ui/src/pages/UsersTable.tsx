@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ActionType,
   ModalForm,
@@ -15,17 +15,29 @@ import {
   ApiResult,
   createUser,
   deleteUser,
+  listAgents,
   listUsers,
+  Me,
   patchUser,
   resetUserPassword,
   UserRow,
 } from '../api'
-import { fmtDate, fmtDateTime, STATUS_LABEL, toEpoch } from '../util'
+import { fmtDate, fmtDateTime, NUMBER_STATUS_LABEL, STATUS_LABEL, toEpoch, toValueEnum } from '../util'
 
-export default function UsersTable() {
+// 后台人员：全部账号 + 全部操作；代理：只读本人名下账号，唯一操作是激活待激活账号。
+export default function UsersTable({ me }: { me: Me }) {
   const { message, modal } = App.useApp()
   const actionRef = useRef<ActionType>()
   const reload = () => actionRef.current?.reload()
+  const isAgent = me.role === 'agent'
+  const [agentEnum, setAgentEnum] = useState<Record<string, { text: string }>>({})
+
+  useEffect(() => {
+    if (isAgent) return
+    listAgents()
+      .then((rows) => setAgentEnum(Object.fromEntries(rows.map((a) => [String(a.id), { text: a.name }]))))
+      .catch(() => setAgentEnum({}))
+  }, [isAgent])
 
   // 统一处理接口结果：成功提示并刷新，失败优先显示后端 error 文案。
   const run = async (p: Promise<ApiResult>, okMsg: string, failMsg: string) => {
@@ -48,6 +60,22 @@ export default function UsersTable() {
       dataIndex: 'code',
       copyable: true,
       fieldProps: { placeholder: '按编号搜索' },
+    },
+    {
+      title: '编号状态',
+      dataIndex: 'number_status',
+      valueType: 'select',
+      valueEnum: toValueEnum(NUMBER_STATUS_LABEL),
+    },
+    {
+      title: '归属代理',
+      dataIndex: 'agent_id',
+      valueType: 'select',
+      valueEnum: agentEnum,
+      hideInTable: isAgent,
+      hideInSearch: isAgent,
+      fieldProps: { showSearch: true },
+      render: (_, r) => r.agent_name || '—',
     },
     {
       title: '激活状态',
@@ -97,6 +125,18 @@ export default function UsersTable() {
       valueType: 'option',
       key: 'option',
       render: (_, record) => {
+        const activate = !record.activated && (
+          <Popconfirm
+            key="activate"
+            title="激活后初始密码为 123456，确认激活？"
+            okText="激活"
+            cancelText="取消"
+            onConfirm={() => run(activateUser(record.code), '已激活', '激活失败')}
+          >
+            <a>激活</a>
+          </Popconfirm>
+        )
+        if (isAgent) return [activate]
         // 不常用 / 有风险的操作收进「更多」，确认走 modal.confirm（Dropdown 内无法嵌 Popconfirm）。
         const more = [
           record.status !== 'banned' && {
@@ -141,17 +181,7 @@ export default function UsersTable() {
         ].filter(Boolean) as { key: string; label: string; danger?: boolean; onClick: () => void }[]
 
         return [
-          !record.activated && (
-            <Popconfirm
-              key="activate"
-              title="激活后初始密码为 123456，确认激活？"
-              okText="激活"
-              cancelText="取消"
-              onConfirm={() => run(activateUser(record.code), '已激活', '激活失败')}
-            >
-              <a>激活</a>
-            </Popconfirm>
-          ),
+          activate,
           record.status === 'active' ? (
             <a key="pause" onClick={() => setStatus(record.code, 'disabled', '已暂停')}>
               暂停
@@ -201,7 +231,7 @@ export default function UsersTable() {
       options={{ reload: true, density: false, setting: true }}
       pagination={{ pageSize: 10, showSizeChanger: true }}
       request={async (params) => {
-        const all = await listUsers()
+        const all = await listUsers(!isAgent && params.agent_id ? Number(params.agent_id) : undefined)
         let rows = all
         if (params.code) {
           const kw = String(params.code).toLowerCase()
@@ -213,44 +243,49 @@ export default function UsersTable() {
         if (params.activated) {
           rows = rows.filter((u) => String(u.activated) === params.activated)
         }
+        if (params.number_status) {
+          rows = rows.filter((u) => u.number_status === params.number_status)
+        }
         const current = params.current ?? 1
         const pageSize = params.pageSize ?? 10
         const start = (current - 1) * pageSize
         return { data: rows.slice(start, start + pageSize), total: rows.length, success: true }
       }}
       toolBarRender={() => [
-        <ModalForm
-          key="create"
-          title="新增用户"
-          width={400}
-          modalProps={{ destroyOnClose: true }}
-          trigger={
-            <Button type="primary" icon={<PlusOutlined />}>
-              新增用户
-            </Button>
-          }
-          onFinish={async (v: { code: string; expires?: unknown }) =>
-            run(
-              createUser((v.code || '').trim().toUpperCase(), toEpoch(v.expires)),
-              '已新增用户（待激活）',
-              '新增失败',
-            )
-          }
-        >
-          <ProFormText
-            name="code"
-            label="编号"
-            placeholder="如 USER01（自动转大写）"
-            rules={[{ required: true, message: '请输入编号' }]}
-            extra="新建账号为待激活状态，激活后初始密码为 123456"
-          />
-          <ProFormDatePicker
-            name="expires"
-            label="到期日"
-            extra="留空表示永久"
-            fieldProps={{ style: { width: '100%' } }}
-          />
-        </ModalForm>,
+        !isAgent && (
+          <ModalForm
+            key="create"
+            title="新增用户"
+            width={400}
+            modalProps={{ destroyOnClose: true }}
+            trigger={
+              <Button type="primary" icon={<PlusOutlined />}>
+                新增用户
+              </Button>
+            }
+            onFinish={async (v: { code: string; expires?: unknown }) =>
+              run(
+                createUser((v.code || '').trim().toUpperCase(), toEpoch(v.expires)),
+                '已新增用户（待激活）',
+                '新增失败',
+              )
+            }
+          >
+            <ProFormText
+              name="code"
+              label="编号"
+              placeholder="如 USER01（自动转大写）"
+              rules={[{ required: true, message: '请输入编号' }]}
+              extra="新建账号为待激活状态，激活后初始密码为 123456"
+            />
+            <ProFormDatePicker
+              name="expires"
+              label="到期日"
+              extra="留空表示永久"
+              fieldProps={{ style: { width: '100%' } }}
+            />
+          </ModalForm>
+        ),
       ]}
     />
   )

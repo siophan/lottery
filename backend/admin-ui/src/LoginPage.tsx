@@ -34,20 +34,20 @@ export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
           subTitle={SUBTITLE}
           submitter={{ searchConfig: { submitText: '登 录' } }}
           onFinish={async (values: { username: string; password: string }) => {
-            const ok = await login(values.username, values.password)
-            if (ok) {
+            const r = await login(values.username, values.password)
+            if (r.ok) {
               message.success('登录成功')
               onSuccess()
             } else {
-              message.error('用户名或密码错误')
+              message.error(r.error || '用户名或密码错误')
             }
-            return ok
+            return r.ok
           }}
         >
           <ProFormText
             name="username"
             fieldProps={{ size: 'large', prefix: <UserOutlined /> }}
-            placeholder="管理员用户名"
+            placeholder="用户名（代理请输入代理名称）"
             rules={[{ required: true, message: '请输入用户名' }]}
           />
           <ProFormText.Password

@@ -21,3 +21,26 @@ export const STATUS_LABEL: Record<string, string> = {
   disabled: '暂停',
   banned: '封禁',
 }
+
+// 编号状态（后端 number_status，由数据推导）→ 中文。
+export const NUMBER_STATUS_LABEL: Record<string, string> = {
+  pending: '待激活',
+  activated: '已激活',
+  arrears: '已欠费',
+  to_recycle: '待回收',
+  unassigned: '未分配',
+}
+
+export const REGION_LABEL: Record<string, string> = { province: '省级', city: '市级', vip: 'VIP' }
+export const TIER_LABEL: Record<string, string> = { senior: '高级', junior: '低级' }
+export const AGENT_STATUS_LABEL: Record<string, string> = {
+  active: '激活',
+  paused: '暂停',
+  cancelled: '取消',
+}
+export const ROLE_LABEL: Record<string, string> = { super: '最高权限者', admin: '管理员', agent: '代理' }
+
+// Record → ProTable / ProFormSelect 的 valueEnum。
+export function toValueEnum(labels: Record<string, string>): Record<string, { text: string }> {
+  return Object.fromEntries(Object.entries(labels).map(([k, v]) => [k, { text: v }]))
+}

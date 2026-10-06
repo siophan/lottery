@@ -1,40 +1,86 @@
-import { useState } from 'react'
+import { ReactNode, useState } from 'react'
 import { PageContainer, ProLayout } from '@ant-design/pro-components'
 import { App, Dropdown } from 'antd'
-import { ApiOutlined, DashboardOutlined, FileSearchOutlined, LogoutOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons'
-import { logout } from './api'
+import {
+  ApartmentOutlined,
+  ApiOutlined,
+  DashboardOutlined,
+  FileSearchOutlined,
+  LogoutOutlined,
+  PartitionOutlined,
+  SafetyOutlined,
+  TeamOutlined,
+  UserOutlined,
+} from '@ant-design/icons'
+import { logout, Me } from './api'
 import { BRAND, Logo } from './branding'
+import Agents from './pages/Agents'
 import AuditLogs from './pages/AuditLogs'
 import Dashboard from './pages/Dashboard'
 import DataSources from './pages/DataSources'
+import Segments from './pages/Segments'
+import Staff from './pages/Staff'
 import UsersTable from './pages/UsersTable'
+import { ROLE_LABEL } from './util'
 
-const ROUTE = {
-  path: '/',
-  routes: [
+interface MenuRoute {
+  path: string
+  name: string
+  icon: ReactNode
+}
+
+// 菜单按角色裁剪（只是辅助：权限以服务端校验为准）。
+function routesFor(me: Me): MenuRoute[] {
+  if (me.role === 'agent') {
+    return [
+      { path: '/users', name: '我的账号', icon: <TeamOutlined /> },
+      {
+        path: '/segments',
+        name: me.agent?.tier === 'senior' ? '编号划拨' : '编号流水',
+        icon: <PartitionOutlined />,
+      },
+    ]
+  }
+  const routes: MenuRoute[] = [
     { path: '/dashboard', name: '概览', icon: <DashboardOutlined /> },
     { path: '/users', name: '用户管理', icon: <TeamOutlined /> },
+    { path: '/agents', name: '代理管理', icon: <ApartmentOutlined /> },
+    { path: '/segments', name: '号段管理', icon: <PartitionOutlined /> },
     { path: '/data-sources', name: '数据源', icon: <ApiOutlined /> },
     { path: '/audit-logs', name: '操作日志', icon: <FileSearchOutlined /> },
-  ],
+  ]
+  if (me.role === 'super') {
+    routes.push({ path: '/staff', name: '管理员与授权', icon: <SafetyOutlined /> })
+  }
+  return routes
 }
 
-const TITLES: Record<string, string> = {
-  '/dashboard': '概览',
-  '/users': '用户管理',
-  '/data-sources': '数据源',
-  '/audit-logs': '操作日志',
+function renderPage(pathname: string, me: Me): ReactNode {
+  switch (pathname) {
+    case '/dashboard':
+      return <Dashboard />
+    case '/users':
+      return <UsersTable me={me} />
+    case '/agents':
+      return <Agents me={me} />
+    case '/segments':
+      return <Segments me={me} />
+    case '/data-sources':
+      return <DataSources />
+    case '/audit-logs':
+      return <AuditLogs />
+    case '/staff':
+      return <Staff />
+    default:
+      return null
+  }
 }
 
-export default function MainLayout({
-  username,
-  onLoggedOut,
-}: {
-  username: string
-  onLoggedOut: () => void
-}) {
+export default function MainLayout({ me, onLoggedOut }: { me: Me; onLoggedOut: () => void }) {
   const { message } = App.useApp()
-  const [pathname, setPathname] = useState('/dashboard')
+  const routes = routesFor(me)
+  const [pathname, setPathname] = useState(routes[0].path)
+  const title = routes.find((r) => r.path === pathname)?.name
 
   const handleLogout = async () => {
     await logout()
@@ -49,7 +95,7 @@ export default function MainLayout({
       layout="mix"
       fixedHeader
       fixSiderbar
-      route={ROUTE}
+      route={{ path: '/', routes }}
       location={{ pathname }}
       menuItemRender={(item, dom) => (
         <a onClick={() => item.path && setPathname(item.path)}>{dom}</a>
@@ -57,7 +103,7 @@ export default function MainLayout({
       avatarProps={{
         icon: <UserOutlined />,
         size: 'small',
-        title: username,
+        title: `${me.username}（${ROLE_LABEL[me.role] ?? me.role}）`,
         render: (_, dom) => (
           <Dropdown
             menu={{
@@ -76,17 +122,7 @@ export default function MainLayout({
         ),
       }}
     >
-      <PageContainer header={{ title: TITLES[pathname] }}>
-        {pathname === '/dashboard' ? (
-          <Dashboard />
-        ) : pathname === '/users' ? (
-          <UsersTable />
-        ) : pathname === '/audit-logs' ? (
-          <AuditLogs />
-        ) : (
-          <DataSources />
-        )}
-      </PageContainer>
+      <PageContainer header={{ title }}>{renderPage(pathname, me)}</PageContainer>
     </ProLayout>
   )
 }

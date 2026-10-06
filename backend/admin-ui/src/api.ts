@@ -24,6 +24,9 @@ export interface UserRow {
   first_activated_at: number | null
   phone: string | null // 已脱敏，如 138****1234
   onboarded: boolean // 是否完成首登改密 + 绑定手机号
+  agent_id: number | null // 归属代理；null = 无归属
+  agent_name: string | null
+  number_status: string // pending 待激活 | activated 已激活 | arrears 已欠费 | to_recycle 待回收 | unassigned 未分配
 }
 
 export interface ApiResult {
@@ -37,26 +40,57 @@ async function result(r: Response): Promise<ApiResult> {
   return { ok: r.status === 200 && d.ok !== false, error: d.error }
 }
 
-export async function getMe(): Promise<{ username: string } | null> {
+export type Role = 'super' | 'admin' | 'agent'
+
+export interface AgentRow {
+  id: number
+  name: string
+  region: string // province | city | vip
+  tier: string // senior 高级 | junior 低级
+  parent_agent_id: number | null
+  status: string // active 激活 | paused 暂停 | cancelled 取消
+  status_by: string | null
+  status_at: number | null
+  status_reason: string | null
+  created_at: number
+  recycled_at: number | null
+  // 以下仅列表接口返回
+  parent_name?: string | null
+  total?: number
+  activated?: number
+  unactivated?: number
+  children?: number
+}
+
+export interface Me {
+  username: string
+  role: Role
+  grants: string[] // 如 agent.rename
+  agent: AgentRow | null // 代理身份时为本人资料
+}
+
+export async function getMe(): Promise<Me | null> {
   const r = await req('/me')
   if (r.status === 200) return r.json()
   return null
 }
 
-export async function login(username: string, password: string): Promise<boolean> {
-  const r = await req('/login', {
-    method: 'POST',
-    body: JSON.stringify({ username, password }),
-  })
-  return r.status === 200
+// 登录失败时带回后端文案（如「代理资格已暂停，无法登录」）；密码错误时后端不给文案。
+export async function login(username: string, password: string): Promise<ApiResult> {
+  return result(
+    await req('/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  )
 }
 
 export async function logout(): Promise<void> {
   await req('/logout', { method: 'POST' })
 }
 
-export async function listUsers(): Promise<UserRow[]> {
-  const r = await req('/users')
+export async function listUsers(agentId?: number): Promise<UserRow[]> {
+  const r = await req('/users' + (agentId != null ? '?agent_id=' + agentId : ''))
   if (r.status !== 200) throw new Error('list users failed: ' + r.status)
   const d = await r.json()
   return d.users as UserRow[]
@@ -192,4 +226,121 @@ export async function listDraws(id: number, code: string, rows = 20): Promise<Dr
   if (r.status !== 200) return []
   const d = await r.json()
   return d.draws as DrawRow[]
+}
+
+// ---------------- 代理 ----------------
+
+function post(path: string, body?: unknown): Promise<Response> {
+  return req(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) })
+}
+
+export async function listAgents(): Promise<AgentRow[]> {
+  const r = await req('/agents')
+  if (r.status !== 200) throw new Error('list agents failed: ' + r.status)
+  return (await r.json()).agents as AgentRow[]
+}
+
+export interface AgentInput {
+  name: string
+  password: string
+  region: string
+  tier: string
+  parent_agent_id: number | null
+}
+
+export async function createAgent(input: AgentInput): Promise<ApiResult> {
+  return result(await post('/agents', input))
+}
+
+export async function updateAgent(
+  id: number,
+  patch: { region?: string; tier?: string; parent_agent_id?: number | null },
+): Promise<ApiResult> {
+  return result(await req('/agents/' + id, { method: 'PATCH', body: JSON.stringify(patch) }))
+}
+
+export async function setAgentStatus(id: number, status: string, reason: string): Promise<ApiResult> {
+  return result(await post(`/agents/${id}/status`, { status, reason }))
+}
+
+export async function renameAgent(id: number, name: string): Promise<ApiResult> {
+  return result(await post(`/agents/${id}/rename`, { name }))
+}
+
+export async function setAgentPassword(id: number, password: string): Promise<ApiResult> {
+  return result(await post(`/agents/${id}/password`, { password }))
+}
+
+export async function recycleAgent(id: number): Promise<ApiResult> {
+  return result(await post(`/agents/${id}/recycle`))
+}
+
+// ---------------- 号段 ----------------
+
+export interface SegmentOpRow {
+  id: number
+  op: string // assign 分配 | transfer 划拨 | recycle 回收
+  start_no: number | null
+  end_no: number | null
+  count: number
+  from_agent_id: number | null
+  to_agent_id: number | null
+  from_name: string | null
+  to_name: string | null
+  actor: string
+  created_at: number
+}
+
+export async function assignSegment(agentId: number, start: number, end: number): Promise<ApiResult> {
+  return result(await post('/segments/assign', { agent_id: agentId, start, end }))
+}
+
+export async function transferSegment(toAgentId: number, start: number, end: number): Promise<ApiResult> {
+  return result(await post('/segments/transfer', { to_agent_id: toAgentId, start, end }))
+}
+
+export async function listSegmentOps(
+  limit: number,
+  offset: number,
+): Promise<{ ops: SegmentOpRow[]; total: number }> {
+  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  const r = await req('/segment-ops?' + qs.toString())
+  if (r.status !== 200) throw new Error('list segment ops failed: ' + r.status)
+  return r.json()
+}
+
+// ---------------- 管理员与授权（仅最高权限者） ----------------
+
+export interface AdminRow {
+  id: number
+  username: string
+  role: Role
+  created_at: number
+  grants: string[]
+}
+
+export async function listAdmins(): Promise<AdminRow[]> {
+  const r = await req('/admins')
+  if (r.status !== 200) throw new Error('list admins failed: ' + r.status)
+  return (await r.json()).admins as AdminRow[]
+}
+
+export async function createAdmin(username: string, password: string): Promise<ApiResult> {
+  return result(await post('/admins', { username, password }))
+}
+
+export async function setAdminPassword(id: number, password: string): Promise<ApiResult> {
+  return result(await post(`/admins/${id}/password`, { password }))
+}
+
+export async function deleteAdmin(id: number): Promise<ApiResult> {
+  return result(await req('/admins/' + id, { method: 'DELETE' }))
+}
+
+export async function addGrant(adminId: number, grant: string): Promise<ApiResult> {
+  return result(await post('/grants', { admin_id: adminId, grant }))
+}
+
+export async function revokeGrant(adminId: number, grant: string): Promise<ApiResult> {
+  return result(await req(`/grants/${adminId}/${encodeURIComponent(grant)}`, { method: 'DELETE' }))
 }

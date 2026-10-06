@@ -1,6 +1,6 @@
 import { ProColumns, ProTable } from '@ant-design/pro-components'
 import { AuditLogRow, listAuditLogs } from '../api'
-import { fmtDate, fmtDateTime, STATUS_LABEL } from '../util'
+import { AGENT_STATUS_LABEL, fmtDate, fmtDateTime, STATUS_LABEL } from '../util'
 
 // 动作码 → 中文；未知动作回退显示原始码。
 const ACTION_LABEL: Record<string, string> = {
@@ -11,6 +11,20 @@ const ACTION_LABEL: Record<string, string> = {
   'user.reset_password': '重置密码',
   'user.delete': '删除',
   'user.onboard': '首登改密绑定',
+  'agent.create': '新建代理',
+  'agent.update': '修改代理',
+  'agent.status': '代理资格变更',
+  'agent.rename': '代理改名',
+  'agent.password': '重置代理密码',
+  'agent.recycle': '回收编号',
+  'segment.assign': '分配号段',
+  'segment.transfer': '划拨编号',
+  'admin.create': '新建管理员',
+  'admin.password': '重置管理员密码',
+  'admin.delete': '删除管理员',
+  'admin.set_super': '指定最高权限者',
+  'grant.add': '授权',
+  'grant.revoke': '撤销授权',
 }
 
 // user.expires 的 from/to 是 unix 秒或 null（永久）。
@@ -24,6 +38,14 @@ function fmtDetail(r: AuditLogRow): string {
     const f = String(d.from)
     const t = String(d.to)
     return `${STATUS_LABEL[f] ?? f} → ${STATUS_LABEL[t] ?? t}`
+  }
+  if (r.action === 'agent.status') {
+    const f = String(d.from)
+    const t = String(d.to)
+    return `${AGENT_STATUS_LABEL[f] ?? f} → ${AGENT_STATUS_LABEL[t] ?? t}（${String(d.reason ?? '')}）`
+  }
+  if (r.action === 'agent.rename') {
+    return `${String(d.from)} → ${String(d.to)}`
   }
   if (r.action === 'user.expires') {
     return `${fmtExpire(d.from)} → ${fmtExpire(d.to)}`
@@ -52,7 +74,7 @@ export default function AuditLogs() {
       title: '对象',
       dataIndex: 'target',
       width: 140,
-      fieldProps: { placeholder: '按对象（账号编号）搜索' },
+      fieldProps: { placeholder: '按对象（账号编号 / 代理名称）搜索' },
     },
     {
       title: '详情',

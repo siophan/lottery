@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Spin } from 'antd'
-import { getMe } from './api'
+import { getMe, Me } from './api'
 import LoginPage from './LoginPage'
 import MainLayout from './MainLayout'
 
 export default function App() {
   const [loading, setLoading] = useState(true)
-  const [username, setUsername] = useState<string | null>(null)
+  const [me, setMe] = useState<Me | null>(null)
 
   const refreshMe = useCallback(async () => {
-    const me = await getMe()
-    setUsername(me ? me.username : null)
+    setMe(await getMe())
     setLoading(false)
   }, [])
 
@@ -26,9 +25,9 @@ export default function App() {
     )
   }
 
-  if (!username) {
+  if (!me) {
     return <LoginPage onSuccess={refreshMe} />
   }
 
-  return <MainLayout username={username} onLoggedOut={() => setUsername(null)} />
+  return <MainLayout me={me} onLoggedOut={() => setMe(null)} />
 }
