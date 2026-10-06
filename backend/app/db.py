@@ -33,6 +33,7 @@ class User:
     charge_anchor_at: int | None = None     # 当前计费起点
     next_charge_at: int | None = None       # 下次扣费时间；None = 当前不计费
     trial_granted_at: int | None = None     # 体验赠送时间；None = 未赠送过
+    nickname: str | None = None             # 自定义昵称；None = 使用默认昵称（子项目 D）
 
 @dataclass
 class Session:
@@ -276,6 +277,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_users_agents(conn)
     _migrate_admins(conn)
     _migrate_points(conn)
+    _migrate_profile(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
@@ -347,6 +349,15 @@ def _migrate_points(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_users_next_charge ON users(next_charge_at)")
     conn.commit()
 
+def _migrate_profile(conn) -> None:
+    # 子项目 D：头像与昵称。独立于 _migrate_users（不得触发其「缺列即回填已激活」）；只加列 / 建表、不回填。
+    # 头像单独存表：gate 每次请求与后台账号列表都会整行读取 users，头像放在 users 里会被反复读出。
+    if "nickname" not in {r["name"] for r in conn.execute("PRAGMA table_info(users)")}:
+        conn.execute("ALTER TABLE users ADD COLUMN nickname TEXT")
+    conn.execute("CREATE TABLE IF NOT EXISTS user_avatars(user_id INTEGER PRIMARY KEY,"
+                 " data TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+    conn.commit()
+
 def mask_phone(phone: str | None) -> str | None:
     if phone is None:
         return None
@@ -357,7 +368,8 @@ def _row_to_user(r: sqlite3.Row) -> User:
                 r["expires_at"], r["status"], r["created_at"],
                 r["first_activated_at"], r["activated_at"], r["phone"], r["onboarded_at"],
                 r["agent_id"], r["activated_by_agent_id"], r["agent_chain_json"],
-                r["points"], r["charge_anchor_at"], r["next_charge_at"], r["trial_granted_at"])
+                r["points"], r["charge_anchor_at"], r["next_charge_at"], r["trial_granted_at"],
+                r["nickname"])
 
 def get_user_by_code(conn, code: str) -> User | None:
     r = conn.execute("SELECT * FROM users WHERE code=?", (code.upper(),)).fetchone()
@@ -478,9 +490,31 @@ def delete_user(conn, code: str) -> bool:
     if not u:
         return False
     conn.execute("DELETE FROM sessions WHERE user_id=?", (u.id,))
+    conn.execute("DELETE FROM user_avatars WHERE user_id=?", (u.id,))
     conn.execute("DELETE FROM users WHERE id=?", (u.id,))
     conn.commit()
     return True
+
+def get_user_avatar(conn, user_id: int) -> str | None:
+    r = conn.execute("SELECT data FROM user_avatars WHERE user_id=?", (user_id,)).fetchone()
+    return r["data"] if r else None
+
+def set_user_profile(conn, user_id: int, *, nickname=_UNSET, avatar=_UNSET, now: int | None = None) -> None:
+    """头像昵称（子项目 D）：传 None 表示恢复默认（昵称置空 / 删除头像记录），不传表示不改；同一事务写入。"""
+    ts = int(time.time()) if now is None else now
+    try:
+        if nickname is not _UNSET:
+            conn.execute("UPDATE users SET nickname=? WHERE id=?", (nickname, user_id))
+        if avatar is None:
+            conn.execute("DELETE FROM user_avatars WHERE user_id=?", (user_id,))
+        elif avatar is not _UNSET:
+            conn.execute("INSERT INTO user_avatars(user_id,data,updated_at) VALUES(?,?,?)"
+                         " ON CONFLICT(user_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
+                         (user_id, avatar, ts))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 def update_user(conn, code: str, *, expires_at=_UNSET, status=_UNSET, password=_UNSET) -> bool:
     u = get_user_by_code(conn, code)
