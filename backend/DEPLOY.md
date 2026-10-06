@@ -214,6 +214,41 @@ sudo systemctl restart ys-backend
 > 需要回滚时，必须先**恢复升级前的数据库备份**，或先删除 `role='agent'` 的 `admins` 行及其
 > `admin_sessions` 会话，再回退代码。
 
+### 升级到含积分的版本
+
+迁移后**所有账号与代理积分余额为 0**：已激活账号立即变为「已欠费」，登录与业务请求返回 10025。**严格按此顺序**：
+
+1. **先发布新客户端**（含 10025 提示与低积分提醒）。旧客户端收到 10025 只显示通用的登录失败 / 退出提示。
+2. **备份数据库**（见「备份」一节）。
+3. 部署新代码并 `sudo systemctl restart ys-backend`：重启时自动迁移（只加列，不改动任何账号的激活 / 首登状态），
+   每日扣减 Worker 随服务启动（每 60 秒一轮）。
+4. **立即批量充值**需要继续使用的账号。少量账号用后台「用户管理」→ 多选 →「批量充值」；
+   全部「已欠费且使用控制正常」的账号可在服务器上用运维密钥按 1000 个一批充值（`POINTS` 为每个账号的分数）：
+   ```bash
+   cd /srv/ys/backend
+   set -a; . /etc/ys-backend.env; set +a
+   POINTS=30 .venv/bin/python - <<'PY'
+   import json, os, urllib.request
+   BASE = "http://127.0.0.1:8000/admin"
+   H = {"X-Admin-Key": os.environ["ADMIN_KEY"], "Content-Type": "application/json"}
+   def call(path, body=None):
+       req = urllib.request.Request(BASE + path, headers=H, method="GET" if body is None else "POST",
+                                    data=None if body is None else json.dumps(body).encode())
+       with urllib.request.urlopen(req) as r:
+           return json.load(r)
+   codes = [u["code"] for u in call("/users")["users"]
+            if u["number_status"] == "arrears" and u["status"] == "active"]
+   for i in range(0, len(codes), 1000):
+       print(call("/points/batch-recharge", {"codes": codes[i:i + 1000], "amount": int(os.environ["POINTS"]),
+                                             "reason": "积分上线初始充值"}))
+   PY
+   ```
+   每批一个事务、全有或全无；输出里的 `batch_id` 可在「积分流水」中按批次核对。
+5. 需要体验期时，在后台「体验期设置」开启（只影响此后首次激活的账号）。
+
+> **回滚说明**：旧版本代码不认识积分列，回退后所有账号不再受积分限制（余额与流水保留在库中）。
+> 再次升级时余额从库中原样恢复，停扣期间不追扣。
+
 ## 备份
 
 备份 SQLite 文件即可（含用户与管理员）：`/srv/ys/backend/data/app.db`（WAL 模式，连 `-wal`/`-shm` 一起备份，或停服后再拷）。

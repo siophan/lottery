@@ -4,6 +4,7 @@ from app.config import Settings
 from app.main import create_app
 from app import db
 from app.dayys_session import DataYsSession
+from tests.points_helpers import set_points_raw
 
 def build(handler):
     conn = db.connect(":memory:"); db.init_db(conn)
@@ -16,6 +17,7 @@ def build(handler):
     dayys = DataYsSession(client, "SRV", "pw", "dev", "1004", token_ttl=3600)
     app = create_app(Settings(session_ttl=3600), client=client, conn=conn, dayys=dayys)
     u = db.create_user(conn, "U1", "pw", None)
+    set_points_raw(conn, "U1", 10)
     return db.create_session(conn, u.id, 3600), TestClient(app)
 
 def test_upstream_timeout_returns_502():

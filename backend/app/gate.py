@@ -4,6 +4,7 @@ from . import db
 
 PREAUTH_PATHS = {"auth/login", "version"}
 INVALID_TOKEN_CODES = {10020, 10021}
+POINTS_EMPTY = {"code": 10025, "msg": "无积分，无权操作，请充值积分后自动恢复使用！"}
 
 def authorize(conn, token_header: str):
     if not token_header:
@@ -19,6 +20,8 @@ def authorize(conn, token_header: str):
             or user.onboarded_at is None
             or (user.expires_at is not None and user.expires_at < int(time.time()))):
         return False, {"code": 10022, "msg": "账号已停用或已到期"}
+    if user.points <= 0:        # 积分暂停（余额为 0）：优先级最低，排在封禁 / 暂停 / 到期 / 未完成首登之后
+        return False, dict(POINTS_EMPTY)
     return True, None
 
 def response_signals_invalid(content: bytes) -> bool:

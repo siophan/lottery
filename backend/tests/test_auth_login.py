@@ -4,6 +4,7 @@ from app.config import Settings
 from app.main import create_app
 from app import db
 from app.dayys_session import DataYsSession
+from tests.points_helpers import set_points_raw
 
 def upstream_ok(req):
     return httpx.Response(200, json={"code": 0, "data": {"token": "DYTOK", "userInfo": {"vip": 1}}})
@@ -20,6 +21,7 @@ def build():
 def test_login_success_returns_our_token_and_dayys_userinfo():
     conn, tc = build()
     db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 10)
     r = tc.post("/api/auth/login", json={"username": "user01", "password": "pw",
                                          "device": "pc", "deviceId": "x"})
     body = r.json()
@@ -125,4 +127,5 @@ def test_login_ticket_ttl_is_15_minutes():
 def test_login_onboarded_user_still_succeeds():
     conn, tc = build()
     db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 10)
     assert tc.post("/api/auth/login", json={"username": "USER01", "password": "pw"}).json()["code"] == 0

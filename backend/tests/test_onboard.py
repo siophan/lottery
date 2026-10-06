@@ -5,6 +5,7 @@ from app.config import Settings
 from app.main import create_app
 from app import db
 from app.dayys_session import DataYsSession
+from tests.points_helpers import set_points_raw
 from app.sms import SmsError
 from app.routes.auth import password_problem
 from app.security import verify_password
@@ -247,6 +248,7 @@ def test_onboard_failure_leaves_user_untouched():
 def test_onboard_success_full_flow():
     conn, tc, sms = build()
     u = fresh_user(conn)
+    set_points_raw(conn, "USER01", 10)
     old_session = db.create_session(conn, u.id, 3600)
     t = ticket_for(conn, u)
     code = issue_code(conn)

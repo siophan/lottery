@@ -8,6 +8,7 @@ from .. import db
 from ..security import verify_password
 from ..throttle import LOCKED_MSG, client_ip
 from ..dayys_session import DataYsLoginError
+from ..gate import POINTS_EMPTY
 
 router = APIRouter()
 
@@ -109,6 +110,8 @@ async def login(request: Request):
         ticket = db.create_onboard_ticket(conn, user.id, ONBOARD_TICKET_TTL)
         return JSONResponse({"code": 10030, "msg": "首次登录请修改密码并绑定手机号",
                              "data": {"onboardToken": ticket}})
+    if user.points <= 0:            # 已激活且余额为 0（积分暂停）：不发会话
+        return JSONResponse(POINTS_EMPTY)
 
     # 取共享 data-ys 账号的 userInfo（确保服务端已登录上游）
     try:
@@ -117,7 +120,8 @@ async def login(request: Request):
         return JSONResponse({"code": 502, "msg": f"上游账号不可用: {e}"}, status_code=502)
 
     token = db.create_session(conn, user.id, settings.session_ttl)
-    return JSONResponse({"code": 0, "data": {"token": token, "userInfo": user_info}})
+    # points：客户端据此在登录后提示低积分（0 < points < 7）
+    return JSONResponse({"code": 0, "data": {"token": token, "userInfo": user_info, "points": user.points}})
 
 
 @router.post("/auth/onboard/sms")

@@ -537,10 +537,10 @@ def list_users_with_agent(conn, agent_id: int | None = None) -> list[tuple[User,
             for r in conn.execute(sql + " ORDER BY u.id", args).fetchall()]
 
 def number_status(u: User, agent_status: str | None) -> str:
-    """编号五态（由数据推导，不另存）：pending 待激活 | activated 已激活 | arrears 已欠费 |
-    to_recycle 待回收 | unassigned 未分配。余额在子项目 C 实现，此前已激活一律为 activated。"""
+    """编号五态（由数据推导，不另存）：pending 待激活 | activated 已激活（余额 > 0）|
+    arrears 已欠费（已激活且余额为 0）| to_recycle 待回收 | unassigned 未分配。"""
     if u.first_activated_at is not None:
-        return "activated"
+        return "activated" if u.points > 0 else "arrears"
     if u.agent_id is None:
         return "unassigned"
     return "to_recycle" if agent_status == "cancelled" else "pending"

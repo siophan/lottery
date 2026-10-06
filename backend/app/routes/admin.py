@@ -90,7 +90,8 @@ async def list_users(request: Request, p: Principal = ANY_ROLE):
          "phone": db.mask_phone(u.phone),
          "onboarded": u.onboarded_at is not None,
          "agent_id": u.agent_id, "agent_name": agent_name,
-         "number_status": db.number_status(u, agent_status)}
+         "number_status": db.number_status(u, agent_status),
+         "points": u.points}
         for u, agent_name, agent_status in db.list_users_with_agent(conn, agent_id)
     ]}
 

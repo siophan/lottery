@@ -4,6 +4,7 @@ from app.config import Settings
 from app.main import create_app
 from app import db
 from app.dayys_session import DataYsSession
+from tests.points_helpers import set_points_raw
 
 def build(handler, dayys_token_seq=("DYTOK",)):
     conn = db.connect(":memory:"); db.init_db(conn)
@@ -24,6 +25,7 @@ def build(handler, dayys_token_seq=("DYTOK",)):
 
 def _session_for(conn, code="U1", expires_at=None):
     u = db.create_user(conn, code, "pw", expires_at)
+    set_points_raw(conn, code, 10)
     return db.create_session(conn, u.id, 3600)
 
 def test_proxy_swaps_our_token_for_dayys_token():

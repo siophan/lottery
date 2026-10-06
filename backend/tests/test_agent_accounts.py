@@ -27,9 +27,9 @@ def test_users_list_agent_fields_and_number_status():
     us = users(key_client(app))
     assert (us["1000000"]["agent_name"], us["1000000"]["number_status"]) == ("live", "pending")
     assert us["1000000"]["agent_id"] == live
-    assert us["1000001"]["number_status"] == "activated"
+    assert us["1000001"]["number_status"] == "arrears"      # 已激活、余额 0
     assert (us["1000002"]["agent_name"], us["1000002"]["number_status"]) == ("gone", "to_recycle")
-    assert (us["OLD1"]["agent_id"], us["OLD1"]["number_status"]) == (None, "activated")
+    assert (us["OLD1"]["agent_id"], us["OLD1"]["number_status"]) == (None, "arrears")
     assert us["1000003"]["number_status"] == "unassigned"
 
 def test_staff_filter_by_agent():

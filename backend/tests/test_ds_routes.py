@@ -5,6 +5,7 @@ from app.main import create_app
 from app import db
 from app.adapters import Draw
 from app.dayys_session import DataYsSession
+from tests.points_helpers import set_points_raw
 
 class FakeCollector:
     def __init__(self):
@@ -22,6 +23,7 @@ def build():
     col = FakeCollector()
     app = create_app(Settings(session_ttl=3600), client=client, conn=conn, dayys=dayys, collector=col)
     u = db.create_user(conn, "U1", "pw", None)
+    set_points_raw(conn, "U1", 10)
     tok = db.create_session(conn, u.id, 3600)
     return conn, TestClient(app), {"token": tok}, col
 
@@ -116,6 +118,7 @@ def test_lifespan_survives_collector_start_error():
     app = create_app(Settings(), client=client, conn=conn,
                      dayys=DataYsSession(client, "S", "p", "d", "1004"), collector=col)
     tok = db.create_session(conn, db.create_user(conn, "U1", "pw", None).id, 3600)
+    set_points_raw(conn, "U1", 10)
     with TestClient(app) as tc:                      # 采集起不来也不能拖垮代理
         assert tc.get("/api/ds/sources?cat=hash", headers={"token": tok}).json()["code"] == 0
     assert col.events == ["start", "stop"]

@@ -5,6 +5,7 @@ from app.config import Settings
 from app.main import create_app
 from app import db
 from app.dayys_session import DataYsSession
+from tests.points_helpers import set_points_raw
 from app.throttle import FailureCounter, LoginThrottle, client_ip, LOCKED_MSG
 
 # ---------------- FailureCounter 纯逻辑 ----------------
@@ -117,6 +118,7 @@ def test_locked_msg_text():
 def test_five_failures_lock_account_even_with_right_password():
     conn, tc, clk = build()
     db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 10)
     for _ in range(5):
         assert login(tc)["msg"] == "账号或密码错误"
     assert login(tc, pw="pw") == LOCKED
@@ -127,6 +129,7 @@ def test_five_failures_lock_account_even_with_right_password():
 def test_locked_login_skips_password_verify(monkeypatch):
     conn, tc, clk = build()
     db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 10)
     for _ in range(5):
         login(tc)
     from app.routes import auth as auth_mod
@@ -138,6 +141,7 @@ def test_locked_login_skips_password_verify(monkeypatch):
 def test_success_clears_account_counter():
     conn, tc, clk = build()
     db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 10)
     for _ in range(4):
         login(tc)
     assert login(tc, pw="pw")["code"] == 0
@@ -151,11 +155,13 @@ def test_unknown_user_failures_count_per_code():
         assert login(tc, user="NOPE")["msg"] == "账号或密码错误"
     assert login(tc, user="NOPE") == LOCKED
     db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 10)
     assert login(tc, pw="pw")["code"] == 0                  # 其他账号不受影响
 
 def test_ip_locked_after_30_failures_across_accounts():
     conn, tc, clk = build()
     db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 10)
     for i in range(30):
         assert login(tc, user=f"X{i}")["msg"] == "账号或密码错误"
     assert login(tc, pw="pw") == LOCKED
@@ -165,6 +171,7 @@ def test_ip_locked_after_30_failures_across_accounts():
 def test_ip_counter_uses_forwarded_ip_behind_local_proxy():
     conn, tc, clk = build()
     db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 10)
     th = tc.app.state.login_throttle
     # TestClient 的对端地址是 "testclient"，不是本机反代：转发头被忽略
     for i in range(30):
