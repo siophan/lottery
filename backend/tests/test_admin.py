@@ -22,8 +22,8 @@ def test_requires_admin_key():
 
 def test_create_list_delete_user():
     conn, tc = build()
-    # password 字段被忽略：只建待激活账号，密码预置为初始密码
-    r = tc.post("/admin/users", headers=H, json={"code": "u1", "password": "pw", "expires_at": 999})
+    # 只建待激活账号，密码预置为初始密码
+    r = tc.post("/admin/users", headers=H, json={"code": "u1", "expires_at": 999})
     assert r.json()["ok"] is True and r.json()["code"] == "U1"
     u = db.get_user_by_code(conn, "u1")
     assert u.first_activated_at is None and u.onboarded_at is None

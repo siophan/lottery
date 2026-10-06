@@ -54,11 +54,15 @@ def test_create_pending_user_and_audit():
     assert e["actor_type"] == "admin" and e["actor"] == "admin-key"
     assert e["detail"] == {"expires_at": 123}
 
-def test_create_ignores_password_and_validates_code():
+PASSWORD_ERR = {"ok": False, "error": "不支持设置密码，请使用激活或重置密码"}
+
+def test_create_rejects_password_and_validates_code():
     conn, tc = build()
-    tc.post("/admin/users", headers=H, json={"code": "a1", "password": "Abcd1234"})
-    u = db.get_user_by_code(conn, "A1")
-    assert verify_password(db.INITIAL_PASSWORD, u.salt, u.password_hash)
+    for pw in ("Abcd1234", None, ""):
+        r = tc.post("/admin/users", headers=H, json={"code": "a1", "password": pw})
+        assert r.status_code == 400 and r.json() == PASSWORD_ERR
+    assert db.get_user_by_code(conn, "A1") is None
+    assert logs(tc)["total"] == 0
     for body in ({}, {"code": ""}, {"code": "  "}, {"code": 5}):
         assert tc.post("/admin/users", headers=H, json=body).status_code == 400
 
@@ -164,15 +168,16 @@ def test_patch_rejects_bad_expires_at():
     for bad in ("x", True, 1.5):
         assert tc.patch("/admin/users/U1", headers=H, json={"expires_at": bad}).status_code == 400
 
-def test_patch_ignores_password():
+def test_patch_rejects_password_without_partial_changes():
     conn, tc = build()
     mk_active(conn)
     before = db.get_user_by_code(conn, "U1")
     r = tc.patch("/admin/users/U1", headers=H, json={"password": "Hacked123", "expires_at": 77})
-    assert r.json()["ok"] is True
+    assert r.status_code == 400 and r.json() == PASSWORD_ERR
     after = db.get_user_by_code(conn, "U1")
     assert after.password_hash == before.password_hash and after.salt == before.salt
-    assert after.expires_at == 77
+    assert after.expires_at is None
+    assert logs(tc)["total"] == 0
 
 def test_patch_missing_user_is_404():
     _, tc = build()

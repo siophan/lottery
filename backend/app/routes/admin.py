@@ -31,6 +31,12 @@ def _err(error: str, status: int):
 def _not_found():
     return _err("账号不存在", 404)
 
+def _password_rejected(payload: dict):
+    # 管理员不得设置任意密码：显式报错而不是静默忽略，避免调用方误以为已设置成功
+    if "password" in payload:
+        return _err("不支持设置密码，请使用激活或重置密码", 400)
+    return None
+
 MAX_INT = 2 ** 62      # SQLite INTEGER 为 64 位有符号；留足余量，避免 OverflowError 变 500
 
 def _is_int(v) -> bool:
@@ -48,6 +54,9 @@ def _audit(request: Request, action: str, target: str, detail: dict) -> None:
 async def create_user(request: Request, payload: dict = Body(...)):
     if not _check(request):
         return _forbidden()
+    rejected = _password_rejected(payload)
+    if rejected is not None:
+        return rejected
     code = payload.get("code")
     # 编号不能为空，否则会产生无法通过 /users/{code} 路由删除的脏数据
     if not isinstance(code, str) or not code.strip():
@@ -59,7 +68,7 @@ async def create_user(request: Request, payload: dict = Body(...)):
     code = code.strip()
     if db.get_user_by_code(conn, code):
         return _err("账号已存在", 409)
-    # 只建待激活账号；payload 里的 password 一律忽略（密码预置为初始密码）
+    # 只建待激活账号，密码预置为初始密码
     try:
         u = db.create_user(conn, code, db.INITIAL_PASSWORD, expires_at, pending=True)
     except sqlite3.IntegrityError:      # 并发下同编号抢先插入
@@ -111,11 +120,14 @@ async def reset_password(code: str, request: Request):
 async def patch_user(code: str, request: Request, payload: dict = Body(...)):
     if not _check(request):
         return _forbidden()
+    rejected = _password_rejected(payload)
+    if rejected is not None:
+        return rejected
     conn = request.app.state.db_conn
     u = db.get_user_by_code(conn, code)
     if not u:
         return _not_found()
-    # 先校验再落库：任何一项非法都不产生部分修改。password 字段一律忽略（管理员不得设置任意密码）
+    # 先校验再落库：任何一项非法都不产生部分修改
     kwargs = {}
     if "status" in payload:
         status = payload["status"]

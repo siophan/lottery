@@ -123,9 +123,9 @@ CREATE TABLE IF NOT EXISTS audit_logs(
 ## 7 管理后台
 
 后端 `/admin/*`：
-- `POST /admin/users {code, expires_at?}`：只建「待激活」账号（不再收密码；密码预置为初始密码 `123456`，使「正确账号密码 + 未激活」能得到 10023 提示，且不暴露任意密码下的账号存在性）。审计 `user.create`。
+- `POST /admin/users {code, expires_at?}`：只建「待激活」账号（不再收密码，payload 含 `password` 键 → 400 `{"ok":false,"error":"不支持设置密码，请使用激活或重置密码"}`；密码预置为初始密码 `123456`，使「正确账号密码 + 未激活」能得到 10023 提示，且不暴露任意密码下的账号存在性）。审计 `user.create`。
 - `POST /admin/users/{code}/activate`：仅待激活可激活 → 密码置 `123456`、`first_activated_at=activated_at=now`、`status=active`、`onboarded_at=NULL`；已激活返回 409「账号已激活」。审计 `user.activate`。
-- `PATCH /admin/users/{code}`：`status` 仅接受 `active|disabled|banned`（其他值 400）；`expires_at` 照旧；**移除** `password` 字段（管理员不得设置任意密码）。状态变更审计 `user.status`（前后值）；封禁/暂停**不删除**会话：gate 每次请求都按账号状态拒绝（封禁 10024、暂停 10022），客户端拦截器据此踢下线并显示对应提示（删会话只会得到笼统的 10020）；恢复为正常后，未过期的旧会话重新可用。
+- `PATCH /admin/users/{code}`：`status` 仅接受 `active|disabled|banned`（其他值 400）；`expires_at` 照旧；**移除** `password` 字段（管理员不得设置任意密码；payload 含 `password` 键 → 同上 400，且不做任何修改）。状态变更审计 `user.status`（前后值）；封禁/暂停**不删除**会话：gate 每次请求都按账号状态拒绝（封禁 10024、暂停 10022），客户端拦截器据此踢下线并显示对应提示（删会话只会得到笼统的 10020）；恢复为正常后，未过期的旧会话重新可用。
 - `POST /admin/users/{code}/reset-password`：仅已激活账号；密码重置为 `123456`、`onboarded_at=NULL`（下次登录重新走首登弹窗，含重新验证手机号），删除会话。审计 `user.reset_password`。
 - `DELETE /admin/users/{code}`：审计 `user.delete`。
 - `GET /admin/users`：新增 `activated`（bool）、`first_activated_at`、`phone`（脱敏 `138****1234`）、`onboarded`（bool）。
