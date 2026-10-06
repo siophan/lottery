@@ -371,6 +371,66 @@ const KICK2_REPLACEMENTS = [
   },
 ];
 
+// 用户信息区（子项目 D）：登录成功时把 data.points 存入 localStorage.dsPoints（首页先显示、再向后台刷新）；
+// 首页 index.vue（在 app chunk 里）在背景与 .card 之间加挂载点 ref="dsProfile"（不放进 opacity .74 的 .card），
+// mounted 时交给 window.dsProfile（client/user-profile.js）渲染，activated 时刷新，destroyed 时卸载。
+// 请求用首页同一个 axios 实例（b775），令牌注入与 10025 等拦截由它统一处理。
+const PROFILE_MARK = '/* ds-patch profile v1 */';
+const PROFILE_LOGIN_REPLACEMENTS = [
+  {
+    find: '              localStorage.setItem("token", res.data.token);\n' +
+      '              localStorage.setItem("userInfo", JSON.stringify(res.data.userInfo));',
+    repl: [
+      '              localStorage.setItem("token", res.data.token);',
+      '              localStorage.setItem("userInfo", JSON.stringify(res.data.userInfo));',
+      `              ${PROFILE_MARK}`,
+      '              localStorage.setItem("dsPoints", res.data && typeof res.data.points == "number" ? String(res.data.points) : "");',
+    ].join('\n'),
+    count: 1,
+  },
+];
+const INDEX_LOCATOR = 'var indexvue_type_template_id_d79680f8_scoped_true_render';
+const PROFILE_APP_REPLACEMENTS = [
+  {
+    find: "  }, [_c('div', {\n    staticClass: \"bg bodymain\"\n  }), _c('div', {\n    staticClass: \"card\"\n  }, [",
+    repl: "  }, [_c('div', {\n    staticClass: \"bg bodymain\"\n  }), _c('div', {\n    ref: \"dsProfile\"\n  }), _c('div', {\n    staticClass: \"card\"\n  }, [",
+    count: 1,
+  },
+  {
+    find: '    this.shiming();\n  },\n  methods: {\n    aaa() {',
+    repl: [
+      '    this.shiming();',
+      `    ${PROFILE_MARK}`,
+      '    if (window.dsProfile && this.$refs.dsProfile) {',
+      '      this.dsProfileCtl = window.dsProfile.mount(this.$refs.dsProfile, {',
+      '        request: __webpack_require__("b775")["a"],',
+      '        apiURL: __webpack_require__("f121")["apiURL"],',
+      '        points: localStorage.getItem("dsPoints")',
+      '      });',
+      '    }',
+      '  },',
+      '  activated() {',
+      '    if (this.dsProfileCtl) this.dsProfileCtl.refresh(localStorage.getItem("dsPoints"));',
+      '  },',
+      '  methods: {',
+      '    aaa() {',
+    ].join('\n'),
+    count: 1,
+  },
+  {
+    find: '  destroyed() {\n    clearInterval(this.intervalID2);\n    clearInterval(this.intervalID3);\n  }\n});',
+    repl: [
+      '  destroyed() {',
+      '    clearInterval(this.intervalID2);',
+      '    clearInterval(this.intervalID3);',
+      '    if (this.dsProfileCtl) this.dsProfileCtl.destroy();',
+      '  }',
+      '});',
+    ].join('\n'),
+    count: 1,
+  },
+];
+
 const APP_LAYERS = [
   { locator: 'function topRows(params)', layers: [{ mark: APP_MARK, replacements: APP_REPLACEMENTS }] },
   {
@@ -381,6 +441,7 @@ const APP_LAYERS = [
       { mark: KICK2_MARK, replacements: KICK2_REPLACEMENTS },
     ],
   },
+  { locator: INDEX_LOCATOR, layers: [{ mark: PROFILE_MARK, replacements: PROFILE_APP_REPLACEMENTS }] },
 ];
 
 // 登录页 chunk（src/views/login/index.vue）：login() 收到 10030（首次登录需改密并绑定手机）时打开首登弹窗
@@ -460,6 +521,7 @@ const POINTS_REPLACEMENTS = [
 const LOGIN_LAYERS = [
   { mark: ONBOARD_MARK, replacements: LOGIN_REPLACEMENTS },
   { mark: POINTS_MARK, replacements: POINTS_REPLACEMENTS },
+  { mark: PROFILE_MARK, replacements: PROFILE_LOGIN_REPLACEMENTS },
 ];
 
 // 在 locator 所在模块的 eval 字符串编码下，依次叠加尚未打过的层
@@ -507,7 +569,7 @@ function patchChunk(raw, name) {
 
 module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
-  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG };
+  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');

@@ -5,7 +5,7 @@ const path = require('path');
 const vm = require('vm');
 const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS, AUTH_MARK, KICK_MARK,
   patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
-  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG } = require('../scripts/patch-ds-client.js');
+  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR } = require('../scripts/patch-ds-client.js');
 const dsSources = require('../client/ds-sources.js');
 
 const DIR = path.join(__dirname, '..', 'client', 'js');
@@ -908,4 +908,79 @@ test('login: 返回 10025 → 提示后端文案 3 秒，不跳转、不存 toke
   assert.strictEqual(h.store.token, undefined);
   assert.strictEqual(h.alerts.length, 0);
   assert.strictEqual(h.opens.length, 0);
+});
+
+// ---- profile v1：登录保存余额；首页在背景与 .card 之间挂载用户信息区（window.dsProfile） ----
+test('login: 登录成功把 data.points 存入 localStorage.dsPoints（缺失存空串）', async () => {
+  let h = loginHarness({ code: 0, data: { token: 'T', userInfo: {}, points: 12 } });
+  await h.run();
+  assert.strictEqual(h.store.dsPoints, '12');
+  h = loginHarness({ code: 0, data: { token: 'T', userInfo: {} } });
+  await h.run();
+  assert.strictEqual(h.store.dsPoints, '');
+});
+
+const indexSource = () => appModuleSource(fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8'), INDEX_LOCATOR);
+
+test('app chunk: 首页模板在背景与 .card 之间加 ref="dsProfile" 挂载点', () => {
+  const src = indexSource();
+  assert.ok(src.includes(PROFILE_MARK));
+  const bg = src.indexOf('staticClass: "bg bodymain"');
+  const mountPoint = src.indexOf('ref: "dsProfile"');
+  const card = src.indexOf('staticClass: "card"');
+  assert.ok(bg > 0 && bg < mountPoint && mountPoint < card);
+  new vm.Script(src);
+});
+
+// 执行整个首页模块（依赖一律桩），取出 index.vue 的组件选项
+function indexHarness({ withProfile = true, points = '5' } = {}) {
+  const mounts = [];
+  const ctl = { refreshed: [], destroyed: 0, refresh(p) { this.refreshed.push(p); }, destroy() { this.destroyed++; } };
+  const service = function () {};
+  const store = { dsPoints: points };
+  const src = indexSource() + '\n;__webpack_exports__.dsIndex = indexvue_type_script_lang_js_;';
+  const fn = new vm.Script('(function(module, __webpack_exports__, __webpack_require__, window){' + src + '\n})')
+    .runInNewContext({
+      console, setInterval() {}, clearInterval() {}, document: anyStub(),
+      localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem() {}, removeItem() {} },
+    });
+  const exp = {};
+  const all = { '2877': { a: (o) => ({ exports: o, options: o }) }, b775: { a: service }, f121: { apiURL: API_URL } };
+  const req = Object.assign((id) => (id in all ? all[id] : anyStub()), {
+    r() {}, d(e, n, g) { Object.defineProperty(e, n, { get: g, enumerable: true }); },
+    n: (m) => { const g = () => m; g.a = m; return g; },
+  });
+  const win = { electron: { ipcRenderer: { send() {}, on() {} } } };
+  if (withProfile) win.dsProfile = { mount: (el, o) => { mounts.push([el, o]); return ctl; } };
+  fn({ exports: exp }, exp, req, win);
+  const comp = exp.dsIndex;
+  const el = { id: 'mount-point' };
+  const vmThis = Object.assign(comp.data(), {
+    $refs: { dsProfile: el }, changeWindowSize() {}, shiming() {}, setSoftDate() {},
+  });
+  return { comp, vmThis, mounts, ctl, el, service, store };
+}
+
+test('首页 mounted 调用 dsProfile.mount，activated 刷新，destroyed 卸载', () => {
+  const h = indexHarness();
+  h.comp.mounted.call(h.vmThis);
+  assert.strictEqual(h.mounts.length, 1);
+  const [el, o] = h.mounts[0];
+  assert.strictEqual(el, h.el);
+  assert.strictEqual(o.request, h.service);
+  assert.strictEqual(o.apiURL, API_URL);
+  assert.strictEqual(o.points, '5');
+  h.store.dsPoints = '8';
+  h.comp.activated.call(h.vmThis);
+  assert.deepStrictEqual(h.ctl.refreshed, ['8']);
+  h.comp.destroyed.call(h.vmThis);
+  assert.strictEqual(h.ctl.destroyed, 1);
+});
+
+test('首页：dsProfile 脚本未加载时不报错', () => {
+  const h = indexHarness({ withProfile: false });
+  h.comp.mounted.call(h.vmThis);
+  h.comp.activated.call(h.vmThis);
+  h.comp.destroyed.call(h.vmThis);
+  assert.strictEqual(h.vmThis.dsProfileCtl, undefined);
 });
