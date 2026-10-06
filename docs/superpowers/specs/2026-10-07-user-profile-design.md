@@ -17,22 +17,23 @@
 
 ## 2 数据
 
-- `users` 新增 `nickname TEXT`、`avatar TEXT`，均可空；空表示使用默认值。由独立的迁移函数添加（不得放进会回填激活状态的 `_migrate_users`）。
+- `users` 新增 `nickname TEXT`（可空，空表示使用默认昵称），由独立的迁移函数添加（不得放进会回填激活状态的 `_migrate_users`）。
+- 自定义头像单独存表 `user_avatars(user_id INTEGER PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL)`；无记录表示使用默认头像。不放进 `users`：每次业务请求的拦截校验与后台账号列表都会整行读取 `users`，头像会被反复读出。删除账号时一并删除其头像。
 - 默认值不落库，每次按账号编号确定性计算：同一账号永远得到同一默认值，不同账号尽量不同。
   - 默认昵称：「形容词 + 的 + 名词」，如「好运的海豚」；词表各约 30–50 个积极、中性的词，由账号编号的哈希选取。
   - 默认头像：5×5 左右对称的几何图案 SVG（类似 GitHub 默认头像），前景色色相由哈希决定、背景浅色；以 `data:image/svg+xml;base64,...` 返回。
-- 实际显示值：`nickname` 非空用 `nickname`，否则默认昵称；`avatar` 非空用 `avatar`，否则默认头像。
+- 实际显示值：`nickname` 非空用 `nickname`，否则默认昵称；有 `user_avatars` 记录用其 `data`，否则默认头像。
 - 昵称规则：去首尾空白后 1–12 个字符（按 Unicode 字符计），不含控制字符；不要求唯一。
 - 自定义头像：
   - 客户端将图片居中裁为正方形并缩放到 128×128，编码为 JPEG 后上传 data URL。
   - 服务端只接受 `data:image/jpeg|png|webp;base64,` 前缀，base64 可解码、解码后不超过 100KB，且文件头魔数与声明类型一致；拒绝 SVG 及其他类型。
-  - 原样以 data URL 文本存入 `users.avatar`。
+  - 原样以 data URL 文本存入 `user_avatars.data`。
 
 ## 3 客户端接口
 
 均以请求头 `token`（会话令牌）认证，并经过 `gate.authorize` 的同一套拦截（10020/10022/10024/10025 等），与其他业务请求一致；接口需能从令牌取到当前用户。路由注册在 `/api/{path}` 兜底转发之前。
 
-- `GET /api/user/profile` → `{"code":0,"data":{"code","nickname","avatar","points","nicknameIsDefault","avatarIsDefault"}}`（`nickname`/`avatar` 为实际显示值）。
+- `GET /api/user/profile` → `{"code":0,"data":{"code","nickname","avatar","defaultAvatar","points","nicknameIsDefault","avatarIsDefault"}}`（`nickname`/`avatar` 为实际显示值；`defaultAvatar` 为该账号的默认头像，供编辑弹窗「恢复默认」预览）。
 - `GET /api/user/points` → `{"code":0,"data":{"points"}}`，供每 60 秒刷新，避免反复下载头像。
 - `POST /api/user/profile`，请求体可含：
   - `nickname`：字符串，按规则校验；
@@ -63,8 +64,8 @@
 
 - `/admin/users` 每行增加 `nickname`（实际显示值）；前端账号列表增加「昵称」列，可按昵称筛选；代理视角同样显示。列表不返回头像。
 - `GET /admin/users/{code}/profile` → 昵称、头像（实际显示值）及是否默认；代理只能查看本人名下账号。
-- `POST /admin/users/{code}/profile/reset`：把 `nickname`、`avatar` 置空恢复默认；仅最高权限者与管理员；写审计 `user.profile_reset`（目标为账号编号，详情记录重置前是否为自定义值）。
-- 账号操作增加「头像昵称」：弹窗显示头像与昵称；后台人员可见「重置为默认」，二次确认后执行。
+- `POST /admin/users/{code}/profile/reset`：把 `nickname` 置空、删除头像记录，恢复默认；仅最高权限者与管理员；写审计 `user.profile_reset`（目标为账号编号，详情记录重置前是否为自定义值）。
+- 账号列表中点击昵称打开「头像昵称」弹窗（操作列已较拥挤，不另加按钮）：显示头像与昵称及是否默认；后台人员可见「重置为默认」，二次确认后执行。
 
 ## 6 测试
 
