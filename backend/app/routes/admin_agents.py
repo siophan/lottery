@@ -10,6 +10,8 @@ router = APIRouter()
 STAFF_ONLY = Depends(admin_auth.require_role(*admin_auth.STAFF))
 ANY_ROLE = Depends(admin_auth.require_role(*admin_auth.ALL_ROLES))
 
+AGENT_HIDDEN_FIELDS = ("status_reason", "status_by")     # 后台人员操作信息，代理视图不返回
+
 def _err(e: BizError):
     return JSONResponse({"ok": False, "error": e.msg}, status_code=e.status)
 
@@ -19,8 +21,9 @@ def _is_id_or_none(v) -> bool:
 @router.get("/agents")
 async def list_agents(request: Request, p: Principal = ANY_ROLE):
     conn = request.app.state.db_conn
-    if p.role == "agent":          # 代理只看到自己的直属下级（划拨对象）
-        return {"agents": db_agents.list_agents(conn, parent_id=p.agent_id)}
+    if p.role == "agent":          # 代理只看到自己的直属下级（划拨对象），且不含后台内部的资格变更信息
+        return {"agents": [{k: v for k, v in a.items() if k not in AGENT_HIDDEN_FIELDS}
+                           for a in db_agents.list_agents(conn, parent_id=p.agent_id)]}
     return {"agents": db_agents.list_agents(conn)}
 
 @router.post("/agents")

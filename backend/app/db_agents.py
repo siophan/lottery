@@ -46,6 +46,8 @@ def _row_to_agent(r: sqlite3.Row) -> Agent:
     return Agent(**{k: r[k] for k in _AGENT_FIELDS})
 
 def get_agent(conn, agent_id: int) -> Agent | None:
+    if not db.valid_id(agent_id):        # 超大 / 非法 id 按不存在处理（否则 sqlite3 抛 OverflowError → 500）
+        return None
     r = conn.execute("SELECT * FROM agents WHERE id=?", (agent_id,)).fetchone()
     return _row_to_agent(r) if r else None
 

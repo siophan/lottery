@@ -39,6 +39,29 @@ def create_staff_admin(conn, username, password, *, actor: str, now: int) -> int
         raise
     return cur.lastrowid
 
+def upsert_staff_admin(conn, username: str, password: str, now: int) -> str:
+    """manage.py admin-set：新建管理员或重置已有后台人员密码，返回 created | updated。
+    代理账号（role='agent'）不能用本命令改；新建走与代理名称共用的命名空间检查（不区分大小写、含保留期）。"""
+    h, salt = hash_password(password)
+    begin_write(conn)
+    try:
+        existing = db.get_admin_by_username(conn, username)
+        if existing is not None:
+            if existing.role == "agent":
+                raise BizError("该用户名属于代理账号，不能用 admin-set 修改", 409)
+            conn.execute("UPDATE admins SET password_hash=?, salt=? WHERE id=?", (h, salt, existing.id))
+            res = "updated"
+        else:
+            ensure_name_available(conn, name_key(username), now, None)
+            conn.execute("INSERT INTO admins(username,password_hash,salt,created_at,role)"
+                         " VALUES(?,?,?,?,'admin')", (username, h, salt, now))
+            res = "created"
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return res
+
 def set_admin_password(conn, admin_id: int, password, *, actor: str, now: int) -> None:
     check_password(password)
     a = _staff_admin(conn, admin_id)

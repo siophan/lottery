@@ -4,7 +4,8 @@ import os
 import sys
 import time
 from typing import Optional
-from app import db
+from app import db, db_staff
+from app.db_agents import BizError
 from app.config import load_settings
 
 def _parse_date(s: str) -> Optional[int]:
@@ -40,7 +41,12 @@ def main(argv: list, conn=None) -> int:
     elif args.cmd == "enable":
         print("ok" if db.update_user(conn, args.code, status="active") else "not found")
     elif args.cmd == "admin-set":
-        db.upsert_admin(conn, args.username, args.password); print(f"admin set: {args.username}")
+        try:
+            db_staff.upsert_staff_admin(conn, args.username, args.password, int(time.time()))
+        except BizError as e:
+            print(f"error: {e.msg}")
+            return 1
+        print(f"admin set: {args.username}")
     elif args.cmd == "set-super":
         res = db.set_super(conn, args.username)
         if res != "ok":

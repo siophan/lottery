@@ -93,7 +93,7 @@ def test_staff_activation_of_agent_account_records_chain_without_agent_actor():
     u = db.get_user_by_code(conn, "1000000")
     assert u.activated_by_agent_id is None and json.loads(u.agent_chain_json) == [kid, top]
     db.create_user(conn, "P1", "x", None, pending=True)
-    key_client(app).post("/admin/users/P1/activate")
+    assert key_client(app).post("/admin/users/P1/activate").status_code == 200
     assert db.get_user_by_code(conn, "P1").agent_chain_json is None
 
 def test_agent_other_account_ops_forbidden():

@@ -622,7 +622,8 @@ def add_audit(conn, actor_type: str, actor: str, action: str, target: str | None
     conn.commit()
 
 def list_audit(conn, limit: int, offset: int, target: str | None = None) -> tuple[list[dict], int]:
-    where, args = ("WHERE target=?", [target]) if target is not None else ("", [])
+    # 目标按原样或大写匹配：账号编号审计存大写，代理名称 / 管理员用户名存原样
+    where, args = ("WHERE target IN (?, ?)", [target, target.upper()]) if target is not None else ("", [])
     total = conn.execute(f"SELECT COUNT(*) FROM audit_logs {where}", args).fetchone()[0]
     rs = conn.execute(
         f"SELECT * FROM audit_logs {where} ORDER BY id DESC LIMIT ? OFFSET ?",
@@ -645,7 +646,15 @@ def get_admin_by_username(conn, username: str) -> Admin | None:
     r = conn.execute("SELECT * FROM admins WHERE username=?", (username,)).fetchone()
     return _row_to_admin(r) if r else None
 
+ID_MAX = 2 ** 62      # SQLite INTEGER 为 64 位有符号；留足余量，避免 OverflowError 变 500
+
+def valid_id(v) -> bool:
+    """主键 id 的合法取值：整数（不含 bool）且 0 < v <= 2**62；否则一律按「不存在」处理。"""
+    return isinstance(v, int) and not isinstance(v, bool) and 0 < v <= ID_MAX
+
 def get_admin_by_id(conn, admin_id: int) -> Admin | None:
+    if not valid_id(admin_id):
+        return None
     r = conn.execute("SELECT * FROM admins WHERE id=?", (admin_id,)).fetchone()
     return _row_to_admin(r) if r else None
 

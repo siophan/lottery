@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from .. import db
 from .. import admin_auth, db_agents
 from ..admin_auth import Principal
+from ..throttle import LOCKED_MSG, client_ip
 
 router = APIRouter()
 STAFF_ONLY = Depends(admin_auth.require_role(*admin_auth.STAFF))
@@ -165,7 +166,7 @@ async def audit_logs(request: Request, p: Principal = STAFF_ONLY):
         return _err("参数无效", 400)
     limit = max(1, min(limit, 200))
     target = q.get("target")
-    target = target.strip().upper() if target and target.strip() else None
+    target = target.strip() if target and target.strip() else None
     rows, total = db.list_audit(request.app.state.db_conn, limit, offset, target)
     return {"logs": rows, "total": total}
 
@@ -177,9 +178,18 @@ async def admin_login(request: Request, response: Response, payload: dict = Body
     password = payload.get("password", "")
     if not isinstance(username, str) or not isinstance(password, str):
         return JSONResponse({"ok": False}, status_code=401)
+    throttle = request.app.state.login_throttle
+    ip = client_ip(request)
+    # 与客户端登录共用限流器，但键加 "admin:" 前缀，两边互不锁定；代理用户名半公开，必须限流
+    key = "admin:" + username.strip().casefold()
+    # 先查限流再验密码：锁定期间不做 PBKDF2
+    if throttle.locked(key, ip):
+        return JSONResponse({"ok": False, "error": LOCKED_MSG}, status_code=429)
     admin = admin_auth.authenticate(conn, username, password)
     if not admin:
+        throttle.failed(key, ip)
         return JSONResponse({"ok": False}, status_code=401)
+    throttle.succeeded(key)         # 密码正确即清零该用户名的失败计数
     # 密码正确后才区分代理资格：暂停/取消的代理不能登录后台
     blocked = admin_auth.agent_login_problem(conn, admin)
     if blocked:

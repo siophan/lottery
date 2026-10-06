@@ -59,8 +59,8 @@ async def segment_ops(request: Request, p: Principal = ANY_ROLE):
         return JSONResponse({"ok": False, "error": "参数无效"}, status_code=400)
     if not 0 <= offset <= MAX_INT or (agent_id is not None and not 0 <= agent_id <= MAX_INT):
         return JSONResponse({"ok": False, "error": "参数无效"}, status_code=400)
-    if p.role == "agent":            # 代理只看与自己有关的流水
+    if p.role == "agent":            # 代理只看与自己有关的流水，且不暴露后台人员用户名
         agent_id = p.agent_id
     rows, total = db_segments.list_segment_ops(request.app.state.db_conn, max(1, min(limit, 200)),
-                                               offset, agent_id)
+                                               offset, agent_id, hide_staff=p.role == "agent")
     return {"ops": rows, "total": total}

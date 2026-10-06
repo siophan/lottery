@@ -53,7 +53,8 @@ def assign_segment(conn, agent_id: int, start, end, *, actor_type: str, actor: s
                      if r["agent_id"] is not None or r["first_activated_at"] is not None)
         if bad:
             raise BizError("以下编号已存在，不能分配：" + _fmt_codes(bad), 409)
-        conn.executemany("UPDATE users SET agent_id=? WHERE id=?",
+        # 吸收的无归属待激活号与新建号一致：恢复为正常状态、永久有效
+        conn.executemany("UPDATE users SET agent_id=?, status='active', expires_at=NULL WHERE id=?",
                          [(ag.id, r["id"]) for r in existing.values()])
         new = [n for n in range(start, end + 1) if n not in existing]
         conn.executemany(
@@ -134,7 +135,11 @@ def recycle_agent(conn, agent_id: int, *, actor_type: str, actor: str, now: int)
         raise
     return {"count": len(nums), "children": len(children)}
 
-def list_segment_ops(conn, limit: int, offset: int, agent_id: int | None = None) -> tuple[list[dict], int]:
+STAFF_ACTOR_LABEL = "后台"       # 代理视图里替代后台人员用户名的显示
+
+def list_segment_ops(conn, limit: int, offset: int, agent_id: int | None = None, *,
+                     hide_staff: bool = False) -> tuple[list[dict], int]:
+    """流水列表；hide_staff=True（代理视图）时，后台人员执行的分配 / 回收不暴露其用户名。"""
     where, args = ("WHERE o.from_agent_id=? OR o.to_agent_id=?", [agent_id, agent_id]) \
         if agent_id is not None else ("", [])
     total = conn.execute(f"SELECT COUNT(*) FROM segment_ops o {where}", args).fetchone()[0]
@@ -142,4 +147,9 @@ def list_segment_ops(conn, limit: int, offset: int, agent_id: int | None = None)
         "SELECT o.*, f.name AS from_name, t.name AS to_name FROM segment_ops o"
         " LEFT JOIN agents f ON f.id=o.from_agent_id LEFT JOIN agents t ON t.id=o.to_agent_id"
         f" {where} ORDER BY o.id DESC LIMIT ? OFFSET ?", args + [limit, offset]).fetchall()
-    return [dict(r) for r in rs], total
+    ops = [dict(r) for r in rs]
+    if hide_staff:
+        for o in ops:
+            if o["op"] != "transfer":          # 划拨由代理本人执行，其余都是后台人员
+                o["actor"] = STAFF_ACTOR_LABEL
+    return ops, total

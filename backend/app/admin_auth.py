@@ -25,8 +25,18 @@ class Principal:
     def actor_type(self) -> str:
         return "agent" if self.role == "agent" else "admin"
 
-def authenticate(conn, username: str, password: str):
+def _find_login(conn, username: str):
+    """先按用户名精确匹配；未命中时按代理规范化名称（不区分大小写）匹配。
+    后台人员用户名仍区分大小写，只有代理（名称全局不区分大小写唯一）才放宽。"""
     admin = db.get_admin_by_username(conn, username)
+    if admin:
+        return admin
+    r = conn.execute("SELECT admin_id FROM agents WHERE name_key=?",
+                     (db_agents.name_key(username),)).fetchone()
+    return db.get_admin_by_id(conn, r["admin_id"]) if r else None
+
+def authenticate(conn, username: str, password: str):
+    admin = _find_login(conn, username)
     if not admin:
         return None
     if not security.verify_password(password, admin.salt, admin.password_hash):
@@ -47,13 +57,15 @@ def current_admin(conn, token):
     return db.get_admin_by_id(conn, sess.admin_id)
 
 def agent_login_problem(conn, admin) -> str | None:
-    """代理身份资格非激活（暂停/取消）时返回提示文案；可登录或非代理返回 None。"""
+    """代理身份资格非激活（暂停/取消/未知状态）时返回提示文案；可登录或非代理返回 None。"""
     if admin.role != "agent":
         return None
     agent = db_agents.get_agent_by_admin_id(conn, admin.id)
     if agent is None:
         return "代理资料不存在，无法登录"
-    return AGENT_BLOCKED_MSG.get(agent.status)
+    if agent.status == "active":
+        return None
+    return AGENT_BLOCKED_MSG.get(agent.status, "代理资格无效，无法登录")
 
 def principal_for_admin(conn, admin) -> Principal | None:
     """把已登录的后台账号转成当前身份；代理资格非激活时返回 None（已有会话逐请求拒绝）。"""
