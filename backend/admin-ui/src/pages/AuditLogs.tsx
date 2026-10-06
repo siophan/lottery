@@ -25,6 +25,15 @@ const ACTION_LABEL: Record<string, string> = {
   'admin.set_super': '指定最高权限者',
   'grant.add': '授权',
   'grant.revoke': '撤销授权',
+  'points.grant': '加分',
+  'points.revoke': '扣分',
+  'points.transfer': '转积分给下级',
+  'points.recharge': '代理充值',
+  'points.batch': '批量充值',
+  'points.trial': '体验赠送',
+  'points.suspended': '积分暂停',
+  'points.resumed': '积分恢复',
+  'settings.trial': '体验期设置',
 }
 
 // user.expires 的 from/to 是 unix 秒或 null（永久）。
@@ -50,6 +59,13 @@ function fmtDetail(r: AuditLogRow): string {
   if (r.action === 'user.expires') {
     return `${fmtExpire(d.from)} → ${fmtExpire(d.to)}`
   }
+  if (r.action === 'points.batch') {
+    return `${String(d.count)} 个账号各 ${String(d.amount)} 分，共 ${String(d.total)} 分`
+  }
+  if (r.action.startsWith('points.') && d.amount !== undefined) {
+    return `${String(d.amount)} 分${d.balance !== undefined ? `，余额 ${String(d.balance)}` : ''}` +
+      (d.reason ? `（${String(d.reason)}）` : '')
+  }
   return Object.keys(d).length ? JSON.stringify(d) : '—'
 }
 
@@ -74,7 +90,7 @@ export default function AuditLogs() {
       title: '对象',
       dataIndex: 'target',
       width: 140,
-      fieldProps: { placeholder: '按对象（账号编号 / 代理名称）搜索' },
+      fieldProps: { placeholder: '按对象（账号编号 / 代理名称 / 批次号）搜索' },
     },
     {
       title: '详情',

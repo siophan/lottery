@@ -3,6 +3,8 @@ import {
   ActionType,
   ModalForm,
   ProColumns,
+  ProFormDigit,
+  ProFormRadio,
   ProFormSelect,
   ProFormText,
   ProFormTextArea,
@@ -11,6 +13,7 @@ import {
 import { App, Button, Popconfirm, Tooltip } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import {
+  adjustAgentPoints,
   AgentInput,
   AgentRow,
   ApiResult,
@@ -26,6 +29,7 @@ import {
 import {
   AGENT_STATUS_LABEL,
   fmtDateTime,
+  POINTS_AMOUNT_PROPS,
   REGION_LABEL,
   TIER_LABEL,
   toValueEnum,
@@ -88,6 +92,7 @@ export default function Agents({ me }: { me: Me }) {
           dom
         ),
     },
+    { title: '积分', dataIndex: 'points', hideInSearch: true, sorter: (a, b) => a.points - b.points },
     { title: '总配额', dataIndex: 'total', hideInSearch: true },
     { title: '已激活', dataIndex: 'activated', hideInSearch: true },
     { title: '未激活', dataIndex: 'unactivated', hideInSearch: true },
@@ -173,6 +178,46 @@ export default function Agents({ me }: { me: Me }) {
             />
           </ModalForm>
         ),
+        <ModalForm
+          key="points"
+          title={`积分 · ${r.name}（当前 ${r.points}）`}
+          trigger={<a>积分</a>}
+          width={400}
+          modalProps={{ destroyOnClose: true }}
+          initialValues={{ op: 'grant' }}
+          onFinish={async (v: { op: 'grant' | 'revoke'; amount: number; reason?: string }) =>
+            run(adjustAgentPoints(r.id, v.op, v.amount, v.reason), v.op === 'grant' ? '已加分' : '已扣分')
+          }
+        >
+          <ProFormRadio.Group
+            name="op"
+            label="操作"
+            options={[
+              { label: '加分', value: 'grant' },
+              { label: '扣分', value: 'revoke' },
+            ]}
+            extra="加分要求代理资格为激活；扣分必须填写原因，最多扣到 0"
+          />
+          <ProFormDigit
+            name="amount"
+            label="积分"
+            rules={[{ required: true, message: '请输入积分数量' }]}
+            fieldProps={POINTS_AMOUNT_PROPS}
+          />
+          <ProFormTextArea
+            name="reason"
+            label="原因"
+            rules={[
+              ({ getFieldValue }: { getFieldValue: (name: string) => unknown }) => ({
+                validator: (_: unknown, v?: string) =>
+                  getFieldValue('op') === 'revoke' && !(v || '').trim()
+                    ? Promise.reject(new Error('请填写扣分原因'))
+                    : Promise.resolve(),
+              }),
+              { max: 200 },
+            ]}
+          />
+        </ModalForm>,
         <ModalForm
           key="password"
           title={`重置登录密码 · ${r.name}`}

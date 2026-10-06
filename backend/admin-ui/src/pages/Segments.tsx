@@ -8,18 +8,20 @@ import {
   ProTable,
 } from '@ant-design/pro-components'
 import { App, Button } from 'antd'
-import { PlusOutlined, SwapOutlined } from '@ant-design/icons'
+import { GiftOutlined, PlusOutlined, SwapOutlined } from '@ant-design/icons'
 import {
   AgentRow,
   ApiResult,
   assignSegment,
+  getMe,
   listAgents,
   listSegmentOps,
   Me,
   SegmentOpRow,
+  transferAgentPoints,
   transferSegment,
 } from '../api'
-import { fmtDateTime } from '../util'
+import { fmtDateTime, POINTS_AMOUNT_PROPS } from '../util'
 
 const OP_LABEL: Record<string, string> = { assign: '分配', transfer: '划拨', recycle: '回收' }
 const NO_RULES = [{ required: true, message: '请输入编号' }]
@@ -32,6 +34,7 @@ export default function Segments({ me }: { me: Me }) {
   const [agents, setAgents] = useState<AgentRow[]>([])
   const isStaff = me.role !== 'agent'
   const canTransfer = me.role === 'agent' && me.agent?.tier === 'senior'
+  const [myPoints, setMyPoints] = useState<number | null>(me.agent?.points ?? null)
 
   useEffect(() => {
     if (isStaff || canTransfer) listAgents().then(setAgents).catch(() => setAgents([]))
@@ -119,6 +122,36 @@ export default function Segments({ me }: { me: Me }) {
               showSearch
             />
             {rangeFields}
+          </ModalForm>
+        ),
+        canTransfer && (
+          <ModalForm
+            key="points"
+            title="转积分给直属下级"
+            width={420}
+            modalProps={{ destroyOnClose: true }}
+            trigger={<Button icon={<GiftOutlined />}>转积分给下级</Button>}
+            onOpenChange={(open) => {
+              if (open) getMe().then((m) => setMyPoints(m?.agent?.points ?? null)).catch(() => undefined)
+            }}
+            onFinish={async (v: { to_agent_id: number; amount: number }) =>
+              run(transferAgentPoints(v.to_agent_id, v.amount), '已转出积分')
+            }
+          >
+            <ProFormSelect
+              name="to_agent_id"
+              label="直属下级"
+              options={targets}
+              rules={[{ required: true, message: '请选择下级代理' }]}
+              extra="收款代理须资格激活；转出后不能转回"
+            />
+            <ProFormDigit
+              name="amount"
+              label="积分"
+              rules={[{ required: true, message: '请输入积分数量' }]}
+              fieldProps={POINTS_AMOUNT_PROPS}
+              extra={`从你的积分中扣除（当前 ${myPoints ?? '—'}）`}
+            />
           </ModalForm>
         ),
         canTransfer && (

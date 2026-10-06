@@ -37,6 +37,7 @@ export interface UserRow {
   agent_id: number | null // 归属代理；null = 无归属
   agent_name: string | null
   number_status: string // pending 待激活 | activated 已激活 | arrears 已欠费 | to_recycle 待回收 | unassigned 未分配
+  points: number // 积分余额
 }
 
 export interface ApiResult {
@@ -66,6 +67,7 @@ export interface AgentRow {
   status_reason: string | null
   created_at: number
   recycled_at: number | null
+  points: number // 代理积分余额
   // 以下仅列表接口返回
   parent_name?: string | null
   total?: number
@@ -355,4 +357,119 @@ export async function addGrant(adminId: number, grant: string): Promise<ApiResul
 
 export async function revokeGrant(adminId: number, grant: string): Promise<ApiResult> {
   return result(await req(`/grants/${adminId}/${encodeURIComponent(grant)}`, { method: 'DELETE' }))
+}
+
+// ---------------- 积分 ----------------
+
+export interface PointsResult extends ApiResult {
+  amount?: number // 实际变化量（扣分最多扣到 0，可能小于请求值）
+  balance?: number | null // 加分/扣分：对象变化后余额；代理转分/充值/批量：代理自身剩余余额
+  count?: number
+  total?: number
+  batch_id?: string
+}
+
+// 与 result() 相同的 ok / error 规则，另外带回后端返回的余额等字段。
+async function pointsResult(r: Response): Promise<PointsResult> {
+  const d = await r.json().catch(() => ({}))
+  const error = r.status === 403 && d.error === 'forbidden' ? '无权限或登录已失效' : d.error
+  return { ...d, ok: r.status === 200 && d.ok !== false, error }
+}
+
+// 后台人员：加分（凭空增加）/ 扣分（原因必填，最多扣到 0）
+export async function adjustUserPoints(
+  code: string,
+  op: 'grant' | 'revoke',
+  amount: number,
+  reason?: string,
+): Promise<PointsResult> {
+  return pointsResult(await post(`/users/${encodeURIComponent(code)}/points/${op}`, { amount, reason }))
+}
+
+export async function adjustAgentPoints(
+  id: number,
+  op: 'grant' | 'revoke',
+  amount: number,
+  reason?: string,
+): Promise<PointsResult> {
+  return pointsResult(await post(`/agents/${id}/points/${op}`, { amount, reason }))
+}
+
+// 代理：用自身余额给本人名下账号充值
+export async function rechargeUser(code: string, amount: number): Promise<PointsResult> {
+  return pointsResult(await post(`/users/${encodeURIComponent(code)}/points/recharge`, { amount }))
+}
+
+// 高级代理：转积分给直属下级
+export async function transferAgentPoints(toAgentId: number, amount: number): Promise<PointsResult> {
+  return pointsResult(await post(`/agents/${toAgentId}/points/transfer`, { amount }))
+}
+
+// 批量充值：后台人员凭空增加；代理扣自身余额（仅本人名下账号）
+export async function batchRecharge(codes: string[], amount: number, reason?: string): Promise<PointsResult> {
+  return pointsResult(await post('/points/batch-recharge', { codes, amount, reason }))
+}
+
+export interface LedgerRow {
+  id: number
+  holder_type: 'user' | 'agent'
+  holder_id: string // 账号编号 / 代理 id
+  holder_name: string | null // 账号编号 / 代理名称
+  delta: number
+  balance_before: number
+  balance_after: number
+  kind: string // trial | grant | revoke | transfer_out | transfer_in | charge
+  counterparty_type: string | null
+  counterparty_id: string | null
+  counterparty_name: string | null
+  actor_type: string
+  actor: string
+  reason: string | null
+  batch_id: string | null
+  cycle_key: number | null
+  created_at: number
+}
+
+export interface LedgerQuery {
+  holder_type?: string
+  holder_id?: string
+  kind?: string
+  since?: number
+  until?: number
+}
+
+export async function listLedger(
+  limit: number,
+  offset: number,
+  q: LedgerQuery = {},
+): Promise<{ ledger: LedgerRow[]; total: number }> {
+  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  for (const [k, v] of Object.entries(q)) {
+    if (v !== undefined && v !== '') qs.set(k, String(v))
+  }
+  const r = await req('/points/ledger?' + qs.toString())
+  if (r.status !== 200) throw new Error('list ledger failed: ' + r.status)
+  return r.json()
+}
+
+export interface TrialSettings {
+  trial_enabled: boolean
+  trial_points: number
+  first_charge_delay_hours: number // 只读：固定 24
+  charge_period_hours: number // 只读：固定 24
+}
+
+export async function getTrialSettings(): Promise<TrialSettings> {
+  const r = await req('/settings/trial')
+  if (r.status !== 200) throw new Error('get trial settings failed: ' + r.status)
+  return r.json()
+}
+
+export async function saveTrialSettings(trialEnabled: boolean, trialPoints: number): Promise<ApiResult> {
+  return result(
+    await req('/settings/trial', {
+      method: 'PUT',
+      body: JSON.stringify({ trial_enabled: trialEnabled, trial_points: trialPoints }),
+    }),
+  )
 }

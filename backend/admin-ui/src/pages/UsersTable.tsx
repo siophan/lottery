@@ -1,36 +1,57 @@
-import { useEffect, useRef, useState } from 'react'
+import { Key, useEffect, useRef, useState } from 'react'
 import {
   ActionType,
   ModalForm,
   ProColumns,
   ProFormDatePicker,
+  ProFormDigit,
+  ProFormRadio,
   ProFormText,
+  ProFormTextArea,
   ProTable,
 } from '@ant-design/pro-components'
-import { App, Button, Dropdown, Popconfirm } from 'antd'
+import { App, Button, Dropdown, Popconfirm, Tag } from 'antd'
 import { DownOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import {
   activateUser,
+  adjustUserPoints,
   ApiResult,
+  batchRecharge,
   createUser,
   deleteUser,
+  getMe,
   listAgents,
   listUsers,
   Me,
   patchUser,
+  PointsResult,
+  rechargeUser,
   resetUserPassword,
   UserRow,
 } from '../api'
-import { fmtDate, fmtDateTime, NUMBER_STATUS_LABEL, STATUS_LABEL, toEpoch, toValueEnum } from '../util'
+import {
+  fmtDate,
+  fmtDateTime,
+  NUMBER_STATUS_LABEL,
+  POINTS_AMOUNT_PROPS,
+  STATUS_LABEL,
+  toEpoch,
+  toValueEnum,
+} from '../util'
 
-// 后台人员：全部账号 + 全部操作；代理：只读本人名下账号，唯一操作是激活待激活账号。
+const AMOUNT_RULES = [{ required: true, message: '请输入积分数量' }]
+
+// 后台人员：全部账号 + 全部操作（含加分 / 扣分 / 批量充值）；
+// 代理：只读本人名下账号，可激活待激活账号、用自身积分给名下账号充值 / 批量充值。
 export default function UsersTable({ me }: { me: Me }) {
   const { message, modal } = App.useApp()
   const actionRef = useRef<ActionType>()
   const reload = () => actionRef.current?.reload()
   const isAgent = me.role === 'agent'
   const [agentEnum, setAgentEnum] = useState<Record<string, { text: string }>>({})
+  const [selected, setSelected] = useState<Key[]>([])
+  const [myPoints, setMyPoints] = useState<number | null>(me.agent?.points ?? null)
 
   useEffect(() => {
     if (isAgent) return
@@ -51,6 +72,19 @@ export default function UsersTable({ me }: { me: Me }) {
     return r.ok
   }
 
+  // 积分操作：成功后刷新列表；代理同时刷新本人余额（后端返回的 balance 即代理剩余积分）
+  const runPoints = async (p: Promise<PointsResult>, okMsg: (r: PointsResult) => string) => {
+    const r = await p
+    if (r.ok) {
+      message.success(okMsg(r))
+      if (isAgent && typeof r.balance === 'number') setMyPoints(r.balance)
+      reload()
+    } else {
+      message.error(r.error || '操作失败')
+    }
+    return r.ok
+  }
+
   const setStatus = (code: string, status: string, okMsg: string) =>
     run(patchUser(code, { status }), okMsg, '操作失败')
 
@@ -66,6 +100,13 @@ export default function UsersTable({ me }: { me: Me }) {
       dataIndex: 'number_status',
       valueType: 'select',
       valueEnum: toValueEnum(NUMBER_STATUS_LABEL),
+      render: (dom, r) => (r.number_status === 'arrears' ? <Tag color="red">{dom}</Tag> : dom),
+    },
+    {
+      title: '积分余额',
+      dataIndex: 'points',
+      hideInSearch: true,
+      sorter: (a, b) => a.points - b.points,
     },
     {
       title: '归属代理',
@@ -136,7 +177,29 @@ export default function UsersTable({ me }: { me: Me }) {
             <a>激活</a>
           </Popconfirm>
         )
-        if (isAgent) return [activate]
+        if (isAgent) {
+          return [
+            activate,
+            <ModalForm
+              key="recharge"
+              title={`充值 · ${record.code}`}
+              trigger={<a>充值</a>}
+              width={360}
+              modalProps={{ destroyOnClose: true }}
+              onFinish={async (v: { amount: number }) =>
+                runPoints(rechargeUser(record.code, v.amount), (r) => `已充值，你的剩余积分 ${r.balance}`)
+              }
+            >
+              <ProFormDigit
+                name="amount"
+                label="充值积分"
+                rules={AMOUNT_RULES}
+                fieldProps={POINTS_AMOUNT_PROPS}
+                extra={`从你的积分中扣除（当前 ${myPoints ?? '—'}）；未激活账号也可预充`}
+              />
+            </ModalForm>,
+          ]
+        }
         // 不常用 / 有风险的操作收进「更多」，确认走 modal.confirm（Dropdown 内无法嵌 Popconfirm）。
         const more = [
           record.status !== 'banned' && {
@@ -211,6 +274,43 @@ export default function UsersTable({ me }: { me: Me }) {
               fieldProps={{ style: { width: '100%' } }}
             />
           </ModalForm>,
+          <ModalForm
+            key="points"
+            title={`积分 · ${record.code}（当前 ${record.points}）`}
+            trigger={<a>积分</a>}
+            width={400}
+            modalProps={{ destroyOnClose: true }}
+            initialValues={{ op: 'grant' }}
+            onFinish={async (v: { op: 'grant' | 'revoke'; amount: number; reason?: string }) =>
+              runPoints(adjustUserPoints(record.code, v.op, v.amount, v.reason), (r) =>
+                v.op === 'grant' ? `已加分，余额 ${r.balance}` : `已扣 ${r.amount} 分，余额 ${r.balance}`,
+              )
+            }
+          >
+            <ProFormRadio.Group
+              name="op"
+              label="操作"
+              options={[
+                { label: '加分', value: 'grant' },
+                { label: '扣分', value: 'revoke' },
+              ]}
+            />
+            <ProFormDigit name="amount" label="积分" rules={AMOUNT_RULES} fieldProps={POINTS_AMOUNT_PROPS} />
+            <ProFormTextArea
+              name="reason"
+              label="原因"
+              extra="扣分必须填写原因，最多扣到 0"
+              rules={[
+                ({ getFieldValue }: { getFieldValue: (name: string) => unknown }) => ({
+                  validator: (_: unknown, v?: string) =>
+                    getFieldValue('op') === 'revoke' && !(v || '').trim()
+                      ? Promise.reject(new Error('请填写扣分原因'))
+                      : Promise.resolve(),
+                }),
+                { max: 200 },
+              ]}
+            />
+          </ModalForm>,
           <Dropdown key="more" menu={{ items: more }} trigger={['click']}>
             <a onClick={(e) => e.preventDefault()}>
               更多 <DownOutlined />
@@ -230,7 +330,16 @@ export default function UsersTable({ me }: { me: Me }) {
       search={{ labelWidth: 'auto' }}
       options={{ reload: true, density: false, setting: true }}
       pagination={{ pageSize: 10, showSizeChanger: true }}
+      headerTitle={isAgent ? `我的积分：${myPoints ?? '—'}` : undefined}
+      // 跨页保留勾选，批量充值可一次选多页（单次最多 1000 个）
+      rowSelection={{ selectedRowKeys: selected, onChange: setSelected, preserveSelectedRowKeys: true }}
+      tableAlertOptionRender={() => <a onClick={() => setSelected([])}>清空选择</a>}
       request={async (params) => {
+        if (isAgent) {
+          getMe()
+            .then((m) => setMyPoints(m?.agent?.points ?? null))
+            .catch(() => undefined)
+        }
         const all = await listUsers(!isAgent && params.agent_id ? Number(params.agent_id) : undefined)
         let rows = all
         if (params.code) {
@@ -252,6 +361,38 @@ export default function UsersTable({ me }: { me: Me }) {
         return { data: rows.slice(start, start + pageSize), total: rows.length, success: true }
       }}
       toolBarRender={() => [
+        <ModalForm
+          key="batch"
+          title={`批量充值（已选 ${selected.length} 个账号）`}
+          width={400}
+          modalProps={{ destroyOnClose: true }}
+          trigger={
+            <Button disabled={selected.length === 0 || selected.length > 1000}>
+              批量充值{selected.length ? `（${selected.length}）` : ''}
+            </Button>
+          }
+          onFinish={async (v: { amount: number; reason?: string }) => {
+            const ok = await runPoints(
+              batchRecharge(selected.map(String), v.amount, v.reason),
+              (r) => `已为 ${r.count} 个账号各充值 ${v.amount} 分` + (isAgent ? `，你的剩余积分 ${r.balance}` : ''),
+            )
+            if (ok) setSelected([])
+            return ok
+          }}
+        >
+          <ProFormDigit
+            name="amount"
+            label="每个账号充值积分"
+            rules={AMOUNT_RULES}
+            fieldProps={POINTS_AMOUNT_PROPS}
+            extra={
+              isAgent
+                ? `按总额从你的积分中扣除（当前 ${myPoints ?? '—'}），余额不足则整批失败`
+                : '全有或全无：任一账号不存在则整批失败'
+            }
+          />
+          <ProFormText name="reason" label="备注" rules={[{ max: 200 }]} />
+        </ModalForm>,
         !isAgent && (
           <ModalForm
             key="create"

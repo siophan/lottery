@@ -5,11 +5,13 @@ import {
   ApartmentOutlined,
   ApiOutlined,
   DashboardOutlined,
+  ExperimentOutlined,
   FileSearchOutlined,
   LogoutOutlined,
   PartitionOutlined,
   SafetyOutlined,
   TeamOutlined,
+  TransactionOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import { logout, Me } from './api'
@@ -18,8 +20,10 @@ import Agents from './pages/Agents'
 import AuditLogs from './pages/AuditLogs'
 import Dashboard from './pages/Dashboard'
 import DataSources from './pages/DataSources'
+import PointsLedger from './pages/PointsLedger'
 import Segments from './pages/Segments'
 import Staff from './pages/Staff'
+import TrialSettings from './pages/TrialSettings'
 import UsersTable from './pages/UsersTable'
 import { ROLE_LABEL } from './util'
 
@@ -39,6 +43,7 @@ function routesFor(me: Me): MenuRoute[] {
         name: me.agent?.tier === 'senior' ? '编号划拨' : '编号流水',
         icon: <PartitionOutlined />,
       },
+      { path: '/points-ledger', name: '积分流水', icon: <TransactionOutlined /> },
     ]
   }
   const routes: MenuRoute[] = [
@@ -46,6 +51,8 @@ function routesFor(me: Me): MenuRoute[] {
     { path: '/users', name: '用户管理', icon: <TeamOutlined /> },
     { path: '/agents', name: '代理管理', icon: <ApartmentOutlined /> },
     { path: '/segments', name: '号段管理', icon: <PartitionOutlined /> },
+    { path: '/points-ledger', name: '积分流水', icon: <TransactionOutlined /> },
+    { path: '/trial', name: '体验期设置', icon: <ExperimentOutlined /> },
     { path: '/data-sources', name: '数据源', icon: <ApiOutlined /> },
     { path: '/audit-logs', name: '操作日志', icon: <FileSearchOutlined /> },
   ]
@@ -67,6 +74,10 @@ function renderPage(pathname: string, me: Me): ReactNode {
       return <Segments me={me} />
     case '/data-sources':
       return <DataSources />
+    case '/points-ledger':
+      return <PointsLedger me={me} />
+    case '/trial':
+      return <TrialSettings />
     case '/audit-logs':
       return <AuditLogs />
     case '/staff':
@@ -103,7 +114,10 @@ export default function MainLayout({ me, onLoggedOut }: { me: Me; onLoggedOut: (
       avatarProps={{
         icon: <UserOutlined />,
         size: 'small',
-        title: `${me.username}（${ROLE_LABEL[me.role] ?? me.role}）`,
+        // 代理显示登录时的积分余额（各页面操作后自行刷新；此处随 /me 重新读取而更新）
+        title:
+          `${me.username}（${ROLE_LABEL[me.role] ?? me.role}）` +
+          (me.agent ? ` · 积分 ${me.agent.points}` : ''),
         render: (_, dom) => (
           <Dropdown
             menu={{

@@ -44,3 +44,18 @@ export const ROLE_LABEL: Record<string, string> = { super: '最高权限者', ad
 export function toValueEnum(labels: Record<string, string>): Record<string, { text: string }> {
   return Object.fromEntries(Object.entries(labels).map(([k, v]) => [k, { text: v }]))
 }
+
+// 积分流水类型 → 中文。
+export const POINTS_KIND_LABEL: Record<string, string> = {
+  trial: '体验赠送',
+  grant: '后台加分',
+  revoke: '后台扣分',
+  transfer_out: '转出',
+  transfer_in: '转入',
+  charge: '每日扣减',
+}
+
+export const HOLDER_TYPE_LABEL: Record<string, string> = { user: '账号', agent: '代理' }
+
+// 单笔积分数量 1–100000（与后端一致）。
+export const POINTS_AMOUNT_PROPS = { min: 1, max: 100000, precision: 0 }
