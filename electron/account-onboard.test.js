@@ -43,7 +43,12 @@ function makeEl(tag) {
 function makeDoc() {
   const doc = makeEl('document');
   doc.body = makeEl('body');
-  doc.createElement = makeEl;
+  doc.activeElement = null;
+  doc.createElement = (tag) => {
+    const e = makeEl(tag);
+    e.focus = function () { doc.activeElement = this; };
+    return e;
+  };
   // 文档级监听带 capture 标记，便于断言 Esc 拦截走捕获阶段
   doc.captureListeners = [];
   doc.addEventListener = (t, fn, cap) => { doc.captureListeners.push({ t, fn, cap: !!cap }); };
@@ -95,6 +100,13 @@ function setup(responses, extra) {
 function fill(q, over) {
   const v = Object.assign({ old: '123456', new: 'abc12345', confirm: 'abc12345', phone: '13812345678', code: '123456' }, over);
   Object.keys(v).forEach((k) => { q(k).value = v[k]; });
+}
+
+function keyEv(key, target, extra) {
+  const ev = Object.assign({ key, target, stopped: 0, prevented: 0 }, extra);
+  ev.preventDefault = () => { ev.prevented++; };
+  ev.stopPropagation = () => { ev.stopped++; };
+  return ev;
 }
 
 const tick = () => new Promise((r) => setImmediate(r));
@@ -312,12 +324,15 @@ test('提交中重复点击只发一次请求', async () => {
 });
 
 test('Enter 键提交表单', async () => {
-  const { q, fetchImpl, cb } = setup({ '/auth/onboard': { code: 0, msg: 'ok' } });
+  const { q, fetchImpl, cb, doc } = setup({ '/auth/onboard': { code: 0, msg: 'ok' } });
   fill(q);
-  q('code').dispatch('keydown', { key: 'Enter', preventDefault() {} });
+  const ev = keyEv('Enter', q('code'));
+  doc.fire('keydown', ev);
   await flush();
   assert.strictEqual(fetchImpl.calls.length, 1);
   assert.deepStrictEqual(cb.done, ['ok']);
+  assert.strictEqual(ev.stopped, 1);
+  assert.strictEqual(ev.prevented, 1);
 });
 
 test('提交 code 1：红字显示后端文案、弹窗仍在、按钮恢复', async () => {
@@ -393,4 +408,145 @@ test('弹窗关闭后迟到的响应被忽略', async () => {
   release();
   await flush();
   assert.deepStrictEqual(cb, []);
+});
+
+// ---- 焦点 / 键盘锁 ----
+test('打开后焦点在新密码输入框', () => {
+  const { q, doc } = setup();
+  assert.strictEqual(doc.activeElement, q('new'));
+});
+
+test('Tab 在最后一个可聚焦元素上回绕到第一个；Shift+Tab 在第一个上回绕到最后一个', () => {
+  const { q, doc } = setup();
+  q('exit').focus();
+  let ev = keyEv('Tab', q('exit'));
+  doc.fire('keydown', ev);
+  assert.strictEqual(doc.activeElement, q('old'));
+  assert.strictEqual(ev.prevented, 1);
+  assert.strictEqual(ev.stopped, 1);
+  ev = keyEv('Tab', q('old'), { shiftKey: true });
+  doc.fire('keydown', ev);
+  assert.strictEqual(doc.activeElement, q('exit'));
+  assert.strictEqual(ev.prevented, 1);
+});
+
+test('Tab 在中间元素上不干预焦点，但仍阻止冒泡', () => {
+  const { q, doc } = setup();
+  q('phone').focus();
+  const ev = keyEv('Tab', q('phone'));
+  doc.fire('keydown', ev);
+  assert.strictEqual(doc.activeElement, q('phone'));
+  assert.strictEqual(ev.prevented, 0);
+  assert.strictEqual(ev.stopped, 1);
+});
+
+test('跳过禁用的按钮：提交中（无 onExit）时发码按钮是最后一个，禁用的发码按钮不参与', () => {
+  const { q, doc } = setup({}, { onExit: undefined });
+  q('submit').disabled = true;
+  q('send').focus();
+  doc.fire('keydown', keyEv('Tab', q('send')));
+  assert.strictEqual(doc.activeElement, q('old'));
+  q('submit').disabled = false;
+  q('send').disabled = true;
+  q('submit').focus();
+  doc.fire('keydown', keyEv('Tab', q('submit')));
+  assert.strictEqual(doc.activeElement, q('old'));
+  doc.fire('keydown', keyEv('Tab', q('old'), { shiftKey: true }));
+  assert.strictEqual(doc.activeElement, q('submit'));
+});
+
+test('焦点跑到弹窗外时 Tab 把焦点拉回弹窗', () => {
+  const { q, doc } = setup();
+  const outside = doc.createElement('input');
+  doc.body.appendChild(outside);
+  outside.focus();
+  const ev = keyEv('Tab', outside);
+  doc.fire('keydown', ev);
+  assert.strictEqual(doc.activeElement, q('old'));
+  assert.strictEqual(ev.prevented, 1);
+});
+
+test('弹窗内的 Escape / Enter（按钮上）阻止冒泡；Enter 在按钮上不 preventDefault', () => {
+  const { q, doc } = setup();
+  const esc = keyEv('Escape', q('new'));
+  doc.fire('keydown', esc);
+  assert.deepStrictEqual([esc.prevented, esc.stopped], [1, 1]);
+  const enter = keyEv('Enter', q('exit'));
+  doc.fire('keydown', enter);
+  assert.deepStrictEqual([enter.prevented, enter.stopped], [0, 1]);
+});
+
+test('弹窗外的 Enter 不拦截', () => {
+  const { doc } = setup();
+  const outside = doc.createElement('input');
+  const ev = keyEv('Enter', outside);
+  doc.fire('keydown', ev);
+  assert.deepStrictEqual([ev.prevented, ev.stopped], [0, 0]);
+});
+
+// ---- 标签 / 提示 / 回调异常 ----
+test('每个输入框上方有可见标签，并保留 placeholder', () => {
+  const { q } = setup();
+  assert.strictEqual(q('label-old').textContent, '旧密码（初始密码）');
+  assert.strictEqual(q('label-new').textContent, '新密码');
+  assert.strictEqual(q('label-confirm').textContent, '确认新密码');
+  assert.strictEqual(q('label-phone').textContent, '实名手机号');
+  assert.strictEqual(q('label-code').textContent, '短信验证码');
+  ['old', 'new', 'confirm', 'phone', 'code'].forEach((r) => assert.ok(q(r).attributes.placeholder));
+});
+
+test('发码成功显示绿色提示，之后出错/提交会清掉绿色', async () => {
+  const { q } = setup({
+    '/auth/onboard/sms': { code: 0, msg: '验证码已发送', data: { resendAfter: 60 } },
+    '/auth/onboard': { code: 1, msg: '旧密码错误' },
+  });
+  q('phone').value = '13812345678';
+  q('send').dispatch('click');
+  await flush();
+  assert.strictEqual(q('error').textContent, '验证码已发送');
+  assert.strictEqual(q('error').style.color, '#27ae60');
+  fill(q, { confirm: 'zzz' });
+  q('submit').dispatch('click');
+  assert.strictEqual(q('error').style.color, '#e74c3c');
+  fill(q);
+  q('submit').dispatch('click');
+  await flush();
+  assert.strictEqual(q('error').textContent, '旧密码错误');
+  assert.strictEqual(q('error').style.color, '#e74c3c');
+});
+
+test('提交时先清掉绿色提示', async () => {
+  const { q } = setup({
+    '/auth/onboard/sms': { code: 0, msg: '验证码已发送' },
+    '/auth/onboard': new Error('x'),
+  });
+  q('phone').value = '13812345678';
+  q('send').dispatch('click');
+  await flush();
+  fill(q);
+  q('submit').dispatch('click');
+  assert.strictEqual(q('error').textContent, '');
+  assert.strictEqual(q('error').style.color, '#e74c3c');
+});
+
+test('onDone / onExpired / onExit 抛错被捕获并 console.error', async () => {
+  const errs = [];
+  const orig = console.error;
+  console.error = (e) => errs.push(e);
+  try {
+    const a = setup({ '/auth/onboard': { code: 0, msg: 'ok' } }, { onDone() { throw new Error('d'); } });
+    fill(a.q);
+    a.q('submit').dispatch('click');
+    await flush();
+    assert.strictEqual(a.doc.body.children.length, 0);
+    const b = setup({ '/auth/onboard': { code: 10031, msg: 'm' } }, { onExpired() { throw new Error('e'); } });
+    fill(b.q);
+    b.q('submit').dispatch('click');
+    await flush();
+    const c = setup({}, { onExit() { throw new Error('x'); } });
+    c.q('exit').dispatch('click');
+    assert.deepStrictEqual(errs.map((e) => e.message), ['d', 'e', 'x']);
+  } finally {
+    console.error = orig;
+  }
 });

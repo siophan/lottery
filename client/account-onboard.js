@@ -72,6 +72,11 @@
       fontSize: '14px', border: '1px solid #dcdee2', borderRadius: '4px', outline: 'none',
     };
 
+    // 每个输入框上方的可见标签（预填的旧密码只是一串圆点，必须标明含义）
+    function label(role, text) {
+      return el('label', 'label-' + role, { display: 'block', marginTop: '8px', fontSize: '12px', color: '#515a6e' }, text);
+    }
+
     function input(role, type, placeholder, maxlength) {
       var i = el('input', role, INPUT_STYLE);
       i.setAttribute('type', type);
@@ -119,7 +124,9 @@
     }, '确认提交');
     submitBtn.setAttribute('type', 'button');
 
-    [title, note, oldI, newI, hint, confirmI, phoneI, codeRow, errorBox, submitBtn].forEach(function (n) { card.appendChild(n); });
+    [title, note, label('old', '旧密码（初始密码）'), oldI, label('new', '新密码'), newI, hint,
+      label('confirm', '确认新密码'), confirmI, label('phone', '实名手机号'), phoneI,
+      label('code', '短信验证码'), codeRow, errorBox, submitBtn].forEach(function (n) { card.appendChild(n); });
 
     var exitBtn = null;
     if (typeof options.onExit === 'function') {
@@ -128,23 +135,81 @@
         border: 'none', background: 'none', color: '#808695', textDecoration: 'underline',
       }, '退出程序');
       exitBtn.setAttribute('type', 'button');
-      exitBtn.addEventListener('click', function () { options.onExit(); });
+      exitBtn.addEventListener('click', function () { safeCall(options.onExit); });
       card.appendChild(exitBtn);
     }
     overlay.appendChild(card);
 
-    function showError(msg) { errorBox.textContent = msg || ''; }
+    // 红字错误 / 绿字提示共用同一个消息区；每次都显式重设颜色，保证下一次错误或提交会清掉绿字
+    function showError(msg) {
+      errorBox.style.color = '#e74c3c';
+      errorBox.textContent = msg || '';
+    }
+    function showInfo(msg) {
+      errorBox.style.color = '#27ae60';
+      errorBox.textContent = msg || '';
+    }
+
+    // 回调抛错不能吞掉，也不能让弹窗状态机中断
+    function safeCall(fn, arg) {
+      if (typeof fn !== 'function') return;
+      try { fn(arg); } catch (e) { if (typeof console !== 'undefined' && console.error) console.error(e); }
+    }
 
     function stopTimer() {
       if (timer != null && clearIntervalImpl) clearIntervalImpl(timer);
       timer = null;
     }
 
-    // 弹窗不可取消：Esc 在捕获阶段拦截，关闭时必须摘掉监听
+    function inDialog(n) {
+      while (n) {
+        if (n === overlay) return true;
+        n = n.parentNode;
+      }
+      return false;
+    }
+
+    // Tab 焦点圈在弹窗内：可聚焦元素按 DOM 顺序，禁用的按钮（倒计时中的发码、提交中的提交）不可聚焦
+    function focusables() {
+      return [oldI, newI, confirmI, phoneI, codeI, sendBtn, submitBtn, exitBtn].filter(function (n) {
+        return n && !n.disabled;
+      });
+    }
+
+    // 弹窗不可取消：键盘事件在 document 捕获阶段统一接管，关闭时必须摘掉监听。
+    // 弹窗内产生的 Enter/Tab/Escape 一律 stopPropagation，避免登录页自己的回车登录等处理器被触发
     function onKeydown(e) {
-      if (e && e.key === 'Escape') {
+      if (!e) return;
+      var key = e.key;
+      var target = e.target || doc.activeElement;
+      var inside = inDialog(target);
+      if (key === 'Escape') {
         if (e.preventDefault) e.preventDefault();
         if (e.stopPropagation) e.stopPropagation();
+        return;
+      }
+      if (key === 'Tab') {
+        var list = focusables();
+        var active = doc.activeElement;
+        var idx = list.indexOf(active);
+        var wrapTo = null;
+        if (!inDialog(active)) wrapTo = e.shiftKey ? list[list.length - 1] : list[0];
+        else if (e.shiftKey && idx <= 0) wrapTo = list[list.length - 1];
+        else if (!e.shiftKey && (idx === list.length - 1 || idx < 0)) wrapTo = list[0];
+        if (wrapTo) {
+          if (e.preventDefault) e.preventDefault();
+          if (wrapTo.focus) wrapTo.focus();
+        }
+        if (inside || wrapTo) { if (e.stopPropagation) e.stopPropagation(); }
+        return;
+      }
+      if (key === 'Enter' && inside) {
+        if (e.stopPropagation) e.stopPropagation();
+        // 按钮上的回车保留原生点击；输入框里的回车提交表单
+        if (target && String(target.tagName).toLowerCase() === 'input') {
+          if (e.preventDefault) e.preventDefault();
+          submit();
+        }
       }
     }
     doc.addEventListener('keydown', onKeydown, true);
@@ -162,7 +227,7 @@
 
     function expired(msg) {
       close();
-      if (typeof options.onExpired === 'function') options.onExpired(msg);
+      if (typeof options.onExpired === 'function') safeCall(options.onExpired, msg);
       else if (typeof alert === 'function') alert(msg);
     }
 
@@ -221,6 +286,7 @@
           if (handleTerminal(res)) return;
           if (res.code === 0) {
             var n = res.data && Number(res.data.resendAfter);
+            showInfo(res.msg);
             startCountdown(n > 0 ? n : 60);
           } else {
             sendBtn.disabled = false;
@@ -260,7 +326,7 @@
           if (handleTerminal(res)) return;
           if (res.code === 0) {
             close();
-            if (typeof options.onDone === 'function') options.onDone(res.msg);
+            safeCall(options.onDone, res.msg);
           } else {
             done();
             showError(res.msg);
@@ -275,16 +341,8 @@
 
     sendBtn.addEventListener('click', sendCode);
     submitBtn.addEventListener('click', submit);
-    [oldI, newI, confirmI, phoneI, codeI].forEach(function (i) {
-      i.addEventListener('keydown', function (e) {
-        if (e && e.key === 'Enter') {
-          if (e.preventDefault) e.preventDefault();
-          submit();
-        }
-      });
-    });
-
     doc.body.appendChild(overlay);
+    if (newI.focus) newI.focus();
     return handle;
   }
 
