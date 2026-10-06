@@ -42,7 +42,7 @@ def test_default_avatar_is_valid_svg_stable_and_varied():
 
 @pytest.mark.parametrize("raw,expected", [
     ("小明", "小明"), ("  小明  ", "小明"), ("a" * 12, "a" * 12), ("好运的海豚🐬", "好运的海豚🐬"),
-    ("👨‍👩", "👨‍👩"),
+    ("👨‍👩", "👨‍👩"), ("好运 海豚", "好运 海豚"),
 ])
 def test_clean_nickname_accepts(raw, expected):
     assert profile.clean_nickname(raw) == (expected, None)
@@ -50,7 +50,7 @@ def test_clean_nickname_accepts(raw, expected):
 @pytest.mark.parametrize("raw,err", [
     (None, "昵称不能为空"), ("", "昵称不能为空"), ("   ", "昵称不能为空"),
     ("a" * 13, "昵称最多 12 个字"), ("a\nb", "昵称包含不支持的字符"), ("a\x00b", "昵称包含不支持的字符"),
-    ("a‮b", "昵称包含不支持的字符"), ("a b", "昵称包含不支持的字符"), (123, "昵称包含不支持的字符"),
+    ("a‮b", "昵称包含不支持的字符"), ("a b", "昵称包含不支持的字符"), (123, "昵称包含不支持的字符"),
 ])
 def test_clean_nickname_rejects(raw, err):
     assert profile.clean_nickname(raw) == (None, err)
