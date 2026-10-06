@@ -359,13 +359,13 @@ def update_user(conn, code: str, *, expires_at=_UNSET, status=_UNSET, password=_
 
 def apply_user_changes(conn, u: User, *, actor_type: str, actor: str, now: int,
                        status=_UNSET, expires_at=_UNSET) -> None:
-    """管理员改状态/到期：更新、（暂停/封禁时）删会话、审计在同一事务里一次提交，失败整体回滚。
-    只对真实变化的字段写审计；值没变则什么都不写。"""
+    """管理员改状态/到期：更新与审计在同一事务里一次提交，失败整体回滚。
+    只对真实变化的字段写审计；值没变则什么都不写。
+    暂停/封禁不删会话：gate 每次请求都按状态拒绝（封禁 10024、暂停 10022），
+    客户端据此踢下线并显示对应提示；删掉会话只会得到笼统的 10020「登录已失效」。"""
     try:
         if status is not _UNSET and status != u.status:
             conn.execute("UPDATE users SET status=? WHERE id=?", (status, u.id))
-            if status in ("disabled", "banned"):
-                conn.execute("DELETE FROM sessions WHERE user_id=?", (u.id,))
             _audit_nocommit(conn, actor_type, actor, "user.status", u.code,
                             {"from": u.status, "to": status}, now)
         if expires_at is not _UNSET and expires_at != u.expires_at:

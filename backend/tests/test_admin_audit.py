@@ -111,25 +111,29 @@ def test_patch_status_validation():
     assert db.get_user_by_code(conn, "U1").status == "active"
     assert logs(tc)["total"] == 0
 
-def test_patch_status_audits_from_to_and_drops_sessions():
+def test_patch_status_audits_from_to_and_keeps_sessions():
     conn, tc = build()
     u = mk_active(conn)
-    db.create_session(conn, u.id, 3600)
+    tok = db.create_session(conn, u.id, 3600)
     r = tc.patch("/admin/users/U1", headers=H, json={"status": "banned"})
     assert r.status_code == 200 and r.json() == {"ok": True}
     assert db.get_user_by_code(conn, "U1").status == "banned"
-    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+    # 会话保留：客户端下一次请求由 gate 按状态拒绝并拿到 10024，被踢下线时能看到「已封禁」
+    assert db.get_session(conn, tok) is not None
+    assert tc.get("/api/user/info", headers={"token": tok}).json() == {
+        "code": 10024, "msg": "账号已封禁，无法登录"}
     e = logs(tc)["logs"][0]
     assert e["action"] == "user.status" and e["target"] == "U1"
     assert e["detail"] == {"from": "active", "to": "banned"}
 
-def test_patch_disable_drops_sessions_but_active_keeps_them():
+def test_patch_disable_keeps_sessions_and_gate_returns_10022():
     conn, tc = build()
     u = mk_active(conn)
-    db.create_session(conn, u.id, 3600)
+    tok = db.create_session(conn, u.id, 3600)
     tc.patch("/admin/users/U1", headers=H, json={"status": "disabled"})
-    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
-    db.create_session(conn, u.id, 3600)
+    assert db.get_session(conn, tok) is not None
+    assert tc.get("/api/user/info", headers={"token": tok}).json() == {
+        "code": 10022, "msg": "账号已停用或已到期"}
     tc.patch("/admin/users/U1", headers=H, json={"status": "active"})     # 恢复不动会话
     assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
     assert [l["detail"] for l in logs(tc)["logs"]] == [

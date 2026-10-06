@@ -127,7 +127,7 @@ async def patch_user(code: str, request: Request, payload: dict = Body(...)):
         if not _valid_expires(exp):
             return _err("到期时间无效", 400)
         kwargs["expires_at"] = exp
-    # 状态/到期更新、踢会话（暂停/封禁）与审计同一事务
+    # 状态/到期更新与审计同一事务；暂停/封禁不删会话，由 gate 按状态逐请求拒绝
     if kwargs:
         db.apply_user_changes(conn, u, actor_type="admin", actor=admin_auth.actor_of(request),
                               now=int(time.time()), **kwargs)
