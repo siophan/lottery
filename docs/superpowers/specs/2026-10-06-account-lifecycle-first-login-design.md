@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS audit_logs(
 
 按顺序：
 1. 账号不存在 / 密码错 → `{"code":1,"msg":"账号或密码错误"}`（不变）。
+   （待激活账号的密码在建号时即为 `123456`，见第7节。）
 2. 待激活（`first_activated_at IS NULL`）→ `{"code":10023,"msg":"账号未激活，请联系有激活权限的人员激活"}`（C-17-01）。
 3. 封禁 → `{"code":10024,"msg":"账号已封禁，无法登录"}`（封禁优先于其他状态）。
 4. 暂停或已到期 → `{"code":10022,"msg":"账号已停用或已到期"}`（不变）。
@@ -121,7 +122,7 @@ CREATE TABLE IF NOT EXISTS audit_logs(
 ## 7 管理后台
 
 后端 `/admin/*`：
-- `POST /admin/users {code, expires_at?}`：只建「待激活」账号（不再收密码；随机不可用的密码哈希）。审计 `user.create`。
+- `POST /admin/users {code, expires_at?}`：只建「待激活」账号（不再收密码；密码预置为初始密码 `123456`，使「正确账号密码 + 未激活」能得到 10023 提示，且不暴露任意密码下的账号存在性）。审计 `user.create`。
 - `POST /admin/users/{code}/activate`：仅待激活可激活 → 密码置 `123456`、`first_activated_at=activated_at=now`、`status=active`、`onboarded_at=NULL`；已激活返回 409「账号已激活」。审计 `user.activate`。
 - `PATCH /admin/users/{code}`：`status` 仅接受 `active|disabled|banned`（其他值 400）；`expires_at` 照旧；**移除** `password` 字段（管理员不得设置任意密码）。状态变更审计 `user.status`（前后值）；封禁/暂停时删除该账号全部会话。
 - `POST /admin/users/{code}/reset-password`：仅已激活账号；密码重置为 `123456`、`onboarded_at=NULL`（下次登录重新走首登弹窗，含重新验证手机号），删除会话。审计 `user.reset_password`。
