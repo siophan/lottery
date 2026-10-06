@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { isBlockedPage, guardNewPage, BLOCKED_MSG } = require('./page-guard');
+const { isBlockedPage, guardNewPage, BLOCKED_MSG, GUARDED_CHANNELS } = require('./page-guard');
 
 test('blocks the renewal and order-list windows however the path is written', () => {
   for (const p of ['#/person/fee', '#/person/fee?type=p3', '/#/person/fee', 'app://./index.html#/person/fee',
@@ -23,4 +23,8 @@ test('guardNewPage notifies instead of opening blocked pages and passes the rest
   assert.deepEqual(opened, ['userInfo', 'nopath']);
   assert.deepEqual(notified, ['ev1', 'ev2']);
   assert.equal(BLOCKED_MSG, '该功能暂不可用');
+});
+
+test('every window-opening channel of the original main process is guarded', () => {
+  assert.deepEqual(GUARDED_CHANNELS, ['newPage', 'openCalculator']);
 });

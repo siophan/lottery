@@ -8,7 +8,7 @@
 const path = require('path');
 const { ipcMain, dialog, BrowserWindow } = require('electron');
 const { startServer, UPSTREAM_DEFAULT } = require('./server');
-const { guardNewPage, BLOCKED_MSG } = require('./page-guard');
+const { guardNewPage, BLOCKED_MSG, GUARDED_CHANNELS } = require('./page-guard');
 
 // 原生插件 shim：必须在 require 原版主进程之前挂到 global。
 // background.js 里的 a(131)("*.node") 已被改写为 global.__ys_native("*.node")。
@@ -33,7 +33,7 @@ ipcMain.on = function (channel, listener) {
       console.log('[update-stub] checkForUpdate 已拦截 -> 无需更新 (mac)');
     });
   }
-  if (channel === 'newPage') {
+  if (GUARDED_CHANNELS.includes(channel)) {
     // 续费页、订单列表页（上游下单入口）不建窗，提示功能暂不可用；见 page-guard.js
     return _ipcOn(channel, guardNewPage(listener, (event) => {
       // 「到期请续费」对话框会先 subclose 当前窗口再请求续费页，发送方可能已销毁

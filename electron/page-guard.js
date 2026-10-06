@@ -3,6 +3,8 @@
 // 后端已拦截 order/ 接口；这里在主进程统一拦下这两类窗口，散落在各页面「服务已到期，请续费」对话框里的入口一并失效。
 const BLOCKED_PAGES = ['/person/fee', '/person/orderlist'];
 const BLOCKED_MSG = '该功能暂不可用';
+// 按 args.path 建窗的通道：openCalculator 与 newPage 调用同一个建窗函数，一并拦截
+const GUARDED_CHANNELS = ['newPage', 'openCalculator'];
 
 // path 形如 "#/person/fee?type=p3"、"app://./index.html#/person/orderList"；取 hash 路由部分，去掉查询串后比较
 function isBlockedPage(p) {
@@ -12,7 +14,7 @@ function isBlockedPage(p) {
   return BLOCKED_PAGES.includes(route);
 }
 
-// 包装 newPage 监听器：被拦截的页面不建窗，改为调用 notify(event)；其余原样交给原监听器
+// 包装建窗监听器（newPage / openCalculator）：被拦截的页面不建窗，改为调用 notify(event)；其余原样交给原监听器
 function guardNewPage(listener, notify) {
   return (event, args) => {
     if (args && isBlockedPage(args.path)) {
@@ -23,4 +25,4 @@ function guardNewPage(listener, notify) {
   };
 }
 
-module.exports = { isBlockedPage, guardNewPage, BLOCKED_MSG };
+module.exports = { isBlockedPage, guardNewPage, BLOCKED_MSG, GUARDED_CHANNELS };
