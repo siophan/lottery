@@ -24,6 +24,19 @@ def test_aliyun_signature_matches_rpc_doc_vector():
          "Timestamp": "2016-02-23T12:46:24Z"}
     assert aliyun_signature(p, "testsecret") == "OLeaidS1JvxuMvnyHOwuJ+uX5qY="
 
+def test_aliyun_signature_matches_sendsms_doc_vector():
+    # 阿里云短信 SendSms 签名文档示例：AccessKeyId=testId、AccessKeySecret=testSecret
+    p = {
+        "AccessKeyId": "testId", "Action": "SendSms", "Format": "XML", "OutId": "123",
+        "PhoneNumbers": "15300000001", "RegionId": "cn-hangzhou",
+        "SignName": "阿里云短信测试专用", "SignatureMethod": "HMAC-SHA1",
+        "SignatureNonce": "45e25e9b-0a6f-4070-8c85-2956eda1b466",
+        "SignatureVersion": "1.0", "TemplateCode": "SMS_71390007",
+        "TemplateParam": '{"customer":"test"}',
+        "Timestamp": "2017-07-12T02:42:19Z", "Version": "2017-05-25",
+    }
+    assert aliyun_signature(p, "testSecret") == "zJDF+Lrzhj/ThnlvIToysFRq6t4="
+
 def test_aliyun_signature_ignores_existing_signature_param():
     a = aliyun_signature(DOC_PARAMS, "testsecret")
     assert aliyun_signature(dict(DOC_PARAMS, Signature="old"), "testsecret") == a

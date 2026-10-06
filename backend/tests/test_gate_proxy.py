@@ -133,3 +133,19 @@ def test_proxy_session_of_deleted_user_rejected():
     conn.execute("DELETE FROM users WHERE code='U1'"); conn.commit()
     r = tc.post("/api/lotteryNumber/topRows", headers={"token": tok}, json={})
     assert r.json()["code"] == 10022
+
+def test_onboard_ticket_is_not_a_session_token_10020():
+    # 首登票据只能用于改密/发短信：当作 token 访问代理与多数据源接口一律 10020，不触达上游
+    seen = []
+    def handler(req):
+        seen.append(req)
+        return httpx.Response(200, json={"code": 0, "data": "ok"})
+    conn, tc = build(handler)
+    u = db.create_user(conn, "U1", "123456", None)
+    conn.execute("UPDATE users SET onboarded_at=NULL WHERE id=?", (u.id,)); conn.commit()
+    ticket = db.create_onboard_ticket(conn, u.id, 900)
+    r = tc.post("/api/lotteryNumber/topRows", headers={"token": ticket}, json={})
+    assert r.json()["code"] == 10020
+    r = tc.get("/api/ds/sources?cat=hash", headers={"token": ticket})
+    assert r.json()["code"] == 10020
+    assert seen == []
