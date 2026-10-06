@@ -403,6 +403,11 @@ def get_onboard_ticket_user(conn, token: str, now: int) -> User | None:
     ).fetchone()
     return _row_to_user(r) if r else None
 
+def purge_expired_onboard_tickets(conn, now: int) -> int:
+    cur = conn.execute("DELETE FROM onboard_tickets WHERE expires_at < ?", (now,))
+    conn.commit()
+    return cur.rowcount
+
 # ---------------- 短信验证码 ----------------
 
 def _sms_hash(salt: str, code: str) -> str:

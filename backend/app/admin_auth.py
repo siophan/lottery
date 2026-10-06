@@ -33,3 +33,12 @@ def cookie_or_key_ok(request) -> bool:
     header = request.headers.get("X-Admin-Key") or ""
     # encode to bytes: compare_digest raises TypeError on non-ASCII str
     return bool(key) and hmac.compare_digest(header.encode("utf-8"), key.encode("utf-8"))
+
+def actor_of(request) -> str | None:
+    """审计用操作者：cookie 登录的管理员取用户名；X-Admin-Key 方式记为 "admin-key"；未通过鉴权返回 None。"""
+    settings = request.app.state.settings
+    conn = request.app.state.db_conn
+    admin = current_admin(conn, request.cookies.get(settings.admin_cookie_name))
+    if admin is not None:
+        return admin.username
+    return "admin-key" if cookie_or_key_ok(request) else None

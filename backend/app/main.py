@@ -1,4 +1,6 @@
+import asyncio
 import os
+import time
 from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request
@@ -14,6 +16,7 @@ from .sms import build_sms_sender
 from .routes import auth as auth_routes
 from .routes import admin as admin_routes
 from .collector import Collector
+from .maintenance import run_maintenance, maintenance_loop
 from .routes import ds as ds_routes
 from .routes import admin_datasources as admin_ds_routes
 
@@ -29,10 +32,18 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
                 await app.state.collector.start()
             except Exception as e:      # 采集起不来（如库里 headers_json 损坏）只记日志，代理照常启动
                 print(f"collector start failed: {e!r}")
+        # 每日维护（清理过期审计/会话/票据等）：启动时先跑一次，之后每 24h 一次
+        run_maintenance(app.state.db_conn, int(time.time()))
+        app.state.maintenance_task = asyncio.create_task(maintenance_loop(app.state.db_conn))
         try:
             yield
         finally:
             try:
+                app.state.maintenance_task.cancel()
+                try:
+                    await app.state.maintenance_task
+                except asyncio.CancelledError:
+                    pass
                 await app.state.collector.stop()
             finally:       # collector.stop() 抛异常也要关掉短信客户端
                 if app.state.sms_client is not None:
@@ -64,6 +75,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
         app.state.sms_client = httpx.AsyncClient(timeout=10)
         sms = build_sms_sender(settings, app.state.sms_client)
     app.state.sms = sms
+    app.state.maintenance_task = None
     app.state.collector = collector or Collector(app.state.db_conn, enabled=settings.collector_enabled)
 
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all

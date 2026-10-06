@@ -326,3 +326,15 @@ def test_get_user_by_id():
     u = db.create_user(conn, "U1", "pw", None)
     assert db.get_user_by_id(conn, u.id).code == "U1"
     assert db.get_user_by_id(conn, 9999) is None
+
+def test_purge_expired_onboard_tickets():
+    conn = mem()
+    u = db.create_user(conn, "A1", "pw", None)
+    now = 10_000
+    for tok, exp in (("old", now - 1), ("edge", now), ("new", now + 5)):
+        conn.execute("INSERT INTO onboard_tickets(token,user_id,created_at,expires_at) VALUES(?,?,?,?)",
+                     (tok, u.id, 1, exp))
+    conn.commit()
+    assert db.purge_expired_onboard_tickets(conn, now) == 1       # 仅严格过期的被删
+    left = {r["token"] for r in conn.execute("SELECT token FROM onboard_tickets")}
+    assert left == {"edge", "new"}

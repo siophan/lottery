@@ -1,10 +1,14 @@
 import os
+import sqlite3
+import time
 from fastapi import APIRouter, Request, Body, Response
 from fastapi.responses import JSONResponse, FileResponse
 from .. import db
 from .. import admin_auth
 
 router = APIRouter()
+
+ALLOWED_STATUS = ("active", "disabled", "banned")   # 使用控制：正常 / 暂停 / 封禁
 
 _ADMIN_INDEX = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "static", "admin-dist", "index.html"
@@ -21,19 +25,40 @@ async def admin_index():
     # Ant Design Pro（Vite 构建）单页应用入口；静态资源由 main.py 挂在 /admin/assets。
     return FileResponse(_ADMIN_INDEX)
 
+def _err(error: str, status: int):
+    return JSONResponse({"ok": False, "error": error}, status_code=status)
+
+def _not_found():
+    return _err("账号不存在", 404)
+
+def _is_int(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+def _audit(request: Request, action: str, target: str, detail: dict) -> None:
+    db.add_audit(request.app.state.db_conn, "admin", admin_auth.actor_of(request),
+                 action, target, detail)
+
 @router.post("/users")
 async def create_user(request: Request, payload: dict = Body(...)):
     if not _check(request):
         return _forbidden()
     code = payload.get("code")
-    password = payload.get("password")
-    # 编号/密码不能为空，否则会产生无法通过 /users/{code} 路由删除的脏数据
+    # 编号不能为空，否则会产生无法通过 /users/{code} 路由删除的脏数据
     if not isinstance(code, str) or not code.strip():
         return JSONResponse({"ok": False, "error": "code required"}, status_code=400)
-    if not isinstance(password, str) or not password:
-        return JSONResponse({"ok": False, "error": "password required"}, status_code=400)
+    expires_at = payload.get("expires_at")
+    if expires_at is not None and not _is_int(expires_at):
+        return _err("到期时间无效", 400)
     conn = request.app.state.db_conn
-    u = db.create_user(conn, code.strip(), password, payload.get("expires_at"))
+    code = code.strip()
+    if db.get_user_by_code(conn, code):
+        return _err("账号已存在", 409)
+    # 只建待激活账号；payload 里的 password 一律忽略（密码预置为初始密码）
+    try:
+        u = db.create_user(conn, code, db.INITIAL_PASSWORD, expires_at, pending=True)
+    except sqlite3.IntegrityError:      # 并发下同编号抢先插入
+        return _err("账号已存在", 409)
+    _audit(request, "user.create", u.code, {"expires_at": expires_at})
     return {"ok": True, "code": u.code}
 
 @router.get("/users")
@@ -42,27 +67,96 @@ async def list_users(request: Request):
         return _forbidden()
     conn = request.app.state.db_conn
     return {"users": [
-        {"code": u.code, "status": u.status, "expires_at": u.expires_at, "created_at": u.created_at}
+        {"code": u.code, "status": u.status, "expires_at": u.expires_at, "created_at": u.created_at,
+         "activated": u.first_activated_at is not None,
+         "first_activated_at": u.first_activated_at,
+         "phone": db.mask_phone(u.phone),
+         "onboarded": u.onboarded_at is not None}
         for u in db.list_users(conn)
     ]}
+
+@router.post("/users/{code}/activate")
+async def activate_user(code: str, request: Request):
+    if not _check(request):
+        return _forbidden()
+    conn = request.app.state.db_conn
+    res = db.activate_user(conn, code, int(time.time()))
+    if res == "not_found":
+        return _not_found()
+    if res == "already":
+        return _err("账号已激活", 409)
+    _audit(request, "user.activate", code.upper(), {})
+    return {"ok": True}
+
+@router.post("/users/{code}/reset-password")
+async def reset_password(code: str, request: Request):
+    if not _check(request):
+        return _forbidden()
+    conn = request.app.state.db_conn
+    res = db.reset_user_password(conn, code)
+    if res == "not_found":
+        return _not_found()
+    if res == "pending":
+        return _err("账号未激活", 409)
+    _audit(request, "user.reset_password", code.upper(), {})
+    return {"ok": True}
 
 @router.patch("/users/{code}")
 async def patch_user(code: str, request: Request, payload: dict = Body(...)):
     if not _check(request):
         return _forbidden()
     conn = request.app.state.db_conn
+    u = db.get_user_by_code(conn, code)
+    if not u:
+        return _not_found()
+    # 先校验再落库：任何一项非法都不产生部分修改。password 字段一律忽略（管理员不得设置任意密码）
     kwargs = {}
-    for k in ("expires_at", "status", "password"):
-        if k in payload:
-            kwargs[k] = payload[k]
-    return {"ok": db.update_user(conn, code, **kwargs)}
+    if "status" in payload:
+        status = payload["status"]
+        if not isinstance(status, str) or status not in ALLOWED_STATUS:
+            return _err("状态取值无效", 400)
+        kwargs["status"] = status
+    if "expires_at" in payload:
+        exp = payload["expires_at"]
+        if exp is not None and not _is_int(exp):
+            return _err("到期时间无效", 400)
+        kwargs["expires_at"] = exp
+    if kwargs:
+        db.update_user(conn, code, **kwargs)
+    if "status" in kwargs and kwargs["status"] != u.status:
+        if kwargs["status"] in ("disabled", "banned"):
+            db.delete_user_sessions(conn, u.id)      # 暂停/封禁立即踢下线
+        _audit(request, "user.status", u.code, {"from": u.status, "to": kwargs["status"]})
+    if "expires_at" in kwargs and kwargs["expires_at"] != u.expires_at:
+        _audit(request, "user.expires", u.code, {"from": u.expires_at, "to": kwargs["expires_at"]})
+    return {"ok": True}
 
 @router.delete("/users/{code}")
 async def delete_user(code: str, request: Request):
     if not _check(request):
         return _forbidden()
     conn = request.app.state.db_conn
-    return {"ok": db.delete_user(conn, code)}
+    if not db.delete_user(conn, code):
+        return _not_found()
+    _audit(request, "user.delete", code.upper(), {})
+    return {"ok": True}
+
+@router.get("/audit-logs")
+async def audit_logs(request: Request):
+    if not _check(request):
+        return _forbidden()
+    q = request.query_params
+    try:
+        limit = int(q.get("limit", 50))
+        offset = int(q.get("offset", 0))
+    except ValueError:
+        return _err("参数无效", 400)
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    target = q.get("target")
+    target = target.strip().upper() if target and target.strip() else None
+    rows, total = db.list_audit(request.app.state.db_conn, limit, offset, target)
+    return {"logs": rows, "total": total}
 
 @router.post("/login")
 async def admin_login(request: Request, response: Response, payload: dict = Body(...)):
