@@ -17,8 +17,9 @@ RECHARGE_REASON = "积分上线初始充值"
 
 def _recharge_arrears(conn, points: int, dry_run: bool) -> int:
     """积分上线后的初始充值：直接写库（与后台批量充值同一函数，每 1000 个一批、每批全有或全无），
-    不经 HTTP、不需要运维密钥。只挑已欠费（已激活且余额 0）、使用控制正常、未到期的账号；
-    重复执行只会处理仍为 0 分的账号，中途失败可安全重跑。"""
+    不经 HTTP、不需要运维密钥。只挑积分上线前的老账号：已激活、余额 0、从未有过任何积分流水，
+    且使用控制正常、未到期。充值后即有流水，所以重跑不会重复充值；用完积分的号、拿过体验积分的号、
+    代理名下的号（都有流水）也不会被白送。中途失败可安全重跑。"""
     try:
         db_points.check_amount(points)
     except BizError as e:
@@ -27,7 +28,9 @@ def _recharge_arrears(conn, points: int, dry_run: bool) -> int:
     now = int(time.time())
     codes = [r["code"] for r in conn.execute(
         "SELECT code FROM users WHERE first_activated_at IS NOT NULL AND points=0 AND status='active'"
-        " AND (expires_at IS NULL OR expires_at >= ?) ORDER BY id", (now,))]
+        " AND (expires_at IS NULL OR expires_at >= ?)"
+        " AND NOT EXISTS (SELECT 1 FROM points_ledger l WHERE l.holder_type='user' AND l.holder_id=users.code)"
+        " ORDER BY id", (now,))]
     print(f"accounts to recharge: {len(codes)}")
     if dry_run or not codes:
         return 0
@@ -52,7 +55,7 @@ def main(argv: list, conn=None) -> int:
     ads = sub.add_parser("admin-set"); ads.add_argument("username"); ads.add_argument("password")
     ss = sub.add_parser("set-super"); ss.add_argument("username")
     sub.add_parser("list")
-    ra = sub.add_parser("recharge-arrears", help="给所有「已欠费、使用正常、未到期」的账号各充值 POINTS 分")
+    ra = sub.add_parser("recharge-arrears", help="给积分上线前的老账号（已激活、0 分、从无积分流水、使用正常、未到期）各充值 POINTS 分")
     ra.add_argument("points", type=int); ra.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
 

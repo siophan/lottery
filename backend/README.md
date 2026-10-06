@@ -119,8 +119,9 @@ DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
   `auth/checkUserInfo`、`sms/send`）不转发，直接返回 `{"code":1,"msg":"该功能暂不可用"}`。
   上游下单同样记在共用账号上（续费、买方案、VIP、培训报名，含「积分支付」直接扣共用账号余额，订单列表人人可见），
   整个 `order/`（`order/newCreate`、`order/create`、`order/createPlanNum`、`order/createPlanJc`、`order/createVipPlanJc`、
-  `order/page`、`order/info` 等）一律不转发。客户端侧的入口也已隐藏：续费页、订单列表页由主进程拦截不建窗
-  （`electron/page-guard.js`），方案页的购买按钮由 `scripts/patch-ds-client.js` 的 shop 补丁层去掉。
+  `order/page`、`order/info` 等）一律不转发。转发层只接受由字母、数字、下划线、连字符组成的非空路径段，
+  带 `;`、`.`、空白、控制字符、反斜杠或空段的路径一律不转发（防止上游按 `;参数` / 后缀规则把它们解析成被拦的接口）。
+  客户端侧的入口也已隐藏：续费页、订单列表页由主进程拦截不建窗（`electron/page-guard.js`），方案页的购买按钮由 `scripts/patch-ds-client.js` 的 shop 补丁层去掉。
 - **暂停 / 封禁**：不删会话，每个请求都按状态拒绝（封禁 10024、暂停/到期 10022），客户端据此踢下线并显示对应提示；
   恢复后未过期的会话重新可用。所有后台操作与用户首登都写入「操作日志」（审计保留三年，手机号只存脱敏值）。
 
@@ -236,7 +237,8 @@ ADMIN_COOKIE_SECURE=false DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
 - **回收与删除**：回收已取消的代理时，其名下未激活账号上预充的积分同一事务退回该代理（转出 / 转入流水，原因「回收编号退回」），
   再分配给别的代理时这些号从 0 分开始。删除账号时剩余积分先记一条扣分流水（原因「删除账号」）再删除；
   流水按账号编号记账，同编号重建的账号接续原流水，且不会再次获得体验赠送。
-- **初始充值**：`manage.py recharge-arrears <分数> [--dry-run]` 给所有「已欠费、使用控制正常、未到期」的账号各充值（直接写库，每 1000 个一批）。
+- **初始充值**：`manage.py recharge-arrears <分数> [--dry-run]` 给积分上线前的老账号（已激活、0 分、从无积分流水、
+  使用控制正常、未到期）各充值（直接写库，每 1000 个一批）。只用于上线那一次；有过流水的账号一律不选，重跑不会重复充值。
 - **体验期**：后台「体验期设置」（仅后台人员）开关默认关闭、赠送分数默认 7（1–100）；开启后，此后首次激活的账号赠送一次。
   关闭 / 重新开启都不补发、不追溯；首次扣减延迟与扣减周期固定 24 小时。
 - 接口：`POST /admin/users/{code}/points/grant|revoke`、`POST /admin/agents/{id}/points/grant|revoke`（后台人员，

@@ -1,5 +1,5 @@
 import time, calendar
-from app import db
+from app import db, db_points
 import manage
 
 def mem():
@@ -72,3 +72,20 @@ def test_recharge_arrears_rejects_bad_amount(capsys):
     conn = mem()
     assert manage.main(["recharge-arrears", "0", "--dry-run"], conn=conn) == 1     # 先校验分数，再选账号
     assert "积分数量需为 1–100000 的整数" in capsys.readouterr().out
+
+def test_recharge_arrears_skips_accounts_that_ever_had_points(capsys):
+    # 只补「从未有过积分流水」的老账号：上线后再跑，不能给用完积分的号、拿过体验的号白送
+    conn = mem()
+    now = int(time.time())
+    for c in ("A1", "SPENT"):
+        db.create_user(conn, c, "pw", None)
+    db_points.staff_adjust(conn, "user", "SPENT", "grant", 5, None, actor_type="admin", actor="root", now=now)
+    db_points.staff_adjust(conn, "user", "SPENT", "revoke", 5, "测试", actor_type="admin", actor="root", now=now)
+    db_points.set_trial_settings(conn, True, 7, actor_type="admin", actor="root", now=now)
+    db.create_user(conn, "TRIAL", "x", None, pending=True)
+    assert db.activate_user(conn, "TRIAL", now) == "ok"
+    db_points.staff_adjust(conn, "user", "TRIAL", "revoke", 7, "测试", actor_type="admin", actor="root", now=now)
+    assert manage.main(["recharge-arrears", "30"], conn=conn) == 0
+    assert "accounts to recharge: 1" in capsys.readouterr().out
+    from tests.points_helpers import points_of
+    assert [points_of(conn, c) for c in ("A1", "SPENT", "TRIAL")] == [30, 0, 0]
