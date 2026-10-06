@@ -96,7 +96,7 @@ def test_create_user_pending():
     assert got.first_activated_at is None and got.activated_at is None and got.onboarded_at is None
     assert got.status == "active"
     assert not verify_password("ignored", got.salt, got.password_hash)
-    assert not verify_password(db.INITIAL_PASSWORD, got.salt, got.password_hash)
+    assert verify_password(db.INITIAL_PASSWORD, got.salt, got.password_hash)   # 预置初始密码
 
 # ---------------- activate / reset ----------------
 

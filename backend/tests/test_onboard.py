@@ -301,3 +301,61 @@ def test_injected_sms_creates_no_extra_client():
     conn = db.connect(":memory:"); db.init_db(conn)
     app = create_app(Settings(), conn=conn, sms=FakeSms())
     assert app.state.sms_client is None
+
+# ---------------- 票据签发后账号状态变化 ----------------
+
+@pytest.mark.parametrize("mutate,code,msg", [
+    (lambda conn: db.update_user(conn, "USER01", status="banned"), 10024, "账号已封禁，无法登录"),
+    (lambda conn: db.update_user(conn, "USER01", status="disabled"), 10022, "账号已停用或已到期"),
+    (lambda conn: db.update_user(conn, "USER01", expires_at=int(time.time()) - 5), 10022, "账号已停用或已到期"),
+])
+def test_onboard_endpoints_reject_account_blocked_after_ticket(mutate, code, msg):
+    conn, tc, sms = build()
+    t = ticket_for(conn, fresh_user(conn))
+    issue_code(conn)
+    mutate(conn)
+    assert send_sms(tc, t) == {"code": code, "msg": msg}
+    assert sms.sent == []
+    assert submit(tc, t, smsCode="246810") == {"code": code, "msg": msg}
+    assert db.get_user_by_code(conn, "USER01").onboarded_at is None
+
+# ---------------- 审计与改密同一事务 ----------------
+
+def test_complete_onboarding_writes_audit_in_same_transaction():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    u = fresh_user(conn)
+    db.complete_onboarding(conn, u.id, "Abcd1234", PHONE, 1000, audit_detail={"phone": "138****1234"})
+    row = conn.execute("SELECT * FROM audit_logs").fetchone()
+    assert (row["actor_type"], row["actor"], row["action"], row["target"], row["created_at"]) == \
+        ("user", "USER01", "user.onboard", "USER01", 1000)
+    assert json.loads(row["detail_json"]) == {"phone": "138****1234"}
+    assert db.get_user_by_code(conn, "USER01").onboarded_at == 1000
+
+def test_complete_onboarding_audit_failure_rolls_back_password_change():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    u = fresh_user(conn)
+    with pytest.raises(TypeError):
+        db.complete_onboarding(conn, u.id, "Abcd1234", PHONE, 1000, audit_detail={"x": object()})
+    after = db.get_user_by_code(conn, "USER01")
+    assert after.onboarded_at is None and after.phone is None
+    assert verify_password("123456", after.salt, after.password_hash)
+    assert conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0] == 0
+
+def test_complete_onboarding_without_audit_detail_writes_no_audit():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    u = fresh_user(conn)
+    db.complete_onboarding(conn, u.id, "Abcd1234", PHONE, 1000)
+    assert conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0] == 0
+
+# ---------------- 发送器异常诊断 ----------------
+
+def test_sms_sender_unexpected_exception_logged_to_stderr(capsys):
+    conn, tc, sms = build()
+    async def boom(phone, code):
+        raise RuntimeError("provider exploded")
+    sms.send_code = boom
+    t = ticket_for(conn, fresh_user(conn))
+    assert send_sms(tc, t) == {"code": 1, "msg": "验证码发送失败，请稍后再试"}
+    err = capsys.readouterr().err
+    assert "RuntimeError" in err and "provider exploded" in err
+    assert conn.execute("SELECT COUNT(*) FROM sms_codes").fetchone()[0] == 0

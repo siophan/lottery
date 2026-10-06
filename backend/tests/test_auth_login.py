@@ -74,12 +74,13 @@ def test_login_pending_user_rejected_10023():
     r = tc.post("/api/auth/login", json={"username": "USER01", "password": "123456"})
     assert r.json() == {"code": 10023, "msg": "账号未激活，请联系有激活权限的人员激活"}
 
-def test_login_pending_user_10023_regardless_of_password():
-    # 待激活账号密码是随机值，任何输入都应得到 10023（否则该码不可达）
+def test_login_pending_user_wrong_password_is_generic_error():
+    # 密码不对仍是通用错误，不能用任意密码探测出待激活账号
     conn, tc = build()
     db.create_user(conn, "USER01", "x", None, pending=True)
     r = tc.post("/api/auth/login", json={"username": "USER01", "password": "bad"})
-    assert r.json()["code"] == 10023
+    assert r.json() == {"code": 1, "msg": "账号或密码错误"}
+    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
 
 def test_login_unknown_user_still_generic_error():
     conn, tc = build()

@@ -1,5 +1,6 @@
 import re
 import secrets
+import sys
 import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -23,6 +24,15 @@ _SMS_CHECK_MSG = {
     "wrong": "验证码错误",
     "too_many": "验证码错误次数过多，请重新获取",
 }
+
+
+def _ticket_user_problem(user, now: int) -> JSONResponse | None:
+    """票据签发后账号可能被封禁/暂停/到期：此时不再允许继续首登流程。"""
+    if user.status == "banned":
+        return JSONResponse({"code": 10024, "msg": "账号已封禁，无法登录"})
+    if user.status != "active" or (user.expires_at is not None and user.expires_at < now):
+        return JSONResponse({"code": 10022, "msg": "账号已停用或已到期"})
+    return None
 
 
 def _fail(msg: str) -> JSONResponse:
@@ -69,13 +79,11 @@ async def login(request: Request):
     dayys = request.app.state.dayys
 
     user = db.get_user_by_code(conn, username)
-    if user is not None and user.first_activated_at is None:
-        # 待激活账号的密码是随机不可用值，若放在密码校验之后则 10023 永远不可达；
-        # 因此先于密码校验判定（提示用户去找人激活，而不是让其反复试密码）
-        return JSONResponse({"code": 10023, "msg": "账号未激活，请联系有激活权限的人员激活"})
     if user is None or not verify_password(password, user.salt, user.password_hash):
         return JSONResponse({"code": 1, "msg": "账号或密码错误"})
     now = int(time.time())
+    if user.first_activated_at is None:     # 待激活账号预置了初始密码，输对密码才会走到这里
+        return JSONResponse({"code": 10023, "msg": "账号未激活，请联系有激活权限的人员激活"})
     if user.status == "banned":      # 封禁优先于暂停/到期
         return JSONResponse({"code": 10024, "msg": "账号已封禁，无法登录"})
     if user.status != "active" or (user.expires_at is not None and user.expires_at < now):
@@ -103,8 +111,12 @@ async def onboard_sms(request: Request):
     sms = request.app.state.sms
     now = int(time.time())
 
-    if db.get_onboard_ticket_user(conn, _str(payload, "onboardToken"), now) is None:
+    user = db.get_onboard_ticket_user(conn, _str(payload, "onboardToken"), now)
+    if user is None:
         return JSONResponse(_TICKET_INVALID)
+    blocked = _ticket_user_problem(user, now)
+    if blocked is not None:
+        return blocked
     phone = _str(payload, "phone")
     if not PHONE_RE.fullmatch(phone):
         return _fail("手机号格式错误")
@@ -120,7 +132,8 @@ async def onboard_sms(request: Request):
         await sms.send_code(phone, code)
     except Exception as e:      # SmsError 及发送器的任何意外异常：删掉刚存的码，不向用户暴露细节
         db.delete_sms_code(conn, phone, SMS_PURPOSE)
-        print(f"[sms] send failed: {type(e).__name__}")
+        # 给运维留诊断线索：类型 + 信息（SmsError 的信息本身不含密钥）
+        print(f"[sms] send failed: {type(e).__name__}: {e}", file=sys.stderr)
         return _fail("验证码发送失败，请稍后再试")
     return JSONResponse({"code": 0, "msg": "验证码已发送", "data": {"resendAfter": SMS_COOLDOWN}})
 
@@ -134,6 +147,9 @@ async def onboard(request: Request):
     user = db.get_onboard_ticket_user(conn, _str(payload, "onboardToken"), now)
     if user is None:
         return JSONResponse(_TICKET_INVALID)
+    blocked = _ticket_user_problem(user, now)
+    if blocked is not None:
+        return blocked
     old = _str(payload, "oldPassword")
     if not verify_password(old, user.salt, user.password_hash):
         return _fail("旧密码错误")
@@ -149,7 +165,6 @@ async def onboard(request: Request):
     if result != "ok":
         return _fail(_SMS_CHECK_MSG[result])
 
-    db.complete_onboarding(conn, user.id, new, phone, now)
-    db.add_audit(conn, "user", user.code, "user.onboard", user.code,
-                 {"phone": db.mask_phone(phone)}, now)
+    db.complete_onboarding(conn, user.id, new, phone, now,
+                           audit_detail={"phone": db.mask_phone(phone)})
     return JSONResponse({"code": 0, "msg": "密码修改与手机号绑定成功，请使用新密码重新登录"})

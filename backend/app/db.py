@@ -244,8 +244,9 @@ def create_user(conn, code: str, password: str, expires_at: int | None,
                 *, pending: bool = False) -> User:
     now = int(time.time())
     if pending:
-        # 待激活：三列为 NULL，密码为随机不可猜值（激活时才设为初始密码）
-        h, salt = hash_password(new_token())
+        # 待激活：三列为 NULL，密码预置为初始密码。这样登录时「密码正确 + 待激活」
+        # 才返回 10023，密码不对仍是通用错误，不会用任意密码探测出待激活账号
+        h, salt = hash_password(INITIAL_PASSWORD)
         stamp = None
     else:
         h, salt = hash_password(password)
@@ -292,13 +293,21 @@ def reset_user_password(conn, code: str) -> str:
         raise
     return "ok"
 
-def complete_onboarding(conn, user_id: int, new_password: str, phone: str, now: int) -> None:
+def complete_onboarding(conn, user_id: int, new_password: str, phone: str, now: int,
+                        *, audit_detail: dict | None = None) -> None:
     h, salt = hash_password(new_password)
     try:
         conn.execute("UPDATE users SET password_hash=?, salt=?, phone=?, onboarded_at=? WHERE id=?",
                      (h, salt, phone, now, user_id))
         conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM onboard_tickets WHERE user_id=?", (user_id,))
+        if audit_detail is not None:
+            # 审计与改密同一事务：要么都落库，要么都回滚
+            code = conn.execute("SELECT code FROM users WHERE id=?", (user_id,)).fetchone()["code"]
+            conn.execute(
+                "INSERT INTO audit_logs(actor_type,actor,action,target,detail_json,created_at)"
+                " VALUES('user',?,'user.onboard',?,?,?)",
+                (code, code, json.dumps(audit_detail, ensure_ascii=False), now))
         conn.commit()
     except Exception:
         conn.rollback()
