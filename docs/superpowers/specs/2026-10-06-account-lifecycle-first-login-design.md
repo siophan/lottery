@@ -37,11 +37,11 @@
 CREATE TABLE IF NOT EXISTS onboard_tickets(   -- 首登临时票据，只能用于改密/发短信
   token TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
   created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS sms_codes(         -- 每个 (phone,purpose) 只保留最新一条
-  phone TEXT NOT NULL, purpose TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS sms_codes(         -- 每个 (phone,purpose,user_id) 只保留最新一条；码只能由取码账号使用
+  phone TEXT NOT NULL, purpose TEXT NOT NULL, user_id INTEGER NOT NULL,
   code_hash TEXT NOT NULL, salt TEXT NOT NULL,
   expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
-  sent_at INTEGER NOT NULL, PRIMARY KEY(phone, purpose));
+  sent_at INTEGER NOT NULL, PRIMARY KEY(phone, purpose, user_id));
 CREATE TABLE IF NOT EXISTS sms_send_log(      -- 频控用：每手机号每日上限
   phone TEXT NOT NULL, sent_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS audit_logs(
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS audit_logs(
 - 手机号不匹配 `^1[3-9]\d{9}$` → `{"code":1,"msg":"手机号格式错误"}`。
 - 账号已绑定手机号（管理员重置密码后重新首登）且提交的号码与之不同 → `{"code":1,"msg":"请使用已绑定的手机号（尾号XXXX）验证"}`（XXXX 为已绑定号码后 4 位），不发码。
 - 同号 60 秒内重复 → `{"code":1,"msg":"验证码发送过于频繁，请稍后再试"}`；同号 24 小时内 ≥10 条 → `{"code":1,"msg":"今日验证码发送次数已达上限"}`。
-- 生成 6 位数字码，存 `sha256(salt+code)`，有效期 5 分钟，覆盖旧码；调用短信服务商发送；发送失败 → `{"code":1,"msg":"验证码发送失败，请稍后再试"}`（并删除刚存的码）。
+- 生成 6 位数字码，存 `sha256(salt+code)`，有效期 5 分钟，覆盖该账号对该号码的旧码（码与账号绑定：A 账号取的码 B 账号不能用，B 取码也不覆盖 A 的码；同号冷却/日上限仍按手机号统计）；调用短信服务商发送；发送失败 → `{"code":1,"msg":"验证码发送失败，请稍后再试"}`（并删除刚存的码）。
 - 成功 → `{"code":0,"msg":"验证码已发送","data":{"resendAfter":60}}`。
 
 ### 4.2 `POST /api/auth/onboard`  `{onboardToken, oldPassword, newPassword, confirmPassword, phone, smsCode}`

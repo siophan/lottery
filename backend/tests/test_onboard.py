@@ -53,7 +53,8 @@ def form(ticket, **kw):
 def submit(tc, ticket, **kw):
     return tc.post("/api/auth/onboard", json=form(ticket, **kw)).json()
 
-def issue_code(conn, phone=PHONE, code="246810", now=None, user_id=None):
+def issue_code(conn, phone=PHONE, code="246810", now=None, user_id=1):
+    """默认发给第一个账号（fresh_user 建出的 USER01，id=1）。"""
     db.save_sms_code(conn, phone, "onboard", code, 300, int(time.time()) if now is None else now,
                      user_id=user_id)
     return code
@@ -109,7 +110,7 @@ def test_sms_success_sends_6_digit_code_and_stores_hash_only():
     assert phone == PHONE and re.fullmatch(r"\d{6}", code)
     row = conn.execute("SELECT * FROM sms_codes WHERE phone=? AND purpose='onboard'", (PHONE,)).fetchone()
     assert row is not None and code not in json.dumps(dict(row))
-    assert db.check_sms_code(conn, PHONE, "onboard", code, int(time.time())) == "ok"
+    assert db.check_sms_code(conn, PHONE, "onboard", code, int(time.time()), user_id=1) == "ok"
 
 def test_sms_cooldown_60s(monkeypatch):
     conn, tc, sms = build()
@@ -487,3 +488,24 @@ def test_onboard_bound_phone_check_comes_after_format_check():
     t = ticket_for(conn, bound_user(conn))
     assert send_sms(tc, t, "123") == {"code": 1, "msg": "手机号格式错误"}
     assert submit(tc, t, phone="123") == {"code": 1, "msg": "手机号格式错误"}
+
+# ---------------- 验证码绑定账号（接口层） ----------------
+
+def test_code_requested_by_one_account_unusable_by_another(monkeypatch):
+    conn, tc, sms = build()
+    a = fresh_user(conn, "USER01")
+    b = fresh_user(conn, "USER02")
+    ta, tb = ticket_for(conn, a), ticket_for(conn, b)
+    assert send_sms(tc, ta)["code"] == 0
+    _, code_a = sms.sent[0]
+    # B 无自己的码：拿 A 的码提交视为没有验证码，且不碰 A 的码
+    assert submit(tc, tb, smsCode=code_a) == {"code": 1, "msg": "验证码已过期，请重新获取"}
+    # 同号冷却对 B 依然生效
+    assert send_sms(tc, tb) == {"code": 1, "msg": "验证码发送过于频繁，请稍后再试"}
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + 61)
+    assert send_sms(tc, tb)["code"] == 0
+    _, code_b = sms.sent[1]
+    # B 取码没有覆盖 A 的码：两者各自可用
+    assert submit(tc, ta, smsCode=code_a)["code"] == 0
+    assert submit(tc, tb, smsCode=code_b)["code"] == 0

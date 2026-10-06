@@ -152,7 +152,7 @@ async def onboard_sms(request: Request):
     try:
         await sms.send_code(phone, code)
     except Exception as e:      # SmsError 及发送器的任何意外异常：删掉刚存的码，不向用户暴露细节
-        db.delete_sms_code(conn, phone, SMS_PURPOSE)
+        db.delete_sms_code(conn, phone, SMS_PURPOSE, user_id=user.id)
         # 给运维留诊断线索：类型 + 信息（SmsError 的信息本身不含密钥）
         print(f"[sms] send failed: {type(e).__name__}: {e}", file=sys.stderr)
         return _fail("验证码发送失败，请稍后再试")
@@ -185,7 +185,8 @@ async def onboard(request: Request):
     if blocked is not None:
         return blocked
     # 前面都通过才校验（消耗）验证码，避免无谓的错误计数
-    result = db.check_sms_code(conn, phone, SMS_PURPOSE, _str(payload, "smsCode"), now)
+    result = db.check_sms_code(conn, phone, SMS_PURPOSE, _str(payload, "smsCode"), now,
+                               user_id=user.id)
     if result != "ok":
         return _fail(_SMS_CHECK_MSG[result])
 

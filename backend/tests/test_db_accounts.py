@@ -166,57 +166,57 @@ def test_complete_onboarding_updates_and_clears_sessions_and_tickets():
 
 def test_sms_code_ok_deletes_code():
     conn = mem()
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000)
-    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1100) == "ok"
-    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1100) == "missing"
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000, user_id=1)
+    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1100, user_id=1) == "ok"
+    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1100, user_id=1) == "missing"
 
 def test_sms_code_not_stored_in_plaintext():
     conn = mem()
-    db.save_sms_code(conn, "13800000000", "onboard", "654321", 300, 1000)
+    db.save_sms_code(conn, "13800000000", "onboard", "654321", 300, 1000, user_id=1)
     r = conn.execute("SELECT * FROM sms_codes").fetchone()
     assert "654321" not in (r["code_hash"], r["salt"])
     assert r["sent_at"] == 1000 and r["expires_at"] == 1300 and r["attempts"] == 0
 
 def test_sms_code_missing_and_expired():
     conn = mem()
-    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1000) == "missing"
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000)
-    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1300) == "ok"
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000)
-    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1301) == "expired"
+    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1000, user_id=1) == "missing"
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000, user_id=1)
+    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1300, user_id=1) == "ok"
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000, user_id=1)
+    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1301, user_id=1) == "expired"
 
 def test_sms_code_wrong_then_too_many_deletes_code():
     conn = mem()
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000)
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000, user_id=1)
     for _ in range(4):
-        assert db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001) == "wrong"
-    assert db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001) == "too_many"
+        assert db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001, user_id=1) == "wrong"
+    assert db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001, user_id=1) == "too_many"
     # 码已作废，即使输入正确也是 missing
-    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1001) == "missing"
+    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1001, user_id=1) == "missing"
 
 def test_sms_code_wrong_then_right_still_ok():
     conn = mem()
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000)
-    assert db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001) == "wrong"
-    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1002) == "ok"
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000, user_id=1)
+    assert db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001, user_id=1) == "wrong"
+    assert db.check_sms_code(conn, "13800000000", "onboard", "123456", 1002, user_id=1) == "ok"
 
 def test_save_sms_code_overwrites_old_and_resets_attempts():
     conn = mem()
-    db.save_sms_code(conn, "13800000000", "onboard", "111111", 300, 1000)
-    db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001)
-    db.save_sms_code(conn, "13800000000", "onboard", "222222", 300, 1100)
+    db.save_sms_code(conn, "13800000000", "onboard", "111111", 300, 1000, user_id=1)
+    db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001, user_id=1)
+    db.save_sms_code(conn, "13800000000", "onboard", "222222", 300, 1100, user_id=1)
     assert conn.execute("SELECT COUNT(*) FROM sms_codes").fetchone()[0] == 1
-    assert db.check_sms_code(conn, "13800000000", "onboard", "111111", 1101) == "wrong"
-    assert db.check_sms_code(conn, "13800000000", "onboard", "222222", 1101) == "ok"
+    assert db.check_sms_code(conn, "13800000000", "onboard", "111111", 1101, user_id=1) == "wrong"
+    assert db.check_sms_code(conn, "13800000000", "onboard", "222222", 1101, user_id=1) == "ok"
 
 def test_last_sent_at_comes_from_send_log_and_survives_code_deletion():
     conn = mem()
     assert db.last_sms_sent_at(conn, "13800000000") is None
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000)
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1200)
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000, user_id=1)
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1200, user_id=1)
     assert db.last_sms_sent_at(conn, "13800000000") == 1200
     assert db.last_sms_sent_at(conn, "13900000000") is None
-    db.delete_sms_code(conn, "13800000000", "onboard")
+    db.delete_sms_code(conn, "13800000000", "onboard", user_id=1)
     assert db.last_sms_sent_at(conn, "13800000000") == 1200      # 删码不影响冷却依据
 
 def test_count_sms_sent_by_user_since():
@@ -224,7 +224,7 @@ def test_count_sms_sent_by_user_since():
     db.save_sms_code(conn, "13800000000", "onboard", "1", 300, 100, user_id=7)
     db.save_sms_code(conn, "13900000000", "onboard", "1", 300, 200, user_id=7)
     db.save_sms_code(conn, "13900000000", "onboard", "1", 300, 300, user_id=8)
-    db.save_sms_code(conn, "13700000000", "onboard", "1", 300, 400)          # 无 user_id
+    db.save_sms_code(conn, "13700000000", "onboard", "1", 300, 400, user_id=10)
     assert db.count_sms_sent_by_user_since(conn, 7, 0) == 2
     assert db.count_sms_sent_by_user_since(conn, 7, 150) == 1
     assert db.count_sms_sent_by_user_since(conn, 8, 0) == 1
@@ -245,8 +245,8 @@ def test_sms_send_log_user_id_migration_is_idempotent():
 def test_count_sms_sent_since():
     conn = mem()
     for t in (100, 200, 300):
-        db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, t)
-    db.save_sms_code(conn, "13900000000", "onboard", "123456", 300, 250)
+        db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, t, user_id=1)
+    db.save_sms_code(conn, "13900000000", "onboard", "123456", 300, 250, user_id=1)
     assert db.count_sms_sent_since(conn, "13800000000", 0) == 3
     assert db.count_sms_sent_since(conn, "13800000000", 200) == 2
     assert db.count_sms_sent_since(conn, "13800000000", 301) == 0
@@ -303,23 +303,23 @@ def test_reset_user_password_also_clears_onboard_tickets():
 def test_purge_old_sms_send_log():
     conn = mem()
     now = 100000
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, now - 86400 - 1)
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, now - 86400)
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, now)
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, now - 86400 - 1, user_id=1)
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, now - 86400, user_id=1)
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, now, user_id=1)
     assert db.purge_old_sms_send_log(conn, now) == 1
     assert db.count_sms_sent_since(conn, "13800000000", 0) == 2
 
 def test_sms_attempts_increment_is_sql_side():
     conn = mem()
-    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000)
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000, user_id=1)
     # 另一连接/并发修改了计数：以数据库值为准，而不是 Python 读到的旧值
     orig = db.check_sms_code
-    db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001)
+    db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001, user_id=1)
     conn.execute("UPDATE sms_codes SET attempts=3")
     conn.commit()
-    assert orig(conn, "13800000000", "onboard", "000000", 1001, max_attempts=5) == "wrong"
+    assert orig(conn, "13800000000", "onboard", "000000", 1001, user_id=1, max_attempts=5) == "wrong"
     assert conn.execute("SELECT attempts FROM sms_codes").fetchone()[0] == 4
-    assert orig(conn, "13800000000", "onboard", "000000", 1001, max_attempts=5) == "too_many"
+    assert orig(conn, "13800000000", "onboard", "000000", 1001, user_id=1, max_attempts=5) == "too_many"
 
 def test_get_user_by_id():
     conn = db.connect(":memory:"); db.init_db(conn)
@@ -338,3 +338,37 @@ def test_purge_expired_onboard_tickets():
     assert db.purge_expired_onboard_tickets(conn, now) == 1       # 仅严格过期的被删
     left = {r["token"] for r in conn.execute("SELECT token FROM onboard_tickets")}
     assert left == {"edge", "new"}
+
+# ---------------- 验证码绑定账号 ----------------
+
+def test_sms_code_is_bound_to_requesting_account():
+    conn = mem()
+    db.save_sms_code(conn, "13800000000", "onboard", "111111", 300, 1000, user_id=1)
+    # 账号 2 拿账号 1 的码验证不通过，也不会消耗账号 1 的错误次数
+    assert db.check_sms_code(conn, "13800000000", "onboard", "111111", 1001, user_id=2) == "missing"
+    assert conn.execute("SELECT attempts FROM sms_codes WHERE user_id=1").fetchone()[0] == 0
+    assert db.check_sms_code(conn, "13800000000", "onboard", "111111", 1001, user_id=1) == "ok"
+
+def test_sms_code_of_other_account_same_phone_not_overwritten():
+    conn = mem()
+    db.save_sms_code(conn, "13800000000", "onboard", "111111", 300, 1000, user_id=1)
+    db.save_sms_code(conn, "13800000000", "onboard", "222222", 300, 1100, user_id=2)
+    assert conn.execute("SELECT COUNT(*) FROM sms_codes").fetchone()[0] == 2
+    assert db.check_sms_code(conn, "13800000000", "onboard", "222222", 1101, user_id=1) == "wrong"
+    assert db.check_sms_code(conn, "13800000000", "onboard", "111111", 1101, user_id=1) == "ok"
+    assert db.check_sms_code(conn, "13800000000", "onboard", "222222", 1101, user_id=2) == "ok"
+
+def test_delete_sms_code_only_touches_own_account():
+    conn = mem()
+    db.save_sms_code(conn, "13800000000", "onboard", "111111", 300, 1000, user_id=1)
+    db.save_sms_code(conn, "13800000000", "onboard", "222222", 300, 1000, user_id=2)
+    db.delete_sms_code(conn, "13800000000", "onboard", user_id=2)
+    assert [r[0] for r in conn.execute("SELECT user_id FROM sms_codes")] == [1]
+
+def test_sms_too_many_only_voids_own_code():
+    conn = mem()
+    db.save_sms_code(conn, "13800000000", "onboard", "111111", 300, 1000, user_id=1)
+    db.save_sms_code(conn, "13800000000", "onboard", "222222", 300, 1000, user_id=2)
+    for _ in range(5):
+        db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001, user_id=2)
+    assert db.check_sms_code(conn, "13800000000", "onboard", "111111", 1001, user_id=1) == "ok"

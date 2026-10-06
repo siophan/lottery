@@ -167,13 +167,14 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         CREATE TABLE IF NOT EXISTS sms_codes(
           phone TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
           purpose TEXT NOT NULL,
           code_hash TEXT NOT NULL,
           salt TEXT NOT NULL,
           expires_at INTEGER NOT NULL,
           attempts INTEGER NOT NULL DEFAULT 0,
           sent_at INTEGER NOT NULL,
-          PRIMARY KEY(phone, purpose)
+          PRIMARY KEY(phone, purpose, user_id)
         );
         CREATE TABLE IF NOT EXISTS sms_send_log(
           phone TEXT NOT NULL,
@@ -434,13 +435,14 @@ def _sms_hash(salt: str, code: str) -> str:
     return hashlib.sha256((salt + code).encode("utf-8")).hexdigest()
 
 def save_sms_code(conn, phone: str, purpose: str, code: str, ttl: int, now: int,
-                  *, user_id: int | None = None) -> None:
+                  *, user_id: int) -> None:
+    # 验证码按 (手机号, 用途, 账号) 存：A 账号取的码 B 账号用不了，B 取码也不会覆盖 A 的码
     salt = secrets.token_hex(8)
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO sms_codes(phone,purpose,code_hash,salt,expires_at,attempts,sent_at)"
-            " VALUES(?,?,?,?,?,0,?)",
-            (phone, purpose, _sms_hash(salt, code), salt, now + ttl, now),
+            "INSERT OR REPLACE INTO sms_codes(phone,purpose,user_id,code_hash,salt,expires_at,attempts,sent_at)"
+            " VALUES(?,?,?,?,?,?,0,?)",
+            (phone, purpose, user_id, _sms_hash(salt, code), salt, now + ttl, now),
         )
         conn.execute("INSERT INTO sms_send_log(phone,sent_at,user_id) VALUES(?,?,?)",
                      (phone, now, user_id))
@@ -449,12 +451,14 @@ def save_sms_code(conn, phone: str, purpose: str, code: str, ttl: int, now: int,
         conn.rollback()
         raise
 
-def delete_sms_code(conn, phone: str, purpose: str) -> None:
-    conn.execute("DELETE FROM sms_codes WHERE phone=? AND purpose=?", (phone, purpose))
+def delete_sms_code(conn, phone: str, purpose: str, *, user_id: int) -> None:
+    conn.execute("DELETE FROM sms_codes WHERE phone=? AND purpose=? AND user_id=?",
+                 (phone, purpose, user_id))
     conn.commit()
 
 def last_sms_sent_at(conn, phone: str) -> int | None:
-    # 取自发送流水而非 sms_codes：发送失败/验证码作废后删掉码行，也不会绕过冷却
+    # 取自发送流水而非 sms_codes：发送失败/验证码作废后删掉码行，也不会绕过冷却；
+    # 流水按手机号统计，换个账号给同一号码取码同样受冷却约束
     r = conn.execute("SELECT MAX(sent_at) AS t FROM sms_send_log WHERE phone=?", (phone,)).fetchone()
     return r["t"]
 
@@ -473,25 +477,25 @@ def purge_old_sms_send_log(conn, now: int) -> int:
     return cur.rowcount
 
 def check_sms_code(conn, phone: str, purpose: str, code: str, now: int,
-                   max_attempts: int = 5) -> str:
-    """返回 ok | missing | expired | wrong | too_many；ok 与 too_many 时验证码被删除。"""
-    r = conn.execute("SELECT * FROM sms_codes WHERE phone=? AND purpose=?",
-                     (phone, purpose)).fetchone()
+                   *, user_id: int, max_attempts: int = 5) -> str:
+    """返回 ok | missing | expired | wrong | too_many；ok 与 too_many 时验证码被删除。
+    只认该账号自己取的码。"""
+    key = (phone, purpose, user_id)
+    where = "phone=? AND purpose=? AND user_id=?"
+    r = conn.execute(f"SELECT * FROM sms_codes WHERE {where}", key).fetchone()
     if not r:
         return "missing"
     if now > r["expires_at"]:
         return "expired"
     if hmac.compare_digest(_sms_hash(r["salt"], code), r["code_hash"]):
-        delete_sms_code(conn, phone, purpose)
+        delete_sms_code(conn, phone, purpose, user_id=user_id)
         return "ok"
     # 计数在 SQL 里原子自增，再读回判断是否达到上限
-    conn.execute("UPDATE sms_codes SET attempts=attempts+1 WHERE phone=? AND purpose=?",
-                 (phone, purpose))
+    conn.execute(f"UPDATE sms_codes SET attempts=attempts+1 WHERE {where}", key)
     conn.commit()
-    row = conn.execute("SELECT attempts FROM sms_codes WHERE phone=? AND purpose=?",
-                       (phone, purpose)).fetchone()
+    row = conn.execute(f"SELECT attempts FROM sms_codes WHERE {where}", key).fetchone()
     if row is None or row["attempts"] >= max_attempts:
-        delete_sms_code(conn, phone, purpose)
+        delete_sms_code(conn, phone, purpose, user_id=user_id)
         return "too_many"
     return "wrong"
 
