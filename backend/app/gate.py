@@ -11,14 +11,13 @@ def authorize(conn, token_header: str):
     sess = db.get_session(conn, token_header)
     if sess is None or sess.expires_at < int(time.time()):
         return False, {"code": 10020, "msg": "登录已失效，请重新登录"}
-    user = None
-    for u in db.list_users(conn):
-        if u.id == sess.user_id:
-            user = u
-            break
-    if user is None or user.status != "active" or (
-        user.expires_at is not None and user.expires_at < int(time.time())
-    ):
+    user = db.get_user_by_id(conn, sess.user_id)
+    if user is not None and user.status == "banned":
+        return False, {"code": 10024, "msg": "账号已封禁，无法登录"}
+    # 待激活 / 暂停 / 到期 / 未完成首登：旧会话一律视为无效，防止绕过
+    if (user is None or user.first_activated_at is None or user.status != "active"
+            or user.onboarded_at is None
+            or (user.expires_at is not None and user.expires_at < int(time.time()))):
         return False, {"code": 10022, "msg": "账号已停用或已到期"}
     return True, None
 

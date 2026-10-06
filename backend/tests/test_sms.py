@@ -121,3 +121,10 @@ def test_build_sms_sender_aliyun_incomplete_falls_back_with_warning(capsys):
     out = capsys.readouterr()
     assert "sms" in (out.out + out.err).lower()
     assert "topsecret" not in out.out + out.err
+
+def test_build_sms_sender_unknown_provider_falls_back_with_warning(capsys):
+    sender = build_sms_sender(Settings(sms_provider="aliyn"), None)   # 拼写错误
+    assert isinstance(sender, LogSmsSender)
+    out = capsys.readouterr()
+    assert "aliyn" in out.err
+    assert "WARNING" in out.err

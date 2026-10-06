@@ -80,7 +80,7 @@ class AliyunSmsSender:
 
 
 def build_sms_sender(settings, client):
-    """aliyun 且四项配置齐全 -> AliyunSmsSender；否则退回 LogSmsSender（aliyun 配置不全时告警）。"""
+    """aliyun 且四项配置齐全 -> AliyunSmsSender；否则退回 LogSmsSender（aliyun 配置不全或 provider 拼错时告警）。"""
     if settings.sms_provider == "aliyun":
         if all([settings.sms_aliyun_access_key_id, settings.sms_aliyun_access_key_secret,
                 settings.sms_aliyun_sign_name, settings.sms_aliyun_template_code]):
@@ -89,5 +89,8 @@ def build_sms_sender(settings, client):
                                    settings.sms_aliyun_sign_name,
                                    settings.sms_aliyun_template_code)
         print("[sms] WARNING: SMS_PROVIDER=aliyun but config incomplete, falling back to log sender",
+              file=sys.stderr)
+    elif settings.sms_provider != "log":
+        print(f"[sms] WARNING: unknown SMS_PROVIDER={settings.sms_provider!r}, falling back to log sender",
               file=sys.stderr)
     return LogSmsSender()

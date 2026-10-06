@@ -297,3 +297,9 @@ def test_sms_attempts_increment_is_sql_side():
     assert orig(conn, "13800000000", "onboard", "000000", 1001, max_attempts=5) == "wrong"
     assert conn.execute("SELECT attempts FROM sms_codes").fetchone()[0] == 4
     assert orig(conn, "13800000000", "onboard", "000000", 1001, max_attempts=5) == "too_many"
+
+def test_get_user_by_id():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    u = db.create_user(conn, "U1", "pw", None)
+    assert db.get_user_by_id(conn, u.id).code == "U1"
+    assert db.get_user_by_id(conn, 9999) is None

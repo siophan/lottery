@@ -10,6 +10,7 @@ from .upstream import build_client, forward, filter_response_headers
 from .routes import local_router
 from .db import connect, init_db
 from .dayys_session import DataYsSession
+from .sms import build_sms_sender
 from .routes import auth as auth_routes
 from .routes import admin as admin_routes
 from .collector import Collector
@@ -18,7 +19,7 @@ from .routes import admin_datasources as admin_ds_routes
 
 METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 
-def create_app(settings: Settings = None, client=None, conn=None, dayys=None, collector=None) -> FastAPI:
+def create_app(settings: Settings = None, client=None, conn=None, dayys=None, collector=None, sms=None) -> FastAPI:
     settings = settings or load_settings(os.environ)
 
     @asynccontextmanager
@@ -32,6 +33,8 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
             yield
         finally:
             await app.state.collector.stop()
+            if app.state.sms_client is not None:
+                await app.state.sms_client.aclose()
 
     app = FastAPI(lifespan=lifespan)
     app.add_middleware(
@@ -53,6 +56,12 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
         app.state.client, settings.dayys_code, settings.dayys_password,
         settings.dayys_device_id, settings.from_id, settings.dayys_token_ttl,
     )
+    # 短信服务商用独立 httpx 客户端：默认校验 TLS，不继承 UPSTREAM_VERIFY_TLS（那是给上游的）
+    app.state.sms_client = None
+    if sms is None:
+        app.state.sms_client = httpx.AsyncClient(timeout=10)
+        sms = build_sms_sender(settings, app.state.sms_client)
+    app.state.sms = sms
     app.state.collector = collector or Collector(app.state.db_conn, enabled=settings.collector_enabled)
 
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all

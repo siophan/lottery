@@ -96,3 +96,40 @@ def test_client_fromid_replaced_not_duplicated():
     tc.post("/api/lotteryNumber/topRows",
             headers={"token": tok, "fromId": "CLIENT"}, json={})
     assert seen["fromid"] == [Settings(session_ttl=3600).from_id]   # 只有一个，且是我方配置值
+
+# ---------------- 账号生命周期：旧会话不能绕过 ----------------
+
+def test_proxy_rejects_session_of_banned_user_10024():
+    conn, tc = build(lambda req: httpx.Response(200, json={"code": 0, "data": "ok"}))
+    tok = _session_for(conn)
+    db.update_user(conn, "U1", status="banned")
+    r = tc.post("/api/lotteryNumber/topRows", headers={"token": tok}, json={})
+    assert r.json() == {"code": 10024, "msg": "账号已封禁，无法登录"}
+
+def test_proxy_rejects_session_of_disabled_user():
+    conn, tc = build(lambda req: httpx.Response(200, json={"code": 0, "data": "ok"}))
+    tok = _session_for(conn)
+    db.update_user(conn, "U1", status="disabled")
+    r = tc.post("/api/lotteryNumber/topRows", headers={"token": tok}, json={})
+    assert r.json()["code"] == 10022
+
+def test_proxy_rejects_session_of_not_onboarded_user():
+    conn, tc = build(lambda req: httpx.Response(200, json={"code": 0, "data": "ok"}))
+    tok = _session_for(conn)
+    conn.execute("UPDATE users SET onboarded_at=NULL WHERE code='U1'"); conn.commit()
+    r = tc.post("/api/lotteryNumber/topRows", headers={"token": tok}, json={})
+    assert r.json()["code"] == 10022
+
+def test_proxy_rejects_session_of_pending_user():
+    conn, tc = build(lambda req: httpx.Response(200, json={"code": 0, "data": "ok"}))
+    tok = _session_for(conn)
+    conn.execute("UPDATE users SET first_activated_at=NULL WHERE code='U1'"); conn.commit()
+    r = tc.post("/api/lotteryNumber/topRows", headers={"token": tok}, json={})
+    assert r.json()["code"] == 10022
+
+def test_proxy_session_of_deleted_user_rejected():
+    conn, tc = build(lambda req: httpx.Response(200, json={"code": 0, "data": "ok"}))
+    tok = _session_for(conn)
+    conn.execute("DELETE FROM users WHERE code='U1'"); conn.commit()
+    r = tc.post("/api/lotteryNumber/topRows", headers={"token": tok}, json={})
+    assert r.json()["code"] == 10022

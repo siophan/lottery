@@ -236,6 +236,10 @@ def get_user_by_code(conn, code: str) -> User | None:
     r = conn.execute("SELECT * FROM users WHERE code=?", (code.upper(),)).fetchone()
     return _row_to_user(r) if r else None
 
+def get_user_by_id(conn, user_id: int) -> User | None:
+    r = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    return _row_to_user(r) if r else None
+
 def create_user(conn, code: str, password: str, expires_at: int | None,
                 *, pending: bool = False) -> User:
     now = int(time.time())
