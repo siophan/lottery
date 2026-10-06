@@ -7,16 +7,40 @@ import {
   ProFormText,
   ProTable,
 } from '@ant-design/pro-components'
-import { App, Button, Popconfirm } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { App, Button, Dropdown, Popconfirm } from 'antd'
+import { DownOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { createUser, deleteUser, listUsers, patchUser, UserRow } from '../api'
-import { fmtDate, fmtDateTime, toEpoch } from '../util'
+import {
+  activateUser,
+  ApiResult,
+  createUser,
+  deleteUser,
+  listUsers,
+  patchUser,
+  resetUserPassword,
+  UserRow,
+} from '../api'
+import { fmtDate, fmtDateTime, STATUS_LABEL, toEpoch } from '../util'
 
 export default function UsersTable() {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const actionRef = useRef<ActionType>()
   const reload = () => actionRef.current?.reload()
+
+  // 统一处理接口结果：成功提示并刷新，失败优先显示后端 error 文案。
+  const run = async (p: Promise<ApiResult>, okMsg: string, failMsg: string) => {
+    const r = await p
+    if (r.ok) {
+      message.success(okMsg)
+      reload()
+    } else {
+      message.error(r.error || failMsg)
+    }
+    return r.ok
+  }
+
+  const setStatus = (code: string, status: string, okMsg: string) =>
+    run(patchUser(code, { status }), okMsg, '操作失败')
 
   const columns: ProColumns<UserRow>[] = [
     {
@@ -26,13 +50,35 @@ export default function UsersTable() {
       fieldProps: { placeholder: '按编号搜索' },
     },
     {
-      title: '状态',
+      title: '激活状态',
+      dataIndex: 'activated',
+      valueType: 'select',
+      valueEnum: {
+        false: { text: '待激活', status: 'Default' },
+        true: { text: '已激活', status: 'Success' },
+      },
+    },
+    {
+      title: '使用控制',
       dataIndex: 'status',
       valueType: 'select',
       valueEnum: {
-        active: { text: '启用', status: 'Success' },
-        disabled: { text: '停用', status: 'Error' },
+        active: { text: STATUS_LABEL.active, status: 'Success' },
+        disabled: { text: STATUS_LABEL.disabled, status: 'Warning' },
+        banned: { text: STATUS_LABEL.banned, status: 'Error' },
       },
+    },
+    {
+      title: '手机号',
+      dataIndex: 'phone',
+      hideInSearch: true,
+      render: (_, r) => r.phone || '—',
+    },
+    {
+      title: '首登',
+      dataIndex: 'onboarded',
+      hideInSearch: true,
+      render: (_, r) => (r.onboarded ? '已完成' : '未完成'),
     },
     {
       title: '到期',
@@ -50,90 +96,98 @@ export default function UsersTable() {
       title: '操作',
       valueType: 'option',
       key: 'option',
-      render: (_, record) => [
-        <ModalForm
-          key="expire"
-          title={`改到期 · ${record.code}`}
-          trigger={<a>改到期</a>}
-          width={360}
-          modalProps={{ destroyOnClose: true }}
-          initialValues={{
-            expires: record.expires_at ? dayjs.unix(record.expires_at) : undefined,
-          }}
-          onFinish={async (v: { expires?: unknown }) => {
-            const ok = await patchUser(record.code, { expires_at: toEpoch(v.expires) })
-            if (ok) {
-              message.success('到期时间已更新')
-              reload()
-            } else {
-              message.error('更新失败')
+      render: (_, record) => {
+        // 不常用 / 有风险的操作收进「更多」，确认走 modal.confirm（Dropdown 内无法嵌 Popconfirm）。
+        const more = [
+          record.status !== 'banned' && {
+            key: 'ban',
+            label: '封禁',
+            danger: true,
+            onClick: () =>
+              modal.confirm({
+                title: `确认封禁账号 ${record.code}？`,
+                content: '封禁后该账号立即下线且无法登录，可通过「恢复」解除。',
+                okText: '封禁',
+                okButtonProps: { danger: true },
+                cancelText: '取消',
+                onOk: () => setStatus(record.code, 'banned', '已封禁'),
+              }),
+          },
+          record.activated && {
+            key: 'reset',
+            label: '重置密码',
+            onClick: () =>
+              modal.confirm({
+                title: `重置账号 ${record.code} 的密码？`,
+                content: '密码将重置为 123456，用户下次登录需重新修改密码并验证手机号，确认？',
+                okText: '确认重置',
+                cancelText: '取消',
+                onOk: () => run(resetUserPassword(record.code), '密码已重置为初始密码', '重置失败'),
+              }),
+          },
+          {
+            key: 'del',
+            label: '删除',
+            danger: true,
+            onClick: () =>
+              modal.confirm({
+                title: `确认删除用户 ${record.code}？`,
+                okText: '删除',
+                okButtonProps: { danger: true },
+                cancelText: '取消',
+                onOk: () => run(deleteUser(record.code), '已删除', '删除失败'),
+              }),
+          },
+        ].filter(Boolean) as { key: string; label: string; danger?: boolean; onClick: () => void }[]
+
+        return [
+          !record.activated && (
+            <Popconfirm
+              key="activate"
+              title="激活后初始密码为 123456，确认激活？"
+              okText="激活"
+              cancelText="取消"
+              onConfirm={() => run(activateUser(record.code), '已激活', '激活失败')}
+            >
+              <a>激活</a>
+            </Popconfirm>
+          ),
+          record.status === 'active' ? (
+            <a key="pause" onClick={() => setStatus(record.code, 'disabled', '已暂停')}>
+              暂停
+            </a>
+          ) : (
+            <a key="resume" onClick={() => setStatus(record.code, 'active', '已恢复')}>
+              恢复
+            </a>
+          ),
+          <ModalForm
+            key="expire"
+            title={`改到期 · ${record.code}`}
+            trigger={<a>改到期</a>}
+            width={360}
+            modalProps={{ destroyOnClose: true }}
+            initialValues={{
+              expires: record.expires_at ? dayjs.unix(record.expires_at) : undefined,
+            }}
+            onFinish={async (v: { expires?: unknown }) =>
+              run(patchUser(record.code, { expires_at: toEpoch(v.expires) }), '到期时间已更新', '更新失败')
             }
-            return ok
-          }}
-        >
-          <ProFormDatePicker
-            name="expires"
-            label="到期日"
-            extra="留空表示永久"
-            fieldProps={{ style: { width: '100%' } }}
-          />
-        </ModalForm>,
-        <a
-          key="toggle"
-          onClick={async () => {
-            const next = record.status === 'active' ? 'disabled' : 'active'
-            const ok = await patchUser(record.code, { status: next })
-            if (ok) {
-              message.success(next === 'active' ? '已启用' : '已停用')
-              reload()
-            } else {
-              message.error('操作失败')
-            }
-          }}
-        >
-          {record.status === 'active' ? '停用' : '启用'}
-        </a>,
-        <ModalForm
-          key="pw"
-          title={`重置密码 · ${record.code}`}
-          trigger={<a>重置密码</a>}
-          width={360}
-          modalProps={{ destroyOnClose: true }}
-          onFinish={async (v: { password: string }) => {
-            const ok = await patchUser(record.code, { password: v.password })
-            if (ok) {
-              message.success('密码已重置')
-            } else {
-              message.error('重置失败')
-            }
-            return ok
-          }}
-        >
-          <ProFormText.Password
-            name="password"
-            label="新密码"
-            rules={[{ required: true, message: '请输入新密码' }]}
-          />
-        </ModalForm>,
-        <Popconfirm
-          key="del"
-          title={`确认删除用户 ${record.code}？`}
-          okText="删除"
-          okButtonProps={{ danger: true }}
-          cancelText="取消"
-          onConfirm={async () => {
-            const ok = await deleteUser(record.code)
-            if (ok) {
-              message.success('已删除')
-              reload()
-            } else {
-              message.error('删除失败')
-            }
-          }}
-        >
-          <a style={{ color: '#ff4d4f' }}>删除</a>
-        </Popconfirm>,
-      ],
+          >
+            <ProFormDatePicker
+              name="expires"
+              label="到期日"
+              extra="留空表示永久"
+              fieldProps={{ style: { width: '100%' } }}
+            />
+          </ModalForm>,
+          <Dropdown key="more" menu={{ items: more }} trigger={['click']}>
+            <a onClick={(e) => e.preventDefault()}>
+              更多 <DownOutlined />
+            </a>
+          </Dropdown>,
+        ]
+      },
     },
   ]
 
@@ -156,6 +210,9 @@ export default function UsersTable() {
         if (params.status) {
           rows = rows.filter((u) => u.status === params.status)
         }
+        if (params.activated) {
+          rows = rows.filter((u) => String(u.activated) === params.activated)
+        }
         const current = params.current ?? 1
         const pageSize = params.pageSize ?? 10
         const start = (current - 1) * pageSize
@@ -172,31 +229,20 @@ export default function UsersTable() {
               新增用户
             </Button>
           }
-          onFinish={async (v: { code: string; password: string; expires?: unknown }) => {
-            const ok = await createUser(
-              (v.code || '').trim().toUpperCase(),
-              v.password,
-              toEpoch(v.expires),
+          onFinish={async (v: { code: string; expires?: unknown }) =>
+            run(
+              createUser((v.code || '').trim().toUpperCase(), toEpoch(v.expires)),
+              '已新增用户（待激活）',
+              '新增失败',
             )
-            if (ok) {
-              message.success('已新增用户')
-              reload()
-            } else {
-              message.error('新增失败（编号可能已存在）')
-            }
-            return ok
-          }}
+          }
         >
           <ProFormText
             name="code"
             label="编号"
             placeholder="如 USER01（自动转大写）"
             rules={[{ required: true, message: '请输入编号' }]}
-          />
-          <ProFormText.Password
-            name="password"
-            label="初始密码"
-            rules={[{ required: true, message: '请输入初始密码' }]}
+            extra="新建账号为待激活状态，激活后初始密码为 123456"
           />
           <ProFormDatePicker
             name="expires"

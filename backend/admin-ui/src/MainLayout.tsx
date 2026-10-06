@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { PageContainer, ProLayout } from '@ant-design/pro-components'
 import { App, Dropdown } from 'antd'
-import { ApiOutlined, DashboardOutlined, LogoutOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons'
+import { ApiOutlined, DashboardOutlined, FileSearchOutlined, LogoutOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons'
 import { logout } from './api'
 import { BRAND, Logo } from './branding'
+import AuditLogs from './pages/AuditLogs'
 import Dashboard from './pages/Dashboard'
 import DataSources from './pages/DataSources'
 import UsersTable from './pages/UsersTable'
@@ -14,10 +15,16 @@ const ROUTE = {
     { path: '/dashboard', name: '概览', icon: <DashboardOutlined /> },
     { path: '/users', name: '用户管理', icon: <TeamOutlined /> },
     { path: '/data-sources', name: '数据源', icon: <ApiOutlined /> },
+    { path: '/audit-logs', name: '操作日志', icon: <FileSearchOutlined /> },
   ],
 }
 
-const TITLES: Record<string, string> = { '/dashboard': '概览', '/users': '用户管理', '/data-sources': '数据源' }
+const TITLES: Record<string, string> = {
+  '/dashboard': '概览',
+  '/users': '用户管理',
+  '/data-sources': '数据源',
+  '/audit-logs': '操作日志',
+}
 
 export default function MainLayout({
   username,
@@ -70,7 +77,15 @@ export default function MainLayout({
       }}
     >
       <PageContainer header={{ title: TITLES[pathname] }}>
-        {pathname === '/dashboard' ? <Dashboard /> : pathname === '/users' ? <UsersTable /> : <DataSources />}
+        {pathname === '/dashboard' ? (
+          <Dashboard />
+        ) : pathname === '/users' ? (
+          <UsersTable />
+        ) : pathname === '/audit-logs' ? (
+          <AuditLogs />
+        ) : (
+          <DataSources />
+        )}
       </PageContainer>
     </ProLayout>
   )

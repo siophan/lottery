@@ -17,9 +17,24 @@ async function req(path: string, options: RequestInit = {}): Promise<Response> {
 
 export interface UserRow {
   code: string
-  status: string
+  status: string // active 正常 | disabled 暂停 | banned 封禁
   expires_at: number | null
   created_at: number
+  activated: boolean // 是否已激活（false = 待激活）
+  first_activated_at: number | null
+  phone: string | null // 已脱敏，如 138****1234
+  onboarded: boolean // 是否完成首登改密 + 绑定手机号
+}
+
+export interface ApiResult {
+  ok: boolean
+  error?: string
+}
+
+// 统一解析 {ok, error}：HTTP 200 且 ok !== false 视为成功，否则带回后端的 error 文案。
+async function result(r: Response): Promise<ApiResult> {
+  const d = await r.json().catch(() => ({}))
+  return { ok: r.status === 200 && d.ok !== false, error: d.error }
 }
 
 export async function getMe(): Promise<{ username: string } | null> {
@@ -47,32 +62,61 @@ export async function listUsers(): Promise<UserRow[]> {
   return d.users as UserRow[]
 }
 
-export async function createUser(
-  code: string,
-  password: string,
-  expiresAt: number | null,
-): Promise<boolean> {
+export async function createUser(code: string, expiresAt: number | null): Promise<ApiResult> {
   const r = await req('/users', {
     method: 'POST',
-    body: JSON.stringify({ code, password, expires_at: expiresAt }),
+    body: JSON.stringify({ code, expires_at: expiresAt }),
   })
-  return r.status === 200
+  return result(r)
 }
 
 export async function patchUser(
   code: string,
   patch: Record<string, unknown>,
-): Promise<boolean> {
+): Promise<ApiResult> {
   const r = await req('/users/' + encodeURIComponent(code), {
     method: 'PATCH',
     body: JSON.stringify(patch),
   })
-  return r.status === 200
+  return result(r)
 }
 
-export async function deleteUser(code: string): Promise<boolean> {
-  const r = await req('/users/' + encodeURIComponent(code), { method: 'DELETE' })
-  return r.status === 200
+export async function activateUser(code: string): Promise<ApiResult> {
+  return result(await req('/users/' + encodeURIComponent(code) + '/activate', { method: 'POST' }))
+}
+
+export async function resetUserPassword(code: string): Promise<ApiResult> {
+  return result(
+    await req('/users/' + encodeURIComponent(code) + '/reset-password', { method: 'POST' }),
+  )
+}
+
+export async function deleteUser(code: string): Promise<ApiResult> {
+  return result(await req('/users/' + encodeURIComponent(code), { method: 'DELETE' }))
+}
+
+// ---------------- 操作日志 ----------------
+
+export interface AuditLogRow {
+  id: number
+  actor_type: string
+  actor: string
+  action: string
+  target: string
+  detail: Record<string, unknown>
+  created_at: number
+}
+
+export async function listAuditLogs(
+  limit: number,
+  offset: number,
+  target?: string,
+): Promise<{ logs: AuditLogRow[]; total: number }> {
+  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (target) qs.set('target', target)
+  const r = await req('/audit-logs?' + qs.toString())
+  if (r.status !== 200) throw new Error('list audit logs failed: ' + r.status)
+  return r.json()
 }
 
 // ---------------- 数据源 ----------------

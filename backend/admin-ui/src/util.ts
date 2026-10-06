@@ -14,3 +14,10 @@ export function toEpoch(v: unknown): number | null {
   if (!v) return null
   return dayjs(v as dayjs.ConfigType).unix()
 }
+
+// 账号使用控制状态（后端 status 取值）→ 中文。
+export const STATUS_LABEL: Record<string, string> = {
+  active: '正常',
+  disabled: '暂停',
+  banned: '封禁',
+}
