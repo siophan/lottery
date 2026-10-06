@@ -32,9 +32,11 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
         try:
             yield
         finally:
-            await app.state.collector.stop()
-            if app.state.sms_client is not None:
-                await app.state.sms_client.aclose()
+            try:
+                await app.state.collector.stop()
+            finally:       # collector.stop() 抛异常也要关掉短信客户端
+                if app.state.sms_client is not None:
+                    await app.state.sms_client.aclose()
 
     app = FastAPI(lifespan=lifespan)
     app.add_middleware(

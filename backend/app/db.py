@@ -177,7 +177,8 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         CREATE TABLE IF NOT EXISTS sms_send_log(
           phone TEXT NOT NULL,
-          sent_at INTEGER NOT NULL
+          sent_at INTEGER NOT NULL,
+          user_id INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_sms_send_log ON sms_send_log(phone, sent_at);
         CREATE TABLE IF NOT EXISTS audit_logs(
@@ -194,6 +195,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
     _migrate_users(conn)
+    _migrate_sms_send_log(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
@@ -221,6 +223,14 @@ def _migrate_users(conn) -> None:
     except Exception:
         conn.rollback()
         raise
+
+def _migrate_sms_send_log(conn) -> None:
+    # 旧库的 sms_send_log 没有 user_id：幂等补列，再建按账号统计用的索引
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(sms_send_log)")}
+    if "user_id" not in cols:
+        conn.execute("ALTER TABLE sms_send_log ADD COLUMN user_id INTEGER")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_send_user ON sms_send_log(user_id, sent_at)")
+    conn.commit()
 
 def mask_phone(phone: str | None) -> str | None:
     if phone is None:
@@ -398,7 +408,8 @@ def get_onboard_ticket_user(conn, token: str, now: int) -> User | None:
 def _sms_hash(salt: str, code: str) -> str:
     return hashlib.sha256((salt + code).encode("utf-8")).hexdigest()
 
-def save_sms_code(conn, phone: str, purpose: str, code: str, ttl: int, now: int) -> None:
+def save_sms_code(conn, phone: str, purpose: str, code: str, ttl: int, now: int,
+                  *, user_id: int | None = None) -> None:
     salt = secrets.token_hex(8)
     try:
         conn.execute(
@@ -406,7 +417,8 @@ def save_sms_code(conn, phone: str, purpose: str, code: str, ttl: int, now: int)
             " VALUES(?,?,?,?,?,0,?)",
             (phone, purpose, _sms_hash(salt, code), salt, now + ttl, now),
         )
-        conn.execute("INSERT INTO sms_send_log(phone,sent_at) VALUES(?,?)", (phone, now))
+        conn.execute("INSERT INTO sms_send_log(phone,sent_at,user_id) VALUES(?,?,?)",
+                     (phone, now, user_id))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -416,14 +428,18 @@ def delete_sms_code(conn, phone: str, purpose: str) -> None:
     conn.execute("DELETE FROM sms_codes WHERE phone=? AND purpose=?", (phone, purpose))
     conn.commit()
 
-def last_sms_sent_at(conn, phone: str, purpose: str) -> int | None:
-    r = conn.execute("SELECT sent_at FROM sms_codes WHERE phone=? AND purpose=?",
-                     (phone, purpose)).fetchone()
-    return r["sent_at"] if r else None
+def last_sms_sent_at(conn, phone: str) -> int | None:
+    # 取自发送流水而非 sms_codes：发送失败/验证码作废后删掉码行，也不会绕过冷却
+    r = conn.execute("SELECT MAX(sent_at) AS t FROM sms_send_log WHERE phone=?", (phone,)).fetchone()
+    return r["t"]
 
 def count_sms_sent_since(conn, phone: str, since: int) -> int:
     return conn.execute("SELECT COUNT(*) FROM sms_send_log WHERE phone=? AND sent_at>=?",
                         (phone, since)).fetchone()[0]
+
+def count_sms_sent_by_user_since(conn, user_id: int, since: int) -> int:
+    return conn.execute("SELECT COUNT(*) FROM sms_send_log WHERE user_id=? AND sent_at>=?",
+                        (user_id, since)).fetchone()[0]
 
 def purge_old_sms_send_log(conn, now: int) -> int:
     # 频控只需要最近 24 小时的发送记录

@@ -225,6 +225,8 @@ def test_onboard_earlier_failures_do_not_consume_sms_code():
     t = ticket_for(conn, fresh_user(conn))
     code = issue_code(conn)
     assert submit(tc, t, newPassword="short", confirmPassword="short", smsCode=code)["code"] == 1
+    row = conn.execute("SELECT attempts FROM sms_codes WHERE phone=?", (PHONE,)).fetchone()
+    assert row is not None and row["attempts"] == 0      # 前序失败没有碰验证码
     assert submit(tc, t, smsCode=code)["code"] == 0      # 码仍可用
     # 且失败分支没有消耗错误次数
     assert conn.execute("SELECT COUNT(*) FROM sms_codes").fetchone()[0] == 0
@@ -359,3 +361,83 @@ def test_sms_sender_unexpected_exception_logged_to_stderr(capsys):
     err = capsys.readouterr().err
     assert "RuntimeError" in err and "provider exploded" in err
     assert conn.execute("SELECT COUNT(*) FROM sms_codes").fetchone()[0] == 0
+
+# ---------------- 频控细节 ----------------
+
+def test_failed_send_keeps_log_row_counts_toward_cap_and_starts_cooldown():
+    conn, tc, sms = build()
+    t = ticket_for(conn, fresh_user(conn))
+    sms.fail = True
+    assert send_sms(tc, t)["msg"] == "验证码发送失败，请稍后再试"
+    assert conn.execute("SELECT COUNT(*) FROM sms_codes").fetchone()[0] == 0     # 码已删
+    assert conn.execute("SELECT COUNT(*) FROM sms_send_log WHERE phone=?", (PHONE,)).fetchone()[0] == 1
+    sms.fail = False
+    # 码行没了，冷却仍由发送流水生效
+    assert send_sms(tc, t) == {"code": 1, "msg": "验证码发送过于频繁，请稍后再试"}
+    assert sms.sent == []
+
+def test_too_many_attempts_does_not_bypass_cooldown():
+    conn, tc, sms = build()
+    t = ticket_for(conn, fresh_user(conn))
+    assert send_sms(tc, t)["code"] == 0
+    for _ in range(5):
+        submit(tc, t, smsCode="x" * 6)       # 5 次错误 -> 码作废（行被删）
+    assert conn.execute("SELECT COUNT(*) FROM sms_codes").fetchone()[0] == 0
+    assert send_sms(tc, t)["msg"] == "验证码发送过于频繁，请稍后再试"
+
+def test_send_log_older_than_24h_excluded_from_cap():
+    conn, tc, sms = build()
+    t = ticket_for(conn, fresh_user(conn))
+    now = int(time.time())
+    conn.executemany("INSERT INTO sms_send_log(phone,sent_at) VALUES(?,?)",
+                     [(PHONE, now - 86400 - 10)] * 10)
+    conn.commit()
+    assert send_sms(tc, t)["code"] == 0
+
+def test_per_account_cap_blocks_spraying_many_phones():
+    conn, tc, sms = build()
+    u = fresh_user(conn)
+    t = ticket_for(conn, u)
+    now = int(time.time())
+    # 该账号已向 10 个不同手机号发过（均早于冷却窗口）
+    conn.executemany("INSERT INTO sms_send_log(phone,sent_at,user_id) VALUES(?,?,?)",
+                     [(f"1380000000{i}", now - 3600, u.id) for i in range(10)])
+    conn.commit()
+    assert send_sms(tc, t, "13955556666") == {"code": 1, "msg": "今日验证码发送次数已达上限"}
+    assert sms.sent == []
+
+def test_per_account_cap_is_per_account_and_9_is_allowed():
+    conn, tc, sms = build()
+    u = fresh_user(conn)
+    other = fresh_user(conn, code="USER02")
+    t = ticket_for(conn, u)
+    now = int(time.time())
+    conn.executemany("INSERT INTO sms_send_log(phone,sent_at,user_id) VALUES(?,?,?)",
+                     [(f"1380000000{i}", now - 3600, other.id) for i in range(10)])
+    conn.executemany("INSERT INTO sms_send_log(phone,sent_at,user_id) VALUES(?,?,?)",
+                     [(f"1370000000{i}", now - 3600, u.id) for i in range(9)])
+    conn.commit()
+    assert send_sms(tc, t)["code"] == 0                    # 自己 9 条 + 本次 = 10，仍允许
+    assert conn.execute("SELECT user_id FROM sms_send_log WHERE phone=?", (PHONE,)).fetchone()[0] == u.id
+
+def test_per_account_cap_ignores_logs_older_than_24h():
+    conn, tc, sms = build()
+    u = fresh_user(conn)
+    t = ticket_for(conn, u)
+    now = int(time.time())
+    conn.executemany("INSERT INTO sms_send_log(phone,sent_at,user_id) VALUES(?,?,?)",
+                     [(f"1380000000{i}", now - 86400 - 10, u.id) for i in range(10)])
+    conn.commit()
+    assert send_sms(tc, t)["code"] == 0
+
+def test_lifespan_closes_sms_client_even_if_collector_stop_raises():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    class BadCollector:
+        async def start(self): pass
+        async def stop(self): raise RuntimeError("stop failed")
+    app = create_app(Settings(collector_enabled=False), conn=conn, collector=BadCollector())
+    client = app.state.sms_client
+    with pytest.raises(RuntimeError):
+        with TestClient(app):
+            pass
+    assert client.is_closed

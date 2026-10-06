@@ -120,14 +120,16 @@ async def onboard_sms(request: Request):
     phone = _str(payload, "phone")
     if not PHONE_RE.fullmatch(phone):
         return _fail("手机号格式错误")
-    last = db.last_sms_sent_at(conn, phone, SMS_PURPOSE)
+    last = db.last_sms_sent_at(conn, phone)
     if last is not None and now - last < SMS_COOLDOWN:
         return _fail("验证码发送过于频繁，请稍后再试")
-    if db.count_sms_sent_since(conn, phone, now - 86400) >= SMS_DAILY_LIMIT:
+    # 同号 24 小时上限；另按账号限制，防止凭一张票据向大量不同手机号群发
+    if (db.count_sms_sent_since(conn, phone, now - 86400) >= SMS_DAILY_LIMIT
+            or db.count_sms_sent_by_user_since(conn, user.id, now - 86400) >= SMS_DAILY_LIMIT):
         return _fail("今日验证码发送次数已达上限")
 
     code = "".join(secrets.choice("0123456789") for _ in range(6))
-    db.save_sms_code(conn, phone, SMS_PURPOSE, code, SMS_CODE_TTL, now)
+    db.save_sms_code(conn, phone, SMS_PURPOSE, code, SMS_CODE_TTL, now, user_id=user.id)
     try:
         await sms.send_code(phone, code)
     except Exception as e:      # SmsError 及发送器的任何意外异常：删掉刚存的码，不向用户暴露细节

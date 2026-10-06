@@ -209,15 +209,38 @@ def test_save_sms_code_overwrites_old_and_resets_attempts():
     assert db.check_sms_code(conn, "13800000000", "onboard", "111111", 1101) == "wrong"
     assert db.check_sms_code(conn, "13800000000", "onboard", "222222", 1101) == "ok"
 
-def test_delete_sms_code_and_last_sent_at():
+def test_last_sent_at_comes_from_send_log_and_survives_code_deletion():
     conn = mem()
-    assert db.last_sms_sent_at(conn, "13800000000", "onboard") is None
+    assert db.last_sms_sent_at(conn, "13800000000") is None
     db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000)
     db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1200)
-    assert db.last_sms_sent_at(conn, "13800000000", "onboard") == 1200
-    assert db.last_sms_sent_at(conn, "13800000000", "other") is None
+    assert db.last_sms_sent_at(conn, "13800000000") == 1200
+    assert db.last_sms_sent_at(conn, "13900000000") is None
     db.delete_sms_code(conn, "13800000000", "onboard")
-    assert db.last_sms_sent_at(conn, "13800000000", "onboard") is None
+    assert db.last_sms_sent_at(conn, "13800000000") == 1200      # 删码不影响冷却依据
+
+def test_count_sms_sent_by_user_since():
+    conn = mem()
+    db.save_sms_code(conn, "13800000000", "onboard", "1", 300, 100, user_id=7)
+    db.save_sms_code(conn, "13900000000", "onboard", "1", 300, 200, user_id=7)
+    db.save_sms_code(conn, "13900000000", "onboard", "1", 300, 300, user_id=8)
+    db.save_sms_code(conn, "13700000000", "onboard", "1", 300, 400)          # 无 user_id
+    assert db.count_sms_sent_by_user_since(conn, 7, 0) == 2
+    assert db.count_sms_sent_by_user_since(conn, 7, 150) == 1
+    assert db.count_sms_sent_by_user_since(conn, 8, 0) == 1
+    assert db.count_sms_sent_by_user_since(conn, 9, 0) == 0
+
+def test_sms_send_log_user_id_migration_is_idempotent():
+    conn = db.connect(":memory:")
+    conn.execute("CREATE TABLE sms_send_log(phone TEXT NOT NULL, sent_at INTEGER NOT NULL)")
+    conn.execute("INSERT INTO sms_send_log VALUES('13800000000', 5)")
+    conn.commit()
+    db.init_db(conn)
+    db.init_db(conn)
+    assert "user_id" in {r["name"] for r in conn.execute("PRAGMA table_info(sms_send_log)")}
+    assert conn.execute("SELECT user_id FROM sms_send_log").fetchone()["user_id"] is None
+    db.save_sms_code(conn, "13800000000", "onboard", "1", 300, 10, user_id=3)
+    assert db.count_sms_sent_by_user_since(conn, 3, 0) == 1
 
 def test_count_sms_sent_since():
     conn = mem()
