@@ -58,6 +58,25 @@ def test_init_db_creates_new_tables():
     names = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"onboard_tickets", "sms_codes", "sms_send_log", "audit_logs"} <= names
 
+def test_migration_is_atomic_when_backfill_fails():
+    conn = db.connect(":memory:")
+    conn.execute(LEGACY_USERS)
+    conn.execute("INSERT INTO users(code,password_hash,salt,expires_at,status,created_at)"
+                 " VALUES('OLD1','h','s',NULL,'active',1000)")
+    conn.execute("CREATE TRIGGER boom BEFORE UPDATE ON users BEGIN SELECT RAISE(ABORT,'boom'); END")
+    conn.commit()
+    try:
+        db.init_db(conn)
+        assert False, "应当抛异常"
+    except sqlite3.DatabaseError:
+        pass
+    # 回滚后列不应残留，否则下次启动不会再回填
+    assert "onboarded_at" not in _cols(conn)
+    conn.execute("DROP TRIGGER boom")
+    conn.commit()
+    db.init_db(conn)
+    assert db.get_user_by_code(conn, "OLD1").onboarded_at == 1000
+
 # ---------------- create_user ----------------
 
 def test_create_user_default_is_active_and_onboarded():
@@ -250,3 +269,31 @@ def test_constants():
 def test_mask_phone():
     assert db.mask_phone("13812341234") == "138****1234"
     assert db.mask_phone(None) is None
+
+def test_reset_user_password_also_clears_onboard_tickets():
+    conn = mem()
+    u = db.create_user(conn, "r1", "pw", None)
+    tk = db.create_onboard_ticket(conn, u.id, 900)
+    assert db.reset_user_password(conn, "r1") == "ok"
+    assert db.get_onboard_ticket_user(conn, tk, 0) is None
+
+def test_purge_old_sms_send_log():
+    conn = mem()
+    now = 100000
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, now - 86400 - 1)
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, now - 86400)
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, now)
+    assert db.purge_old_sms_send_log(conn, now) == 1
+    assert db.count_sms_sent_since(conn, "13800000000", 0) == 2
+
+def test_sms_attempts_increment_is_sql_side():
+    conn = mem()
+    db.save_sms_code(conn, "13800000000", "onboard", "123456", 300, 1000)
+    # 另一连接/并发修改了计数：以数据库值为准，而不是 Python 读到的旧值
+    orig = db.check_sms_code
+    db.check_sms_code(conn, "13800000000", "onboard", "000000", 1001)
+    conn.execute("UPDATE sms_codes SET attempts=3")
+    conn.commit()
+    assert orig(conn, "13800000000", "onboard", "000000", 1001, max_attempts=5) == "wrong"
+    assert conn.execute("SELECT attempts FROM sms_codes").fetchone()[0] == 4
+    assert orig(conn, "13800000000", "onboard", "000000", 1001, max_attempts=5) == "too_many"

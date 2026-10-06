@@ -201,18 +201,26 @@ def init_db(conn: sqlite3.Connection) -> None:
                                enabled=True, lotteries=s["lotteries"])
 
 def _migrate_users(conn) -> None:
-    # 幂等迁移：缺列才 ADD COLUMN；仅在本次新加列时回填存量账号（视为已激活且已完成首登）
+    # 幂等迁移：缺列才 ADD COLUMN；本次新加了列才回填存量账号（视为已激活且已完成首登）。
+    # ALTER 与回填放在同一个显式事务里（SQLite 支持事务性 DDL），中途崩溃则整体回滚，
+    # 下次启动重新迁移，不会出现"有列但存量账号全是待激活"的半成品状态。
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    added = False
-    for name, ddl in (("first_activated_at", "INTEGER"), ("activated_at", "INTEGER"),
-                      ("phone", "TEXT"), ("onboarded_at", "INTEGER")):
-        if name not in cols:
+    missing = [(n, t) for n, t in (("first_activated_at", "INTEGER"), ("activated_at", "INTEGER"),
+                                   ("phone", "TEXT"), ("onboarded_at", "INTEGER"))
+               if n not in cols]
+    if not missing:
+        return
+    conn.commit()  # 确保没有遗留的隐式事务，BEGIN 才不会报错
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for name, ddl in missing:
             conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
-            added = True
-    if added:
         conn.execute("UPDATE users SET first_activated_at=created_at,"
                      " activated_at=created_at, onboarded_at=created_at")
-    conn.commit()
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 def mask_phone(phone: str | None) -> str | None:
     if phone is None:
@@ -252,16 +260,15 @@ def activate_user(conn, code: str, now: int) -> str:
     u = get_user_by_code(conn, code)
     if not u:
         return "not_found"
-    if u.first_activated_at is not None:
-        return "already"
     h, salt = hash_password(INITIAL_PASSWORD)
-    conn.execute(
+    # 条件更新保证并发下只有一次激活成功
+    cur = conn.execute(
         "UPDATE users SET password_hash=?, salt=?, first_activated_at=?, activated_at=?,"
-        " status='active', onboarded_at=NULL WHERE id=?",
+        " status='active', onboarded_at=NULL WHERE id=? AND first_activated_at IS NULL",
         (h, salt, now, now, u.id),
     )
     conn.commit()
-    return "ok"
+    return "ok" if cur.rowcount == 1 else "already"
 
 def reset_user_password(conn, code: str) -> str:
     u = get_user_by_code(conn, code)
@@ -274,6 +281,7 @@ def reset_user_password(conn, code: str) -> str:
         conn.execute("UPDATE users SET password_hash=?, salt=?, onboarded_at=NULL WHERE id=?",
                      (h, salt, u.id))
         conn.execute("DELETE FROM sessions WHERE user_id=?", (u.id,))
+        conn.execute("DELETE FROM onboard_tickets WHERE user_id=?", (u.id,))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -404,6 +412,12 @@ def count_sms_sent_since(conn, phone: str, since: int) -> int:
     return conn.execute("SELECT COUNT(*) FROM sms_send_log WHERE phone=? AND sent_at>=?",
                         (phone, since)).fetchone()[0]
 
+def purge_old_sms_send_log(conn, now: int) -> int:
+    # 频控只需要最近 24 小时的发送记录
+    cur = conn.execute("DELETE FROM sms_send_log WHERE sent_at < ?", (now - 86400,))
+    conn.commit()
+    return cur.rowcount
+
 def check_sms_code(conn, phone: str, purpose: str, code: str, now: int,
                    max_attempts: int = 5) -> str:
     """返回 ok | missing | expired | wrong | too_many；ok 与 too_many 时验证码被删除。"""
@@ -416,13 +430,15 @@ def check_sms_code(conn, phone: str, purpose: str, code: str, now: int,
     if hmac.compare_digest(_sms_hash(r["salt"], code), r["code_hash"]):
         delete_sms_code(conn, phone, purpose)
         return "ok"
-    attempts = r["attempts"] + 1
-    if attempts >= max_attempts:
+    # 计数在 SQL 里原子自增，再读回判断是否达到上限
+    conn.execute("UPDATE sms_codes SET attempts=attempts+1 WHERE phone=? AND purpose=?",
+                 (phone, purpose))
+    conn.commit()
+    row = conn.execute("SELECT attempts FROM sms_codes WHERE phone=? AND purpose=?",
+                       (phone, purpose)).fetchone()
+    if row is None or row["attempts"] >= max_attempts:
         delete_sms_code(conn, phone, purpose)
         return "too_many"
-    conn.execute("UPDATE sms_codes SET attempts=? WHERE phone=? AND purpose=?",
-                 (attempts, phone, purpose))
-    conn.commit()
     return "wrong"
 
 # ---------------- 审计日志 ----------------
