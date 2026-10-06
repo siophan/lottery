@@ -3,7 +3,8 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS, AUTH_MARK } = require('../scripts/patch-ds-client.js');
+const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS, AUTH_MARK, KICK_MARK,
+  patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK } = require('../scripts/patch-ds-client.js');
 const dsSources = require('../client/ds-sources.js');
 
 const DIR = path.join(__dirname, '..', 'client', 'js');
@@ -520,7 +521,7 @@ function appModuleSource(raw, locator) {
 }
 const REQ_LOCATOR = 'service.interceptors.request.use(config => {';
 
-function requestHarness(token = 'TOK') {
+function requestHarness(token = 'TOK', userInfo = null) {
   const src = appModuleSource(fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8'), REQ_LOCATOR);
   const ic = {};
   const service = {
@@ -530,18 +531,20 @@ function requestHarness(token = 'TOK') {
     },
   };
   const alerts = [];
+  const boxes = [];   // MessageBox.alert 的 options（含 callback）
   const sent = [];
+  const store = { token, userInfo };
   loadComponent(src, {
     modules: {
       bc3a: { create: () => service },
-      '5c96': { MessageBox: { alert: (msg) => alerts.push(msg) } },
+      '5c96': { MessageBox: { alert: (msg, title, opts) => { alerts.push(msg); boxes.push(opts); } } },
       f121: { apiURL: API_URL, fromId: 1004 },
     },
     window: { electron: { ipcRenderer: { send: (...a) => sent.push(a) } } },
-    globals: { localStorage: { getItem: (k) => (k === 'token' ? token : null), removeItem() {} } },
+    globals: { localStorage: { getItem: (k) => (store[k] == null ? null : store[k]), removeItem: (k) => { delete store[k]; } } },
   });
   const send = (url) => ic.req({ url, headers: {} }).headers;
-  return { ic, alerts, sent, send };
+  return { ic, alerts, boxes, sent, send, store };
 }
 
 test('app chunk: request 模块含 auth 补丁，源码语法有效（幂等见「app chunk: 补丁幂等」）', () => {
@@ -590,4 +593,187 @@ test('app chunk: 第三方返回 10020/10021/10022 不踢人，原样 resolve；
   assert.strictEqual(h.alerts.length, 1);
   const ok = { code: 0, data: [] };
   assert.strictEqual(await h.ic.res({ status: 200, data: ok, config: { url: 'https://qqtj.example.com/draw' } }), ok);
+});
+
+// ---- kick v1：自家接口返回 10024（封禁）同样踢下线；userInfo 为空时回调不再抛错 ----
+test('app chunk: request 模块含 kick 补丁', () => {
+  const src = appModuleSource(fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8'), REQ_LOCATOR);
+  assert.ok(src.includes(KICK_MARK));
+  assert.ok(src.includes('ipcRenderer.send("close", userInfo && userInfo.username);'));
+  assert.ok(!src.includes('ipcRenderer.send("close", userInfo.username);'));
+  new vm.Script(src);
+});
+
+test('app chunk: 自家接口返回 10024 → 弹「账号已封禁！」并在确认后退出；第三方 10024 原样 resolve', async () => {
+  let h = requestHarness('TOK', JSON.stringify({ username: 'A123456' }));
+  assert.strictEqual(h.ic.res({ status: 200, data: { code: 10024, msg: 'x' }, config: { url: API_URL + '/user/isExpire' } }), undefined);
+  assert.deepStrictEqual(h.alerts, ['账号已封禁！']);
+  h.boxes[0].callback('confirm');
+  assert.deepStrictEqual(plain(h.sent), [['kick'], ['close', 'A123456']]);
+  assert.strictEqual(h.store.token, undefined);
+  assert.strictEqual(h.store.userInfo, undefined);
+  h = requestHarness();
+  const res = { code: 10024, msg: 'x' };
+  assert.strictEqual(await h.ic.res({ status: 200, data: res, config: { url: 'https://qqtj.example.com/draw' } }), res);
+  assert.strictEqual(h.alerts.length, 0);
+});
+
+test('app chunk: 踢下线回调在 userInfo 为空时不抛错，照常发送 kick / close', () => {
+  for (const code of [10020, 10021, 10022, 10024]) {
+    const h = requestHarness('TOK', null);
+    h.ic.res({ status: 200, data: { code }, config: { url: API_URL + '/x' } });
+    assert.strictEqual(h.alerts.length, 1, String(code));
+    assert.doesNotThrow(() => h.boxes[0].callback('confirm'));
+    assert.deepStrictEqual(plain(h.sent), [['kick'], ['close', null]], String(code));
+  }
+});
+
+test('app chunk: 原有 1002x 提示文案不变', () => {
+  const msgs = {};
+  for (const code of [10020, 10021, 10022]) {
+    const h = requestHarness();
+    h.ic.res({ status: 200, data: { code }, config: { url: API_URL + '/x' } });
+    msgs[code] = h.alerts[0];
+  }
+  assert.deepStrictEqual(msgs, { 10020: '软件未登录登录！', 10021: '软件已在其他地方登录！', 10022: '软件已到期！' });
+});
+
+// ---- onboard v1：登录页把首登响应（10030）交给首登弹窗 window.dsOnboard；密码规则放宽到 6-20 位 ----
+const LOGIN = path.join(DIR, LOGIN_CHUNK);
+const LOGIN_LOCATOR = 'jizhumimaClick() {';
+const loginSource = () => appModuleSource(fs.readFileSync(LOGIN, 'utf8'), LOGIN_LOCATOR);
+
+test('login chunk: 已打补丁且再次运行不变（幂等），全部模块源码语法有效', () => {
+  const raw = fs.readFileSync(LOGIN, 'utf8');
+  for (const l of LOGIN_LAYERS) assert.ok(raw.includes(l.mark), `缺少补丁层 ${l.mark}`);
+  assert.strictEqual(patchLogin(raw), raw);
+  const srcs = evalSources(raw);
+  assert.ok(srcs.length > 3);
+  for (const s of srcs) new vm.Script(s);
+  const page = srcs.find((s) => s.includes(LOGIN_LOCATOR));
+  assert.ok(page.includes(ONBOARD_MARK));
+});
+
+test('login chunk: 锚点不匹配时报错', () => {
+  assert.throws(() => patchLogin("eval('jizhumimaClick() {')"), /命中 0 次/);
+  assert.throws(() => patchLogin('nothing'), /jizhumimaClick/);
+});
+
+// 用补丁后的登录页组件跑 login()：user.h（login 接口）返回 reply；jizhumima=true 且已存了 jizhuPassword
+function loginHarness(reply, { onboard = true } = {}) {
+  const opens = [];
+  const messages = [];
+  const sent = [];
+  const routes = [];
+  const logins = [];
+  const store = { jizhumima: '1', jizhuUsername: 'A123456', jizhuPassword: '123456' };
+  const comp = loadComponent(loginSource(), {
+    modules: {
+      c24f: { h: (p) => { logins.push(p); return Promise.resolve(reply); } },
+      f121: { apiURL: API_URL },
+    },
+    window: Object.assign({
+      addEventListener() {},
+      electron: { ipcRenderer: { send: (...a) => sent.push(a), on() {} } },
+    }, onboard ? { dsOnboard: { open: (o) => opens.push(o) } } : {}),
+    globals: {
+      localStorage: {
+        getItem: (k) => (k in store ? store[k] : null),
+        setItem: (k, v) => { store[k] = String(v); },
+        removeItem: (k) => { delete store[k]; },
+      },
+    },
+  });
+  const vmThis = Object.assign(comp.data(), {
+    checked: true, jizhumima: true, loginUserFrom: 'a123456', mac: 'MAC',
+    $refs: { loginForm: { validate: (cb) => cb(true) } },
+    $message: (m) => messages.push(m),
+    $router: { push: (r) => routes.push(r) },
+    $store: { dispatch() {} },
+  });
+  vmThis.loginForm.password = '123456';
+  const run = async () => { comp.methods.login.call(vmThis); await tick(); };
+  return { comp, vmThis, opens, messages, sent, routes, logins, store, run };
+}
+
+test('login: 返回 10030 → 打开首登弹窗（apiURL / onboardToken），不弹通用错误、不跳转', async () => {
+  const h = loginHarness({ code: 10030, msg: '首次登录请修改密码', data: { onboardToken: 'T' } });
+  await h.run();
+  assert.strictEqual(h.logins.length, 1);
+  assert.strictEqual(h.opens.length, 1);
+  assert.strictEqual(h.opens[0].apiURL, API_URL);
+  assert.strictEqual(h.opens[0].onboardToken, 'T');
+  for (const k of ['onDone', 'onExpired', 'onExit']) assert.strictEqual(typeof h.opens[0][k], 'function', k);
+  assert.strictEqual(h.messages.length, 0);
+  assert.deepStrictEqual(h.routes, []);
+  assert.strictEqual(h.vmThis.loading, false);
+  assert.strictEqual(h.store.token, undefined);
+});
+
+test('login: 首登完成（onDone）→ 清空密码、删除记住的密码、提示成功', async () => {
+  const h = loginHarness({ code: 10030, data: { onboardToken: 'T' } });
+  await h.run();
+  h.opens[0].onDone('X');
+  assert.strictEqual(h.vmThis.loginForm.password, '');
+  assert.ok(!('jizhuPassword' in h.store));
+  assert.strictEqual(h.store.jizhuUsername, 'A123456');
+  assert.strictEqual(h.messages.length, 1);
+  assert.strictEqual(h.messages[0].message, 'X');
+  assert.strictEqual(h.messages[0].type, 'success');
+});
+
+test('login: 未勾选记住密码时 onDone 不动 jizhuPassword', async () => {
+  const h = loginHarness({ code: 10030, data: { onboardToken: 'T' } });
+  h.vmThis.jizhumima = false;
+  await h.run();
+  h.opens[0].onDone('X');
+  assert.strictEqual(h.vmThis.loginForm.password, '');
+  assert.strictEqual(h.store.jizhuPassword, '123456');
+});
+
+test('login: 票据失效（onExpired）→ 清空密码并提示错误；退出（onExit）→ 关闭程序', async () => {
+  const h = loginHarness({ code: 10030, data: { onboardToken: 'T' } });
+  await h.run();
+  h.opens[0].onExpired('Y');
+  assert.strictEqual(h.vmThis.loginForm.password, '');
+  assert.strictEqual(h.messages.length, 1);
+  assert.strictEqual(h.messages[0].message, 'Y');
+  assert.strictEqual(h.messages[0].type, 'error');
+  assert.deepStrictEqual(plain(h.sent), []);
+  h.opens[0].onExit();
+  assert.deepStrictEqual(plain(h.sent), [['close']]);
+});
+
+test('login: 10030 但首登弹窗脚本未加载 → 走原来的错误提示', async () => {
+  const h = loginHarness({ code: 10030, msg: '需首次登录', data: { onboardToken: 'T' } }, { onboard: false });
+  await h.run();
+  assert.strictEqual(h.messages.length, 1);
+  assert.strictEqual(h.messages[0].message, '需首次登录');
+  assert.strictEqual(h.messages[0].type, 'error');
+});
+
+test('login: code 0 / 其他错误码行为不变', async () => {
+  let h = loginHarness({ code: 0, data: { token: 'TOK', userInfo: { username: 'A123456' } } });
+  await h.run();
+  assert.deepStrictEqual(h.routes, ['/index']);
+  assert.strictEqual(h.store.token, 'TOK');
+  assert.strictEqual(h.opens.length, 0);
+  assert.strictEqual(h.messages.length, 0);
+  h = loginHarness({ code: 1, msg: '密码错误' });
+  await h.run();
+  assert.strictEqual(h.opens.length, 0);
+  assert.deepStrictEqual(h.routes, []);
+  assert.strictEqual(h.messages[0].message, '密码错误');
+  assert.strictEqual(h.messages[0].type, 'error');
+});
+
+test('login: 密码校验规则放宽到 6-20 位；忘记密码的提示文案不变', () => {
+  const h = loginHarness({ code: 0, data: {} });
+  const rule = h.comp.data().rules.password[0];
+  assert.strictEqual(rule.min, 6);
+  assert.strictEqual(rule.max, 20);
+  assert.strictEqual(rule.message, '请输入6-20位密码');
+  const src = loginSource();
+  assert.ok(!src.includes('请输入6-12位密码'));
+  assert.strictEqual(src.split('请输入6-12位新密码').length - 1, 1);
 });

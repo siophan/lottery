@@ -324,9 +324,83 @@ const AUTH_REPLACEMENTS = [
   },
 ];
 
+// 响应拦截器的踢下线分支（auth v1 之后）把 10024（账号封禁）也纳入：gate 对使用中被封禁的账号返回 10024，
+// 原逻辑只认 10020/10021/10022，客户端不会退出。同时修正确认回调里 userInfo 为空（JSON.parse(null)）时取 username 抛错
+const KICK_MARK = '/* ds-patch kick v1 */';
+const KICK_REPLACEMENTS = [
+  {
+    find: '    if ((res.code == 10021 || res.code == 10020 || res.code == 10022) && dsOwnApi(response.config && response.config.url)) {',
+    repl: `    ${KICK_MARK}\n` +
+      '    if ((res.code == 10021 || res.code == 10020 || res.code == 10022 || res.code == 10024) && dsOwnApi(response.config && response.config.url)) {',
+    count: 1,
+  },
+  {
+    find: '      } else if (res.code == 10022) {\n        massege = "软件已到期！";\n      }',
+    repl: '      } else if (res.code == 10022) {\n        massege = "软件已到期！";\n      } else if (res.code == 10024) {\n        massege = "账号已封禁！";\n      }',
+    count: 1,
+  },
+  {
+    find: 'ipcRenderer.send("close", userInfo.username);',
+    repl: 'ipcRenderer.send("close", userInfo && userInfo.username);',
+    count: 1,
+  },
+];
+
 const APP_LAYERS = [
   { locator: 'function topRows(params)', layers: [{ mark: APP_MARK, replacements: APP_REPLACEMENTS }] },
-  { locator: 'service.interceptors.request.use(config => {', layers: [{ mark: AUTH_MARK, replacements: AUTH_REPLACEMENTS }] },
+  {
+    locator: 'service.interceptors.request.use(config => {',
+    layers: [{ mark: AUTH_MARK, replacements: AUTH_REPLACEMENTS }, { mark: KICK_MARK, replacements: KICK_REPLACEMENTS }],
+  },
+];
+
+// 登录页 chunk（src/views/login/index.vue）：login() 收到 10030（首次登录需改密并绑定手机）时打开首登弹窗
+// window.dsOnboard（client/account-onboard.js），弹窗脚本未加载时仍走原来的错误提示；
+// 密码校验规则从 6-12 位放宽到 6-20 位（新密码最长 20 位）。忘记密码的「请输入6-12位新密码」不在本层范围内
+const ONBOARD_MARK = '/* ds-patch onboard v1 */';
+const LOGIN_CHUNK = 'chunk-4dffb567.9e3cf4c5.js';
+const LOGIN_REPLACEMENTS = [
+  { // 带上 else 后两行才能与注释掉的 // this.$router.push("/index"); 区分开，命中 1 次
+    find: '              this.$router.push("/index");\n            } else {\n              this.$message({',
+    repl: [
+      `              this.$router.push("/index");`,
+      `            } else if (res.code == 10030 && window.dsOnboard) {`,
+      `              ${ONBOARD_MARK}`,
+      `              window.dsOnboard.open({`,
+      `                apiURL: config_default.a.apiURL,`,
+      `                onboardToken: res.data.onboardToken,`,
+      `                onDone: msg => {`,
+      `                  this.loginForm.password = "";`,
+      `                  if (this.jizhumima) localStorage.removeItem("jizhuPassword");`,
+      `                  this.$message({`,
+      `                    message: msg,`,
+      `                    type: 'success',`,
+      `                    duration: 3000`,
+      `                  });`,
+      `                },`,
+      `                onExpired: msg => {`,
+      `                  this.loginForm.password = "";`,
+      `                  this.$message({`,
+      `                    message: msg,`,
+      `                    type: 'error',`,
+      `                    duration: 3000`,
+      `                  });`,
+      `                },`,
+      `                onExit: () => ipcRenderer.send("close")`,
+      `              });`,
+      `            } else {`,
+      `              this.$message({`,
+    ].join('\n'),
+    count: 1,
+  },
+  {
+    find: 'max: 12,\n          message: "请输入6-12位密码"',
+    repl: 'max: 20,\n          message: "请输入6-20位密码"',
+    count: 1,
+  },
+];
+const LOGIN_LAYERS = [
+  { mark: ONBOARD_MARK, replacements: LOGIN_REPLACEMENTS },
 ];
 
 // 在 locator 所在模块的 eval 字符串编码下，依次叠加尚未打过的层
@@ -359,6 +433,10 @@ function patchApp(raw) {
   return out;
 }
 
+function patchLogin(raw) {
+  return applyLayers(raw, 'jizhumimaClick() {', LOGIN_LAYERS);
+}
+
 function patchTrend(raw) {
   return applyLayers(raw, 'topRows(res, callback) {', TREND_LAYERS);
 }
@@ -369,7 +447,7 @@ function patchChunk(raw, name) {
 }
 
 module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
-  patchTrend, TREND_CHUNK, TREND_LAYERS };
+  patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');
@@ -392,6 +470,15 @@ if (require.main === module) {
   } else {
     fs.writeFileSync(trendFile, trendOut);
     console.log(`patched ${TREND_CHUNK}`);
+  }
+  const loginFile = path.join(dir, LOGIN_CHUNK);
+  const loginRaw = fs.readFileSync(loginFile, 'utf8');
+  const loginOut = patchLogin(loginRaw);
+  if (loginOut === loginRaw) {
+    console.log(`skip    ${LOGIN_CHUNK}（已打过补丁）`);
+  } else {
+    fs.writeFileSync(loginFile, loginOut);
+    console.log(`patched ${LOGIN_CHUNK}`);
   }
   const appFile = path.join(dir, APP_CHUNK);
   const appRaw = fs.readFileSync(appFile, 'utf8');
