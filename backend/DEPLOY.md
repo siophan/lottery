@@ -2,6 +2,19 @@
 
 中间层后端 + 网页管理后台 + 官网落地页的生产部署。单实例（data-ys 会话与管理员会话都在进程/SQLite 内，不可多实例）。
 
+> **正式环境的实际布局与本手册示例不同**（正式机是多个服务共用的机器，nginx 由宝塔面板管理，代码是拷贝而不是 git 仓库）。
+> 下文第 1–8 节是从零部署的通用示例；在正式环境执行任何命令时按下表替换：
+>
+> | 本手册示例 | 正式环境（lottery.jh8.ai） |
+> |---|---|
+> | `/srv/ys/backend` | `/opt/ys-middleware/backend` |
+> | `/etc/ys-backend.env` | `/etc/ys-middleware.env` |
+> | `ys-backend`（systemd 服务） | `ys-middleware` |
+> | `127.0.0.1:8000` | `127.0.0.1:8020` |
+> | `git pull` 更新代码 | 本地 `backend/` 用 rsync 推送（见「上线：账号生命周期、代理号段、积分、头像昵称」） |
+>
+> 只动 `ys-middleware`，不要碰机器上的其他服务。
+
 ## 0. 前置条件
 
 - 一台 Linux 服务器（本手册以 Debian/Ubuntu + systemd 为例），有公网域名 `lottery.jh8.ai` 指向它。
@@ -209,10 +222,7 @@ sudo systemctl restart ys-backend
 在执行 `set-super` 之前没有最高权限者：管理员管理与授权类接口只能用 `X-Admin-Key` 调用
 （`X-Admin-Key` 始终视为最高权限者，拥有全部权限）。
 
-> **回滚警告**：一旦已创建代理（`admins.role='agent'`），**不要直接把代码回退到本版本之前的旧版**。
-> 旧版不认识 `role` 字段，会把所有后台账号都当作完整管理员，代理将因此获得全部后台权限。
-> 需要回滚时，必须先**恢复升级前的数据库备份**，或先删除 `role='agent'` 的 `admins` 行及其
-> `admin_sessions` 会话，再回退代码。
+> **回滚警告**：见下文「回滚」一节。不要只回退代码而保留现库。
 
 ### 升级到含积分的版本
 
@@ -223,31 +233,89 @@ sudo systemctl restart ys-backend
 3. 部署新代码并 `sudo systemctl restart ys-backend`：重启时自动迁移（只加列，不改动任何账号的激活 / 首登状态），
    每日扣减 Worker 随服务启动（每 60 秒一轮）。
 4. **立即批量充值**需要继续使用的账号。少量账号用后台「用户管理」→ 多选 →「批量充值」；
-   全部「已欠费且使用控制正常」的账号可在服务器上用运维密钥按 1000 个一批充值（`POINTS` 为每个账号的分数）：
+   全部「已欠费、使用控制正常、未到期」的账号在服务器上用 `manage.py` 直接充值（不经 HTTP、不需要运维密钥，
+   每 1000 个一批；`30` 为每个账号的分数）：
    ```bash
    cd /srv/ys/backend
    set -a; . /etc/ys-backend.env; set +a
-   POINTS=30 .venv/bin/python - <<'PY'
-   import json, os, urllib.request
-   BASE = "http://127.0.0.1:8000/admin"
-   H = {"X-Admin-Key": os.environ["ADMIN_KEY"], "Content-Type": "application/json"}
-   def call(path, body=None):
-       req = urllib.request.Request(BASE + path, headers=H, method="GET" if body is None else "POST",
-                                    data=None if body is None else json.dumps(body).encode())
-       with urllib.request.urlopen(req) as r:
-           return json.load(r)
-   codes = [u["code"] for u in call("/users")["users"]
-            if u["number_status"] == "arrears" and u["status"] == "active"]
-   for i in range(0, len(codes), 1000):
-       print(call("/points/batch-recharge", {"codes": codes[i:i + 1000], "amount": int(os.environ["POINTS"]),
-                                             "reason": "积分上线初始充值"}))
-   PY
+   .venv/bin/python manage.py recharge-arrears 30 --dry-run    # 先看人数
+   .venv/bin/python manage.py recharge-arrears 30
    ```
-   每批一个事务、全有或全无；输出里的 `batch_id` 可在「积分流水」中按批次核对。
+   每批一个事务、全有或全无；输出里的 `batch_id` 可在「积分流水」中按批次核对。只处理仍为 0 分的账号，中途失败可直接重跑。
 5. 需要体验期时，在后台「体验期设置」开启（只影响此后首次激活的账号）。
 
-> **回滚说明**：旧版本代码不认识积分列，回退后所有账号不再受积分限制（余额与流水保留在库中）。
-> 再次升级时余额从库中原样恢复，停扣期间不追扣。
+> **回滚**：见下文「回滚」一节。
+
+## 上线：账号生命周期、代理号段、积分、头像昵称（正式环境命令）
+
+四部分一次上线。迁移只加表加列：老账号保留状态与到期时间，回填为已激活、已完成首登，**余额全部为 0**；
+现有管理员全部变为普通管理员。以下命令均为正式环境的真实路径。
+
+**上线前检查**
+
+1. 新客户端已打包好，准备先发布（含首登弹窗、10025 提示、低积分提醒、头像昵称）。旧客户端收到 10025 只会显示通用失败提示。
+2. 确认宝塔里代理到 `127.0.0.1:8020` 的站点配置**覆盖**了客户端 IP 头：
+   ```nginx
+   proxy_set_header X-Real-IP $remote_addr;
+   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+   ```
+   缺了 `X-Real-IP` 这一行，客户端可以自填 IP 绕过登录限流；两行都缺，所有人会共用一个计数，任何人失败 30 次就锁住全站登录。
+3. 检查旧版本遗留的异常数据（应输出 `[]`；否则先在后台修正这些账号的状态或到期时间）：
+   ```bash
+   /opt/ys-middleware/backend/.venv/bin/python -c "import sqlite3; print(sqlite3.connect('/opt/ys-middleware/backend/data/app.db').execute(\"SELECT code, typeof(expires_at), status FROM users WHERE typeof(expires_at) NOT IN ('integer','null') OR status NOT IN ('active','disabled','banned')\").fetchall())"
+   ```
+
+**上线步骤**（严格按顺序）
+
+1. 发布新客户端。
+2. 备份代码与数据库（SQLite 在线备份，WAL 一并处理）：
+   ```bash
+   TS=$(date +%Y%m%d-%H%M%S); B=/opt/ys-middleware-backup-$TS; mkdir -p $B
+   tar -C /opt/ys-middleware -czf $B/code.tgz --exclude='backend/.venv' --exclude='backend/data' backend
+   /opt/ys-middleware/backend/.venv/bin/python -c "import sqlite3; s=sqlite3.connect('/opt/ys-middleware/backend/data/app.db'); d=sqlite3.connect('$B/app.db'); s.backup(d); d.close()"
+   ```
+3. 在本地 `backend/` 目录推送代码（不带 `--delete`，不覆盖数据库与安装包）：
+   ```bash
+   rsync -rc --exclude .venv --exclude __pycache__ --exclude data/ --exclude admin-ui/ \
+     --exclude app/static/downloads/ --exclude .pytest_cache --exclude '*.db*' \
+     ./ root@lottery.jh8.ai:/opt/ys-middleware/backend/
+   ```
+4. 重启，启动时自动迁移：`systemctl restart ys-middleware && systemctl status ys-middleware --no-pager`
+   （从此刻到第 6 步完成前，老账号都会收到 10025，尽快执行后面两步。）
+5. 指定最高权限者（必须在 backend 目录并载入环境变量文件，否则会操作另一个空数据库）：
+   ```bash
+   cd /opt/ys-middleware/backend
+   set -a; . /etc/ys-middleware.env; set +a
+   .venv/bin/python manage.py set-super <用户名>
+   ```
+6. 初始充值（同一终端，环境变量已载入）：
+   ```bash
+   .venv/bin/python manage.py recharge-arrears 30 --dry-run
+   .venv/bin/python manage.py recharge-arrears 30
+   ```
+   当前处于「暂停」或已到期的老账号不会被充值；之后恢复使用时在后台单独充值。
+7. 验证：`/admin/` 用最高权限者登录，看到「管理员与授权」「积分流水」菜单；用一个老账号登录客户端，
+   首页左上角显示头像、昵称和积分；`journalctl -u ys-middleware -n 50 --no-pager` 无异常。
+8. 需要体验期时，在后台「体验期设置」开启（只影响此后首次激活的账号）。
+
+## 回滚
+
+**回滚 = 代码与数据库一起恢复到升级前的备份**（上面第 2 步的 `code.tgz` 与 `app.db`）：
+`systemctl stop ys-middleware` → 解压代码 → 用备份的 `app.db` 覆盖 `data/app.db` 并删掉旁边的 `app.db-wal`、`app.db-shm`
+→ `systemctl start ys-middleware`。升级后新产生的数据（新激活、充值、流水）会随之丢失。
+
+**不要只回退代码而保留现库。** 旧版本代码不认识本版新增的字段：
+- 旧版不认识 `role`，会把代理账号当作完整管理员，代理获得全部后台权限。
+- 旧版登录只校验密码、状态和到期时间：所有已分配但未激活的号段账号、被重置密码后未重新首登的账号，
+  都能直接用公开的初始密码 `123456` 登录，并且不受积分限制。
+
+确实只能回退代码、必须保留现库时，**先停服并另做一份现库备份**，在库上执行下面的语句后再启动旧代码：
+```sql
+UPDATE users SET status='disabled' WHERE first_activated_at IS NULL OR onboarded_at IS NULL;
+UPDATE admins SET password_hash='!' WHERE role='agent';     -- 代理密码失效，旧版无法用它登录
+DELETE FROM admin_sessions WHERE admin_id IN (SELECT id FROM admins WHERE role='agent');
+```
+之后重新升级时：代理需由后台重置密码才能登录；被停用的账号要逐个恢复（注意不要恢复未激活的号段账号）。
 
 ## 备份
 

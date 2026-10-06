@@ -47,3 +47,28 @@ def test_admin_set_creates_and_resets():
     manage.main(["admin-set", "root", "pw2"], conn=conn)
     assert db.get_admin_by_username(conn, "root").password_hash != h1
     assert len(conn.execute("SELECT 1 FROM admins").fetchall()) == 1
+
+def test_recharge_arrears_only_tops_up_usable_zero_balance_accounts(capsys):
+    from tests.points_helpers import ledger, points_of, set_points_raw
+    conn = mem()
+    for c in ("A1", "A2", "OFF", "OLD", "RICH"):
+        db.create_user(conn, c, "pw", None)
+    db.create_user(conn, "PEND", "x", None, pending=True)
+    db.update_user(conn, "OFF", status="disabled")
+    db.update_user(conn, "OLD", expires_at=int(time.time()) - 10)
+    set_points_raw(conn, "RICH", 5)
+    assert manage.main(["recharge-arrears", "30", "--dry-run"], conn=conn) == 0
+    assert "accounts to recharge: 2" in capsys.readouterr().out
+    assert points_of(conn, "A1") == 0
+    assert manage.main(["recharge-arrears", "30"], conn=conn) == 0
+    assert [points_of(conn, c) for c in ("A1", "A2", "OFF", "OLD", "RICH", "PEND")] == [30, 30, 0, 0, 5, 0]
+    rows = ledger(conn, kind="grant")
+    assert {(r["holder_id"], r["actor"], r["reason"]) for r in rows} == {
+        ("A1", "manage.py", "积分上线初始充值"), ("A2", "manage.py", "积分上线初始充值")}
+    assert manage.main(["recharge-arrears", "30"], conn=conn) == 0      # 重跑：已无欠费账号
+    assert "accounts to recharge: 0" in capsys.readouterr().out.splitlines()[-1]
+
+def test_recharge_arrears_rejects_bad_amount(capsys):
+    conn = mem()
+    assert manage.main(["recharge-arrears", "0", "--dry-run"], conn=conn) == 1     # 先校验分数，再选账号
+    assert "积分数量需为 1–100000 的整数" in capsys.readouterr().out
