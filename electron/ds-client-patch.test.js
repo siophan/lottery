@@ -628,6 +628,28 @@ test('app chunk: 踢下线回调在 userInfo 为空时不抛错，照常发送 k
   }
 });
 
+test('app chunk: 登录接口（/auth/login）返回 10024 / 10022 / 10020 / 10021 → 原样 resolve，不弹窗、不退出', async () => {
+  for (const url of [API_URL + '/auth/login', API_URL + '/auth/login?x=1', '/auth/login']) {
+    for (const code of [10024, 10022, 10020, 10021]) {
+      const h = requestHarness('TOK', JSON.stringify({ username: 'A123456' }));
+      const res = { code, msg: '账号已封禁，无法登录' };
+      assert.strictEqual(await h.ic.res({ status: 200, data: res, config: { url } }), res, `${url} ${code}`);
+      assert.strictEqual(h.alerts.length, 0, `${url} ${code}`);
+      assert.deepStrictEqual(plain(h.sent), []);
+    }
+  }
+});
+
+test('app chunk: 其他自家接口（含 /auth/login 前缀相似的路径）返回 10024 照旧踢下线', () => {
+  for (const url of [API_URL + '/user/isExpire', API_URL + '/auth/loginLog', API_URL + '/auth/login/x']) {
+    const h = requestHarness('TOK', JSON.stringify({ username: 'A123456' }));
+    assert.strictEqual(h.ic.res({ status: 200, data: { code: 10024 }, config: { url } }), undefined, url);
+    assert.deepStrictEqual(h.alerts, ['账号已封禁！'], url);
+    h.boxes[0].callback('confirm');
+    assert.deepStrictEqual(plain(h.sent), [['kick'], ['close', 'A123456']], url);
+  }
+});
+
 test('app chunk: 原有 1002x 提示文案不变', () => {
   const msgs = {};
   for (const code of [10020, 10021, 10022]) {
@@ -750,6 +772,18 @@ test('login: 10030 但首登弹窗脚本未加载 → 走原来的错误提示',
   assert.strictEqual(h.messages.length, 1);
   assert.strictEqual(h.messages[0].message, '需首次登录');
   assert.strictEqual(h.messages[0].type, 'error');
+});
+
+test('login: 10030 但缺 data / onboardToken → 不打开弹窗，走原来的错误提示', async () => {
+  for (const reply of [{ code: 10030, msg: '需首次登录' }, { code: 10030, msg: '需首次登录', data: {} }, { code: 10030, msg: '需首次登录', data: null }]) {
+    const h = loginHarness(reply);
+    await h.run();
+    assert.strictEqual(h.opens.length, 0, JSON.stringify(reply));
+    assert.strictEqual(h.messages.length, 1);
+    assert.strictEqual(h.messages[0].message, '需首次登录');
+    assert.strictEqual(h.messages[0].type, 'error');
+    assert.strictEqual(h.vmThis.loading, false);
+  }
 });
 
 test('login: code 0 / 其他错误码行为不变', async () => {

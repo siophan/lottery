@@ -325,13 +325,19 @@ const AUTH_REPLACEMENTS = [
 ];
 
 // 响应拦截器的踢下线分支（auth v1 之后）把 10024（账号封禁）也纳入：gate 对使用中被封禁的账号返回 10024，
-// 原逻辑只认 10020/10021/10022，客户端不会退出。同时修正确认回调里 userInfo 为空（JSON.parse(null)）时取 username 抛错
+// 原逻辑只认 10020/10021/10022，客户端不会退出。同时修正确认回调里 userInfo 为空（JSON.parse(null)）时取 username 抛错。
+// 登录接口（路径以 /auth/login 结尾）本身返回的 1002x 不走踢下线分支，原样 resolve，由登录页 login() 提示 res.msg
+// （否则封禁/到期账号登录时会弹窗并直接退出程序，看不到「账号已封禁，无法登录」）
 const KICK_MARK = '/* ds-patch kick v1 */';
 const KICK_REPLACEMENTS = [
   {
     find: '    if ((res.code == 10021 || res.code == 10020 || res.code == 10022) && dsOwnApi(response.config && response.config.url)) {',
-    repl: `    ${KICK_MARK}\n` +
-      '    if ((res.code == 10021 || res.code == 10020 || res.code == 10022 || res.code == 10024) && dsOwnApi(response.config && response.config.url)) {',
+    repl: [
+      `    ${KICK_MARK}`,
+      `    const dsUrl = response.config && response.config.url;`,
+      `    const dsLogin = typeof dsUrl === "string" && /\\/auth\\/login$/.test(dsUrl.split(/[?#]/)[0]);`,
+      `    if ((res.code == 10021 || res.code == 10020 || res.code == 10022 || res.code == 10024) && !dsLogin && dsOwnApi(dsUrl)) {`,
+    ].join('\n'),
     count: 1,
   },
   {
@@ -355,7 +361,7 @@ const APP_LAYERS = [
 ];
 
 // 登录页 chunk（src/views/login/index.vue）：login() 收到 10030（首次登录需改密并绑定手机）时打开首登弹窗
-// window.dsOnboard（client/account-onboard.js），弹窗脚本未加载时仍走原来的错误提示；
+// window.dsOnboard（client/account-onboard.js）；弹窗脚本未加载或响应缺 onboardToken 时仍走原来的错误提示（res.msg）；
 // 密码校验规则从 6-12 位放宽到 6-20 位（新密码最长 20 位）。忘记密码的「请输入6-12位新密码」不在本层范围内
 const ONBOARD_MARK = '/* ds-patch onboard v1 */';
 const LOGIN_CHUNK = 'chunk-4dffb567.9e3cf4c5.js';
@@ -364,7 +370,7 @@ const LOGIN_REPLACEMENTS = [
     find: '              this.$router.push("/index");\n            } else {\n              this.$message({',
     repl: [
       `              this.$router.push("/index");`,
-      `            } else if (res.code == 10030 && window.dsOnboard) {`,
+      `            } else if (res.code == 10030 && res.data && res.data.onboardToken && window.dsOnboard) {`,
       `              ${ONBOARD_MARK}`,
       `              window.dsOnboard.open({`,
       `                apiURL: config_default.a.apiURL,`,
