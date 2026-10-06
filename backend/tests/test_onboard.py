@@ -53,8 +53,9 @@ def form(ticket, **kw):
 def submit(tc, ticket, **kw):
     return tc.post("/api/auth/onboard", json=form(ticket, **kw)).json()
 
-def issue_code(conn, phone=PHONE, code="246810", now=None):
-    db.save_sms_code(conn, phone, "onboard", code, 300, int(time.time()) if now is None else now)
+def issue_code(conn, phone=PHONE, code="246810", now=None, user_id=None):
+    db.save_sms_code(conn, phone, "onboard", code, 300, int(time.time()) if now is None else now,
+                     user_id=user_id)
     return code
 
 # ---------------- password_problem 纯函数 ----------------
@@ -441,3 +442,48 @@ def test_lifespan_closes_sms_client_even_if_collector_stop_raises():
         with TestClient(app):
             pass
     assert client.is_closed
+
+# ---------------- 重置密码后重新验证已绑定手机号 ----------------
+
+BOUND = "13900005678"
+BOUND_MSG = {"code": 1, "msg": "请使用已绑定的手机号（尾号5678）验证"}
+
+def bound_user(conn):
+    """已绑定手机号、被管理员重置密码后需重新首登的账号。"""
+    u = fresh_user(conn)
+    conn.execute("UPDATE users SET phone=? WHERE id=?", (BOUND, u.id)); conn.commit()
+    return db.get_user_by_id(conn, u.id)
+
+def test_sms_bound_phone_must_match():
+    conn, tc, sms = build()
+    t = ticket_for(conn, bound_user(conn))
+    assert send_sms(tc, t, PHONE) == BOUND_MSG
+    assert sms.sent == []
+    assert conn.execute("SELECT COUNT(*) FROM sms_send_log").fetchone()[0] == 0
+    assert send_sms(tc, t, BOUND)["code"] == 0
+
+def test_onboard_bound_phone_must_match_and_code_not_consumed():
+    conn, tc, sms = build()
+    u = bound_user(conn)
+    t = ticket_for(conn, u)
+    code = issue_code(conn, phone=PHONE, user_id=u.id)
+    assert submit(tc, t, phone=PHONE, smsCode=code) == BOUND_MSG
+    assert conn.execute("SELECT COUNT(*) FROM sms_codes").fetchone()[0] == 1
+    after = db.get_user_by_id(conn, u.id)
+    assert after.onboarded_at is None and after.phone == BOUND
+
+def test_onboard_bound_phone_success_keeps_phone():
+    conn, tc, sms = build()
+    u = bound_user(conn)
+    t = ticket_for(conn, u)
+    assert send_sms(tc, t, BOUND)["code"] == 0
+    _, code = sms.sent[0]
+    assert submit(tc, t, phone=BOUND, smsCode=code)["code"] == 0
+    after = db.get_user_by_id(conn, u.id)
+    assert after.phone == BOUND and after.onboarded_at is not None
+
+def test_onboard_bound_phone_check_comes_after_format_check():
+    conn, tc, sms = build()
+    t = ticket_for(conn, bound_user(conn))
+    assert send_sms(tc, t, "123") == {"code": 1, "msg": "手机号格式错误"}
+    assert submit(tc, t, phone="123") == {"code": 1, "msg": "手机号格式错误"}

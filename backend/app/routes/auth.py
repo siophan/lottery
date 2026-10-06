@@ -40,6 +40,13 @@ def _fail(msg: str) -> JSONResponse:
     return JSONResponse({"code": 1, "msg": msg})
 
 
+def _bound_phone_problem(user, phone: str) -> JSONResponse | None:
+    """重置密码后重新首登：已绑定手机号的账号只能用原号码验证（spec 待确认 #6）。"""
+    if user.phone and phone != user.phone:
+        return _fail(f"请使用已绑定的手机号（尾号{user.phone[-4:]}）验证")
+    return None
+
+
 async def _json_dict(request: Request) -> dict:
     # 请求体不是 JSON 对象时按空处理，由后续校验统一返回业务错误
     try:
@@ -129,6 +136,9 @@ async def onboard_sms(request: Request):
     phone = _str(payload, "phone")
     if not PHONE_RE.fullmatch(phone):
         return _fail("手机号格式错误")
+    blocked = _bound_phone_problem(user, phone)
+    if blocked is not None:
+        return blocked
     last = db.last_sms_sent_at(conn, phone)
     if last is not None and now - last < SMS_COOLDOWN:
         return _fail("验证码发送过于频繁，请稍后再试")
@@ -171,6 +181,9 @@ async def onboard(request: Request):
     phone = _str(payload, "phone")
     if not PHONE_RE.fullmatch(phone):
         return _fail("手机号格式错误")
+    blocked = _bound_phone_problem(user, phone)
+    if blocked is not None:
+        return blocked
     # 前面都通过才校验（消耗）验证码，避免无谓的错误计数
     result = db.check_sms_code(conn, phone, SMS_PURPOSE, _str(payload, "smsCode"), now)
     if result != "ok":
