@@ -20,6 +20,12 @@ class Settings:
     admin_cookie_secure: bool = True   # 生产必开；本地 http 调试置 false
     admin_cookie_name: str = "admin_session"
     collector_enabled: bool = True     # 多数据源采集；测试/临时排障可置 false
+    # 短信服务（首登验证码）：log 仅打印到日志；aliyun 走阿里云 Dysmsapi
+    sms_provider: str = "log"
+    sms_aliyun_access_key_id: str = ""
+    sms_aliyun_access_key_secret: str = ""
+    sms_aliyun_sign_name: str = ""
+    sms_aliyun_template_code: str = ""
 
 def load_settings(env: Mapping[str, str]) -> Settings:
     def flag(v: str) -> bool:
@@ -41,4 +47,9 @@ def load_settings(env: Mapping[str, str]) -> Settings:
         admin_cookie_secure=flag(env.get("ADMIN_COOKIE_SECURE", "true")),
         admin_cookie_name=env.get("ADMIN_COOKIE_NAME", "admin_session"),
         collector_enabled=flag(env.get("COLLECTOR_ENABLED", "true")),
+        sms_provider=env.get("SMS_PROVIDER", "log").strip().lower(),
+        sms_aliyun_access_key_id=env.get("SMS_ALIYUN_ACCESS_KEY_ID", ""),
+        sms_aliyun_access_key_secret=env.get("SMS_ALIYUN_ACCESS_KEY_SECRET", ""),
+        sms_aliyun_sign_name=env.get("SMS_ALIYUN_SIGN_NAME", ""),
+        sms_aliyun_template_code=env.get("SMS_ALIYUN_TEMPLATE_CODE", ""),
     )

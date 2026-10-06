@@ -61,3 +61,25 @@ def test_collector_enabled_flag():
     from app.config import load_settings
     assert load_settings({}).collector_enabled is True
     assert load_settings({"COLLECTOR_ENABLED": "false"}).collector_enabled is False
+
+def test_sms_defaults():
+    s = load_settings({})
+    assert s.sms_provider == "log"
+    assert s.sms_aliyun_access_key_id == ""
+    assert s.sms_aliyun_access_key_secret == ""
+    assert s.sms_aliyun_sign_name == ""
+    assert s.sms_aliyun_template_code == ""
+
+def test_sms_env_override():
+    s = load_settings({
+        "SMS_PROVIDER": "aliyun",
+        "SMS_ALIYUN_ACCESS_KEY_ID": "id1",
+        "SMS_ALIYUN_ACCESS_KEY_SECRET": "sec1",
+        "SMS_ALIYUN_SIGN_NAME": "签名",
+        "SMS_ALIYUN_TEMPLATE_CODE": "SMS_1",
+    })
+    assert s.sms_provider == "aliyun"
+    assert s.sms_aliyun_access_key_id == "id1"
+    assert s.sms_aliyun_access_key_secret == "sec1"
+    assert s.sms_aliyun_sign_name == "签名"
+    assert s.sms_aliyun_template_code == "SMS_1"
