@@ -19,7 +19,7 @@ def run_charge_cycle(conn, now: int) -> dict:
     started  可计费但 next_charge_at 为空（刚恢复）→ 计费起点 = now，下次 = now + 24h，不扣
     reset    逾期 ≥ 24h（Worker 停机错过周期）→ 按重新激活处理，不扣
     charged  到期且逾期不足 24h → 扣 1 分（cycle_key = 该周期的 next_charge_at），下次 += 24h
-    suspended 本轮扣到 0 的账号数（写审计 points.suspended；下一轮因不可计费被停扣）"""
+    suspended 本轮扣到 0 的账号数（写审计 points.suspended；同事务内即停扣，充值后由下一轮重新起算）"""
     p = {"now": now, "period": PERIOD}
     res = {"stopped": 0, "started": 0, "reset": 0, "charged": 0, "suspended": 0}
     begin_write(conn)
@@ -49,6 +49,7 @@ def run_charge_cycle(conn, now: int) -> dict:
                 res["charged"] += 1
                 if after == 0:
                     res["suspended"] += 1
+                    continue                    # 已由 note_user_transition_nocommit 停扣（next_charge_at 置空），不再推进
             conn.execute("UPDATE users SET next_charge_at=? WHERE code=?", (cycle + PERIOD, code))
         conn.commit()
     except Exception:

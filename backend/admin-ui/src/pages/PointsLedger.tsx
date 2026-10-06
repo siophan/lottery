@@ -8,21 +8,18 @@ import { fmtDateTime, HOLDER_TYPE_LABEL, POINTS_KIND_LABEL, toValueEnum } from '
 type LedgerSearch = LedgerRow & { user_code?: string; agent_filter?: string }
 
 // 积分流水：后台人员看全部；代理只看本人账户的（本人作为持有方的行；不含对方 / 名下账号的行，避免泄露他人余额；后端按身份限定）。
-// 筛选：账号编号或代理（二选一，填了账号编号优先）、类型、时间范围；服务端分页。
+// 筛选：账号编号或代理（二选一，填了账号编号优先；仅后台人员）、类型、时间范围；服务端分页。
 export default function PointsLedger({ me }: { me: Me }) {
   const isAgent = me.role === 'agent'
   const [agentEnum, setAgentEnum] = useState<Record<string, { text: string }>>({})
 
   useEffect(() => {
-    // 后台人员：全部代理；代理：本人 + 直属下级
+    // 代理只能看到本人持有的流水，不提供账号 / 代理筛选，无需加载代理列表
+    if (isAgent) return
     listAgents()
-      .then((rows) => {
-        const opts = rows.map((a) => [String(a.id), { text: a.name }] as const)
-        if (isAgent && me.agent) opts.unshift([String(me.agent.id), { text: `${me.agent.name}（本人）` }])
-        setAgentEnum(Object.fromEntries(opts))
-      })
+      .then((rows) => setAgentEnum(Object.fromEntries(rows.map((a) => [String(a.id), { text: a.name }]))))
       .catch(() => setAgentEnum({}))
-  }, [isAgent, me.agent])
+  }, [isAgent])
 
   const party = (type: string | null, name: string | null, id: string | null) =>
     type ? `${HOLDER_TYPE_LABEL[type] ?? type} ${name ?? id ?? ''}` : '—'
@@ -35,13 +32,20 @@ export default function PointsLedger({ me }: { me: Me }) {
       width: 160,
       render: (_, r) => fmtDateTime(r.created_at),
     },
-    { title: '账号编号', dataIndex: 'user_code', hideInTable: true, fieldProps: { placeholder: '按账号编号筛选' } },
+    {
+      title: '账号编号',
+      dataIndex: 'user_code',
+      hideInTable: true,
+      hideInSearch: isAgent,
+      fieldProps: { placeholder: '按账号编号筛选' },
+    },
     {
       title: '代理',
       dataIndex: 'agent_filter',
       valueType: 'select',
       valueEnum: agentEnum,
       hideInTable: true,
+      hideInSearch: isAgent,
       fieldProps: { showSearch: true },
     },
     {

@@ -112,10 +112,21 @@ def test_charge_to_zero_suspends_then_stops():
     assert run(conn, NOW + DAY)["suspended"] == 1
     [e] = audit(conn, "points.suspended")
     assert (e["actor_type"], e["target"]) == ("system", "P1")
-    assert run(conn, NOW + DAY + 60)["stopped"] == 1
-    assert user(conn, "P1").next_charge_at is None
+    assert user(conn, "P1").next_charge_at is None                  # 扣到 0 的同一轮即停扣
+    assert run(conn, NOW + DAY + 60)["stopped"] == 0
     assert run(conn, NOW + 5 * DAY) == {"stopped": 0, "started": 0, "reset": 0, "charged": 0, "suspended": 0}
     assert points_of(conn, "P1") == 0                               # 不累计、不追扣
+
+def test_worker_charge_to_zero_then_quick_recharge_restarts_cycle():
+    conn, _ = build_app()
+    activated_user(conn, "U1", 1)
+    run(conn, NOW)                                                  # started：下次 NOW+DAY
+    assert run(conn, NOW + DAY)["suspended"] == 1
+    db_points.staff_adjust(conn, "user", "U1", "grant", 3, None, actor_type="admin", actor="root", now=NOW + DAY + 10)
+    assert run(conn, NOW + DAY + 30)["started"] == 1
+    assert user(conn, "U1").next_charge_at == NOW + 2 * DAY + 30
+    assert run(conn, NOW + 2 * DAY + 5)["charged"] == 0             # 旧周期不再生效
+    assert points_of(conn, "U1") == 3
 
 def test_recharge_resumes_billing_from_the_next_round():
     conn, _ = build_app()
