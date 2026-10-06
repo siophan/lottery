@@ -58,11 +58,14 @@ def apply_delta_nocommit(conn, holder_type: str, holder_id: str, delta: int, kin
 def note_user_transition_nocommit(conn, code: str, before: int, after: int, *, actor_type: str,
                                   actor: str, now: int) -> None:
     """已激活账号余额 >0 → 0 写审计 points.suspended；0 → >0 写 points.resumed（积分暂停由余额推导，不另存状态）。
-    未激活账号（预充值）不写。只解除积分暂停，不改变 status。"""
+    未激活账号（预充值）不写。只解除积分暂停，不改变 status。
+    >0 → 0 时同事务清空 next_charge_at（保留 charge_anchor_at）：停扣立即生效，
+    即使 Worker 下一轮前就被补充积分，也会从恢复后的第一轮重新起算 24 小时，而不是沿用旧周期。"""
     r = conn.execute("SELECT first_activated_at FROM users WHERE code=?", (code.upper(),)).fetchone()
     if r is None or r["first_activated_at"] is None:
         return
     if before > 0 and after == 0:
+        conn.execute("UPDATE users SET next_charge_at=NULL WHERE code=?", (code.upper(),))
         db._audit_nocommit(conn, actor_type, actor, "points.suspended", code.upper(), {}, now)
     elif before == 0 and after > 0:
         db._audit_nocommit(conn, actor_type, actor, "points.resumed", code.upper(), {"balance": after}, now)
@@ -286,12 +289,13 @@ def batch_recharge(conn, codes, amount, reason, *, actor_type: str, actor: str, 
 def list_ledger(conn, limit: int, offset: int, *, holder_type: str | None = None, holder_id: str | None = None,
                 kind: str | None = None, since: int | None = None, until: int | None = None,
                 agent_id: int | None = None, hide_staff: bool = False) -> tuple[list[dict], int]:
-    """流水列表（新→旧）。agent_id 不为 None 时只返回该代理作为持有方或对方的流水（代理视图）；
+    """流水列表（新→旧）。agent_id 不为 None 时只返回该代理作为持有方的流水（代理视图）；
+    作为对方出现的行不返回（否则会泄露他人的余额变化）——转账本来就成对记账，下级仍能看到自己的 transfer_in。
     hide_staff=True 时后台人员的操作者名显示为「后台」。since / until 为 created_at 的闭区间。"""
     where, args = [], []
     if agent_id is not None:
-        where.append("((l.holder_type='agent' AND l.holder_id=?) OR (l.counterparty_type='agent' AND l.counterparty_id=?))")
-        args += [str(agent_id), str(agent_id)]
+        where.append("(l.holder_type='agent' AND l.holder_id=?)")
+        args.append(str(agent_id))
     if holder_type is not None:
         where.append("l.holder_type=?"); args.append(holder_type)
     if holder_id is not None:

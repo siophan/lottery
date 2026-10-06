@@ -237,16 +237,29 @@ def test_list_ledger_filters_and_agent_scope():
     rows, total = db_points.list_ledger(conn, 50, 0)
     assert total == 6 and rows[0]["holder_id"] == "U9"          # 新 → 旧
     rows, total = db_points.list_ledger(conn, 50, 0, agent_id=a, hide_staff=True)
-    assert total == 5 and all(r["holder_id"] != "U9" for r in rows)
+    # 代理视图只含本人作为持有方的流水：grant、transfer_out、recharge 的代理侧（不含用户侧入账行）
+    assert total == 3 and all(r["holder_type"] == "agent" and r["holder_id"] == str(a) for r in rows)
     grant = [r for r in rows if r["kind"] == "grant"][0]
     assert (grant["holder_name"], grant["actor"]) == ("A", "后台")
-    tin = [r for r in rows if r["kind"] == "transfer_in" and r["holder_type"] == "agent"][0]
-    assert (tin["holder_name"], tin["counterparty_name"]) == ("B", "A")
     rows, total = db_points.list_ledger(conn, 50, 0, agent_id=b)
-    assert total == 2
+    [tin] = rows
+    assert total == 1 and (tin["kind"], tin["holder_name"], tin["counterparty_name"]) == ("transfer_in", "B", "A")
     assert db_points.list_ledger(conn, 50, 0, holder_type="user", holder_id="1000000")[1] == 1
     assert db_points.list_ledger(conn, 50, 0, kind="transfer_out")[1] == 2
     assert db_points.list_ledger(conn, 50, 0, since=NOW + 10, until=NOW + 20)[1] == 4
+
+def test_agent_ledger_view_never_shows_other_agents_rows_or_balances():
+    conn, _ = build_app()
+    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="junior", parent=a)
+    set_agent_points_raw(conn, a, 50000)
+    db_points.transfer_to_agent(conn, a, b, 10, actor="A", now=NOW + 10)
+    rows, total = db_points.list_ledger(conn, 50, 0, agent_id=b)
+    assert total == 1 and rows[0]["kind"] == "transfer_in" and rows[0]["holder_id"] == str(b)
+    assert all(r["kind"] != "transfer_out" for r in rows)
+    assert 50000 not in [r["balance_before"] for r in rows] and 49990 not in [r["balance_after"] for r in rows]
+    assert (rows[0]["balance_before"], rows[0]["balance_after"]) == (0, 10)    # 只看得到自己的余额
+    rows, total = db_points.list_ledger(conn, 50, 0, agent_id=a)             # 上级看自己的转出行
+    assert total == 1 and (rows[0]["kind"], rows[0]["balance_before"], rows[0]["balance_after"]) == ("transfer_out", 50000, 49990)
 
 # ---------------- 路由与权限 ----------------
 
@@ -304,7 +317,7 @@ def test_routes_batch_and_ledger_scope():
     d = tc.get("/admin/points/ledger").json()
     assert d["total"] == 6 and len(d["ledger"]) == 6
     d = ag.get("/admin/points/ledger").json()
-    assert d["total"] == 4 and all("U9" not in (x["holder_id"], x["counterparty_id"]) for x in d["ledger"])
+    assert d["total"] == 2 and all((x["holder_type"], x["holder_id"]) == ("agent", str(a)) for x in d["ledger"])
     assert tc.get("/admin/points/ledger?holder_type=user&holder_id=u9").json()["total"] == 1
     assert tc.get("/admin/points/ledger?kind=grant&limit=1").json()["total"] == 2
     for qs in ("kind=bogus", "holder_type=x", "holder_id=U9", "since=abc", "offset=-1", f"until={2 ** 63}"):

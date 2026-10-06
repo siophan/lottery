@@ -7,7 +7,7 @@ import { fmtDateTime, HOLDER_TYPE_LABEL, POINTS_KIND_LABEL, toValueEnum } from '
 // 搜索表单里只用于筛选的两个虚拟字段（不对应 LedgerRow 的列）
 type LedgerSearch = LedgerRow & { user_code?: string; agent_filter?: string }
 
-// 积分流水：后台人员看全部；代理只看与本人有关的（后端按身份限定）。
+// 积分流水：后台人员看全部；代理只看本人账户的（本人作为持有方的行；不含对方 / 名下账号的行，避免泄露他人余额；后端按身份限定）。
 // 筛选：账号编号或代理（二选一，填了账号编号优先）、类型、时间范围；服务端分页。
 export default function PointsLedger({ me }: { me: Me }) {
   const isAgent = me.role === 'agent'
@@ -99,7 +99,7 @@ export default function PointsLedger({ me }: { me: Me }) {
       search={{ labelWidth: 'auto' }}
       options={{ reload: true, density: false, setting: false }}
       pagination={{ pageSize: 20, showSizeChanger: true }}
-      headerTitle={isAgent ? '与我有关的积分流水' : undefined}
+      headerTitle={isAgent ? '我的积分流水' : undefined}
       request={async (params) => {
         const current = params.current ?? 1
         const pageSize = params.pageSize ?? 20
