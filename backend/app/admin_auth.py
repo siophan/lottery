@@ -92,8 +92,9 @@ def current_principal(request: Request) -> Principal | None:
     return None
 
 def require_role(*roles: str):
-    """FastAPI 依赖工厂：当前身份不在 roles 内（含未登录）→ AdminDenied（403）。"""
-    def dep(request: Request) -> Principal:
+    """FastAPI 依赖工厂：当前身份不在 roles 内（含未登录）→ AdminDenied（403）。
+    必须是 async：同步依赖会被放进线程池，与事件循环线程并发使用同一个 SQLite 连接会串号。"""
+    async def dep(request: Request) -> Principal:
         p = current_principal(request)
         if p is None or p.role not in roles:
             raise AdminDenied()
