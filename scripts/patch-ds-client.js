@@ -352,11 +352,34 @@ const KICK_REPLACEMENTS = [
   },
 ];
 
+// 积分（子项目 C）：自家接口返回 10025（无积分）同样踢下线，提示与后端文案一致。登录接口本身的 10025 不踢
+// （kick v1 的 dsLogin 判断），由登录页 login() 的错误分支提示 res.msg
+const KICK2_MARK = '/* ds-patch kick v2 */';
+const POINTS_EMPTY_MSG = '无积分，无权操作，请充值积分后自动恢复使用！';
+const KICK2_REPLACEMENTS = [
+  {
+    find: '    if ((res.code == 10021 || res.code == 10020 || res.code == 10022 || res.code == 10024) && !dsLogin && dsOwnApi(dsUrl)) {',
+    repl: `    ${KICK2_MARK}\n` +
+      '    if ((res.code == 10021 || res.code == 10020 || res.code == 10022 || res.code == 10024 || res.code == 10025) && !dsLogin && dsOwnApi(dsUrl)) {',
+    count: 1,
+  },
+  {
+    find: '      } else if (res.code == 10024) {\n        massege = "账号已封禁！";\n      }',
+    repl: '      } else if (res.code == 10024) {\n        massege = "账号已封禁！";\n      } else if (res.code == 10025) {\n' +
+      `        massege = "${POINTS_EMPTY_MSG}";\n      }`,
+    count: 1,
+  },
+];
+
 const APP_LAYERS = [
   { locator: 'function topRows(params)', layers: [{ mark: APP_MARK, replacements: APP_REPLACEMENTS }] },
   {
     locator: 'service.interceptors.request.use(config => {',
-    layers: [{ mark: AUTH_MARK, replacements: AUTH_REPLACEMENTS }, { mark: KICK_MARK, replacements: KICK_REPLACEMENTS }],
+    layers: [
+      { mark: AUTH_MARK, replacements: AUTH_REPLACEMENTS },
+      { mark: KICK_MARK, replacements: KICK_REPLACEMENTS },
+      { mark: KICK2_MARK, replacements: KICK2_REPLACEMENTS },
+    ],
   },
 ];
 
@@ -409,8 +432,34 @@ const LOGIN_REPLACEMENTS = [
     count: 1,
   },
 ];
+// 积分（子项目 C）：登录成功且 0 < data.points < 7 时，跳转首页后弹出低积分提醒（可关闭，继续使用）。
+// 路由是 hash 模式，MessageBox 默认 closeOnHashChange 会被跳转立即关掉，必须关闭该选项；
+// 点右上角关闭时 $alert 的 Promise 会 reject('close')，补 .catch 避免未处理的拒绝
+const POINTS_MARK = '/* ds-patch points v1 */';
+const LOW_POINTS = 7;
+const LOW_POINTS_MSG = '您的积分已不足，请尽快联系客服增加积分！';
+const POINTS_REPLACEMENTS = [
+  {
+    find: '              this.$router.push("/index");\n            } else if (res.code == 10030',
+    repl: [
+      `              this.$router.push("/index");`,
+      `              ${POINTS_MARK}`,
+      `              const dsPoints = res.data && res.data.points;`,
+      `              if (typeof dsPoints == "number" && dsPoints > 0 && dsPoints < ${LOW_POINTS} && this.$alert) {`,
+      `                Promise.resolve(this.$alert("${LOW_POINTS_MSG}", "提示", {`,
+      `                  confirmButtonText: "确定",`,
+      `                  showClose: true,`,
+      `                  closeOnHashChange: false`,
+      `                })).catch(() => {});`,
+      `              }`,
+      `            } else if (res.code == 10030`,
+    ].join('\n'),
+    count: 1,
+  },
+];
 const LOGIN_LAYERS = [
   { mark: ONBOARD_MARK, replacements: LOGIN_REPLACEMENTS },
+  { mark: POINTS_MARK, replacements: POINTS_REPLACEMENTS },
 ];
 
 // 在 locator 所在模块的 eval 字符串编码下，依次叠加尚未打过的层
@@ -457,7 +506,8 @@ function patchChunk(raw, name) {
 }
 
 module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
-  patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK };
+  patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
+  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');

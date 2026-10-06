@@ -4,7 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS, AUTH_MARK, KICK_MARK,
-  patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK } = require('../scripts/patch-ds-client.js');
+  patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
+  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG } = require('../scripts/patch-ds-client.js');
 const dsSources = require('../client/ds-sources.js');
 
 const DIR = path.join(__dirname, '..', 'client', 'js');
@@ -688,6 +689,7 @@ function loginHarness(reply, { onboard = true } = {}) {
   const sent = [];
   const routes = [];
   const logins = [];
+  const alerts = [];  // this.$alert 调用参数；返回 reject('close') 的 Promise，模拟用户点右上角关闭
   const store = { jizhumima: '1', jizhuUsername: 'A123456', jizhuPassword: '123456' };
   const comp = loadComponent(loginSource(), {
     modules: {
@@ -712,10 +714,11 @@ function loginHarness(reply, { onboard = true } = {}) {
     $message: (m) => messages.push(m),
     $router: { push: (r) => routes.push(r) },
     $store: { dispatch() {} },
+    $alert: (...a) => { alerts.push(a); return Promise.reject('close'); },
   });
   vmThis.loginForm.password = '123456';
   const run = async () => { comp.methods.login.call(vmThis); await tick(); };
-  return { comp, vmThis, opens, messages, sent, routes, logins, store, run };
+  return { comp, vmThis, opens, messages, sent, routes, logins, store, run, alerts };
 }
 
 test('login: 返回 10030 → 打开首登弹窗（apiURL / onboardToken），不弹通用错误、不跳转', async () => {
@@ -826,4 +829,83 @@ test('login: 登录失败提示停留 3 秒（10023/10024/10022 等文案较长�
   const login = src.slice(src.indexOf('    login() {'));
   assert.ok(!login.slice(0, login.indexOf('\n    }\n')).includes('duration: 800'));
   assert.ok(src.slice(src.indexOf('    forgotPwd() {'), src.indexOf('    login() {')).includes('duration: 800'));
+});
+
+// ---- 积分（子项目 C）：kick v2（10025 踢下线）、points v1（登录后低积分提醒） ----
+test('app chunk: request 模块含 kick v2 补丁，源码语法有效', () => {
+  const src = appModuleSource(fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8'), REQ_LOCATOR);
+  assert.ok(src.includes(KICK2_MARK));
+  assert.strictEqual(POINTS_EMPTY_MSG, '无积分，无权操作，请充值积分后自动恢复使用！');
+  new vm.Script(src);
+});
+
+test('app chunk: 自家接口返回 10025 → 弹积分提示并在确认后退出；登录接口 / 第三方的 10025 原样 resolve', async () => {
+  let h = requestHarness('TOK', JSON.stringify({ username: 'A123456' }));
+  assert.strictEqual(h.ic.res({ status: 200, data: { code: 10025, msg: 'x' }, config: { url: API_URL + '/user/isExpire' } }), undefined);
+  assert.deepStrictEqual(h.alerts, [POINTS_EMPTY_MSG]);
+  h.boxes[0].callback('confirm');
+  assert.deepStrictEqual(plain(h.sent), [['kick'], ['close', 'A123456']]);
+  assert.strictEqual(h.store.token, undefined);
+  for (const url of [API_URL + '/auth/login', 'https://qqtj.example.com/draw']) {
+    h = requestHarness();
+    const res = { code: 10025, msg: POINTS_EMPTY_MSG };
+    assert.strictEqual(await h.ic.res({ status: 200, data: res, config: { url } }), res, url);
+    assert.strictEqual(h.alerts.length, 0, url);
+  }
+});
+
+test('app chunk: kick v2 不改变 10020/10021/10022/10024 的提示', () => {
+  const msgs = {};
+  for (const code of [10020, 10021, 10022, 10024]) {
+    const h = requestHarness();
+    h.ic.res({ status: 200, data: { code }, config: { url: API_URL + '/x' } });
+    msgs[code] = h.alerts[0];
+  }
+  assert.deepStrictEqual(msgs, { 10020: '软件未登录登录！', 10021: '软件已在其他地方登录！', 10022: '软件已到期！', 10024: '账号已封禁！' });
+});
+
+test('login chunk: 含 points v1 补丁', () => {
+  const src = loginSource();
+  assert.ok(src.includes(POINTS_MARK));
+  assert.ok(src.includes('closeOnHashChange: false'));
+  assert.strictEqual(LOW_POINTS_MSG, '您的积分已不足，请尽快联系客服增加积分！');
+});
+
+test('login: 0 < points < 7 → 照常进入首页，并弹出可关闭的低积分提醒（关闭不产生未处理的拒绝）', async () => {
+  for (const points of [1, 6]) {
+    const h = loginHarness({ code: 0, data: { token: 'TOK', userInfo: { username: 'A123456' }, points } });
+    await h.run();
+    await tick();
+    assert.deepStrictEqual(h.routes, ['/index']);
+    assert.strictEqual(h.store.token, 'TOK');
+    assert.strictEqual(h.alerts.length, 1, String(points));
+    const [msg, title, opts] = h.alerts[0];
+    assert.strictEqual(msg, LOW_POINTS_MSG);
+    assert.strictEqual(title, '提示');
+    assert.strictEqual(opts.showClose, true);
+    assert.strictEqual(opts.closeOnHashChange, false);
+    assert.strictEqual(h.messages.length, 0);
+  }
+});
+
+test('login: points 为 0 / ≥ 7 / 缺失 / 非数字 → 不弹低积分提醒', async () => {
+  for (const data of [{ points: 0 }, { points: 7 }, { points: 100 }, {}, { points: '3' }]) {
+    const h = loginHarness({ code: 0, data: Object.assign({ token: 'TOK', userInfo: {} }, data) });
+    await h.run();
+    assert.deepStrictEqual(h.routes, ['/index'], JSON.stringify(data));
+    assert.strictEqual(h.alerts.length, 0, JSON.stringify(data));
+  }
+});
+
+test('login: 返回 10025 → 提示后端文案 3 秒，不跳转、不存 token、不弹提醒框', async () => {
+  const h = loginHarness({ code: 10025, msg: POINTS_EMPTY_MSG });
+  await h.run();
+  assert.strictEqual(h.messages.length, 1);
+  assert.strictEqual(h.messages[0].message, POINTS_EMPTY_MSG);
+  assert.strictEqual(h.messages[0].type, 'error');
+  assert.strictEqual(h.messages[0].duration, 3000);
+  assert.deepStrictEqual(h.routes, []);
+  assert.strictEqual(h.store.token, undefined);
+  assert.strictEqual(h.alerts.length, 0);
+  assert.strictEqual(h.opens.length, 0);
 });
