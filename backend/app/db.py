@@ -1,4 +1,7 @@
+import hashlib
+import hmac
 import json
+import secrets
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -6,6 +9,9 @@ from .adapters import Draw
 from .security import hash_password, new_token
 
 _UNSET = object()
+
+INITIAL_PASSWORD = "123456"          # 后台激活 / 重置后的初始密码
+AUDIT_RETENTION_SEC = 3 * 365 * 86400  # 审计日志保留三年
 
 @dataclass
 class User:
@@ -16,6 +22,10 @@ class User:
     expires_at: int | None
     status: str
     created_at: int
+    first_activated_at: int | None = None   # 首次激活时间；None = 待激活
+    activated_at: int | None = None         # 当前有效激活时间
+    phone: str | None = None                # 绑定的实名手机号（明文，对外一律脱敏）
+    onboarded_at: int | None = None         # 完成首登改密+绑定手机号的时间；None = 未完成
 
 @dataclass
 class Session:
@@ -149,33 +159,142 @@ def init_db(conn: sqlite3.Connection) -> None:
           PRIMARY KEY(source_id, lottery_code, expect)
         );
         CREATE INDEX IF NOT EXISTS idx_draws_time ON draws(source_id, lottery_code, open_time);
+        CREATE TABLE IF NOT EXISTS onboard_tickets(
+          token TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sms_codes(
+          phone TEXT NOT NULL,
+          purpose TEXT NOT NULL,
+          code_hash TEXT NOT NULL,
+          salt TEXT NOT NULL,
+          expires_at INTEGER NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          sent_at INTEGER NOT NULL,
+          PRIMARY KEY(phone, purpose)
+        );
+        CREATE TABLE IF NOT EXISTS sms_send_log(
+          phone TEXT NOT NULL,
+          sent_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sms_send_log ON sms_send_log(phone, sent_at);
+        CREATE TABLE IF NOT EXISTS audit_logs(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          actor_type TEXT NOT NULL,
+          actor TEXT NOT NULL,
+          action TEXT NOT NULL,
+          target TEXT,
+          detail_json TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_logs(target, id);
         """
     )
     conn.commit()
+    _migrate_users(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
                                base_url=s["base_url"], headers={}, interval_sec=5,
                                enabled=True, lotteries=s["lotteries"])
 
+def _migrate_users(conn) -> None:
+    # 幂等迁移：缺列才 ADD COLUMN；仅在本次新加列时回填存量账号（视为已激活且已完成首登）
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    added = False
+    for name, ddl in (("first_activated_at", "INTEGER"), ("activated_at", "INTEGER"),
+                      ("phone", "TEXT"), ("onboarded_at", "INTEGER")):
+        if name not in cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
+            added = True
+    if added:
+        conn.execute("UPDATE users SET first_activated_at=created_at,"
+                     " activated_at=created_at, onboarded_at=created_at")
+    conn.commit()
+
+def mask_phone(phone: str | None) -> str | None:
+    if phone is None:
+        return None
+    return phone[:3] + "****" + phone[-4:]
+
 def _row_to_user(r: sqlite3.Row) -> User:
     return User(r["id"], r["code"], r["password_hash"], r["salt"],
-                r["expires_at"], r["status"], r["created_at"])
+                r["expires_at"], r["status"], r["created_at"],
+                r["first_activated_at"], r["activated_at"], r["phone"], r["onboarded_at"])
 
 def get_user_by_code(conn, code: str) -> User | None:
     r = conn.execute("SELECT * FROM users WHERE code=?", (code.upper(),)).fetchone()
     return _row_to_user(r) if r else None
 
-def create_user(conn, code: str, password: str, expires_at: int | None) -> User:
-    h, salt = hash_password(password)
+def create_user(conn, code: str, password: str, expires_at: int | None,
+                *, pending: bool = False) -> User:
     now = int(time.time())
+    if pending:
+        # 待激活：三列为 NULL，密码为随机不可猜值（激活时才设为初始密码）
+        h, salt = hash_password(new_token())
+        stamp = None
+    else:
+        h, salt = hash_password(password)
+        stamp = now
     cur = conn.execute(
-        "INSERT INTO users(code,password_hash,salt,expires_at,status,created_at)"
-        " VALUES(?,?,?,?, 'active', ?)",
-        (code.upper(), h, salt, expires_at, now),
+        "INSERT INTO users(code,password_hash,salt,expires_at,status,created_at,"
+        "first_activated_at,activated_at,onboarded_at)"
+        " VALUES(?,?,?,?, 'active', ?, ?,?,?)",
+        (code.upper(), h, salt, expires_at, now, stamp, stamp, stamp),
     )
     conn.commit()
-    return User(cur.lastrowid, code.upper(), h, salt, expires_at, "active", now)
+    return User(cur.lastrowid, code.upper(), h, salt, expires_at, "active", now,
+                stamp, stamp, None, stamp)
+
+def activate_user(conn, code: str, now: int) -> str:
+    u = get_user_by_code(conn, code)
+    if not u:
+        return "not_found"
+    if u.first_activated_at is not None:
+        return "already"
+    h, salt = hash_password(INITIAL_PASSWORD)
+    conn.execute(
+        "UPDATE users SET password_hash=?, salt=?, first_activated_at=?, activated_at=?,"
+        " status='active', onboarded_at=NULL WHERE id=?",
+        (h, salt, now, now, u.id),
+    )
+    conn.commit()
+    return "ok"
+
+def reset_user_password(conn, code: str) -> str:
+    u = get_user_by_code(conn, code)
+    if not u:
+        return "not_found"
+    if u.first_activated_at is None:
+        return "pending"
+    h, salt = hash_password(INITIAL_PASSWORD)
+    try:
+        conn.execute("UPDATE users SET password_hash=?, salt=?, onboarded_at=NULL WHERE id=?",
+                     (h, salt, u.id))
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (u.id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return "ok"
+
+def complete_onboarding(conn, user_id: int, new_password: str, phone: str, now: int) -> None:
+    h, salt = hash_password(new_password)
+    try:
+        conn.execute("UPDATE users SET password_hash=?, salt=?, phone=?, onboarded_at=? WHERE id=?",
+                     (h, salt, phone, now, user_id))
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM onboard_tickets WHERE user_id=?", (user_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+def delete_user_sessions(conn, user_id: int) -> None:
+    conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+    conn.commit()
 
 def delete_user(conn, code: str) -> bool:
     u = get_user_by_code(conn, code)
@@ -230,6 +349,108 @@ def delete_session(conn, token: str) -> None:
 def purge_expired_sessions(conn) -> int:
     now = int(time.time())
     cur = conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+    conn.commit()
+    return cur.rowcount
+
+# ---------------- 首登票据 ----------------
+
+def create_onboard_ticket(conn, user_id: int, ttl: int) -> str:
+    tok = new_token()
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO onboard_tickets(token,user_id,created_at,expires_at) VALUES(?,?,?,?)",
+        (tok, user_id, now, now + ttl),
+    )
+    conn.commit()
+    return tok
+
+def get_onboard_ticket_user(conn, token: str, now: int) -> User | None:
+    r = conn.execute(
+        "SELECT u.* FROM onboard_tickets t JOIN users u ON u.id=t.user_id"
+        " WHERE t.token=? AND t.expires_at>=?",
+        (token, now),
+    ).fetchone()
+    return _row_to_user(r) if r else None
+
+# ---------------- 短信验证码 ----------------
+
+def _sms_hash(salt: str, code: str) -> str:
+    return hashlib.sha256((salt + code).encode("utf-8")).hexdigest()
+
+def save_sms_code(conn, phone: str, purpose: str, code: str, ttl: int, now: int) -> None:
+    salt = secrets.token_hex(8)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO sms_codes(phone,purpose,code_hash,salt,expires_at,attempts,sent_at)"
+            " VALUES(?,?,?,?,?,0,?)",
+            (phone, purpose, _sms_hash(salt, code), salt, now + ttl, now),
+        )
+        conn.execute("INSERT INTO sms_send_log(phone,sent_at) VALUES(?,?)", (phone, now))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+def delete_sms_code(conn, phone: str, purpose: str) -> None:
+    conn.execute("DELETE FROM sms_codes WHERE phone=? AND purpose=?", (phone, purpose))
+    conn.commit()
+
+def last_sms_sent_at(conn, phone: str, purpose: str) -> int | None:
+    r = conn.execute("SELECT sent_at FROM sms_codes WHERE phone=? AND purpose=?",
+                     (phone, purpose)).fetchone()
+    return r["sent_at"] if r else None
+
+def count_sms_sent_since(conn, phone: str, since: int) -> int:
+    return conn.execute("SELECT COUNT(*) FROM sms_send_log WHERE phone=? AND sent_at>=?",
+                        (phone, since)).fetchone()[0]
+
+def check_sms_code(conn, phone: str, purpose: str, code: str, now: int,
+                   max_attempts: int = 5) -> str:
+    """返回 ok | missing | expired | wrong | too_many；ok 与 too_many 时验证码被删除。"""
+    r = conn.execute("SELECT * FROM sms_codes WHERE phone=? AND purpose=?",
+                     (phone, purpose)).fetchone()
+    if not r:
+        return "missing"
+    if now > r["expires_at"]:
+        return "expired"
+    if hmac.compare_digest(_sms_hash(r["salt"], code), r["code_hash"]):
+        delete_sms_code(conn, phone, purpose)
+        return "ok"
+    attempts = r["attempts"] + 1
+    if attempts >= max_attempts:
+        delete_sms_code(conn, phone, purpose)
+        return "too_many"
+    conn.execute("UPDATE sms_codes SET attempts=? WHERE phone=? AND purpose=?",
+                 (attempts, phone, purpose))
+    conn.commit()
+    return "wrong"
+
+# ---------------- 审计日志 ----------------
+
+def add_audit(conn, actor_type: str, actor: str, action: str, target: str | None,
+              detail: dict, now: int | None = None) -> None:
+    conn.execute(
+        "INSERT INTO audit_logs(actor_type,actor,action,target,detail_json,created_at)"
+        " VALUES(?,?,?,?,?,?)",
+        (actor_type, actor, action, target, json.dumps(detail, ensure_ascii=False),
+         int(time.time()) if now is None else now),
+    )
+    conn.commit()
+
+def list_audit(conn, limit: int, offset: int, target: str | None = None) -> tuple[list[dict], int]:
+    where, args = ("WHERE target=?", [target]) if target is not None else ("", [])
+    total = conn.execute(f"SELECT COUNT(*) FROM audit_logs {where}", args).fetchone()[0]
+    rs = conn.execute(
+        f"SELECT * FROM audit_logs {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+        args + [limit, offset],
+    ).fetchall()
+    rows = [dict(id=r["id"], actor_type=r["actor_type"], actor=r["actor"], action=r["action"],
+                 target=r["target"], detail=json.loads(r["detail_json"] or "{}"),
+                 created_at=r["created_at"]) for r in rs]
+    return rows, total
+
+def purge_old_audit_logs(conn, now: int) -> int:
+    cur = conn.execute("DELETE FROM audit_logs WHERE created_at < ?", (now - AUDIT_RETENTION_SEC,))
     conn.commit()
     return cur.rowcount
 
