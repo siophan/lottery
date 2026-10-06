@@ -1,5 +1,6 @@
 import json
 import posixpath
+import re
 import time
 from . import db
 
@@ -13,9 +14,15 @@ BLOCKED_PATHS = {"user/updatepwd", "user/updatemobile", "user/updateinfo", "user
 # 上游下单 / 续费 / 订单查询同样以共用账号的身份进行（含「积分支付」直接扣共用账号余额，订单列表人人可见），整段拦截
 BLOCKED_PREFIXES = ("order",)
 BLOCKED = {"code": 1, "msg": "该功能暂不可用"}
+# 允许转发的路径形状：非空段、只含字母数字下划线连字符（上游所有接口都是这种形状）。
+# 上游若按 Servlet / Spring 规则处理路径，「user/updatePwd;x」「user/updatePwd.json」「user/updatePwd.」
+# 都会落到被拦的接口上，所以 ; . 空白 控制字符 反斜杠 空段 一律不转发，不去猜上游怎么规范化
+SAFE_PATH = re.compile(r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*")
 
 def is_blocked(path: str) -> bool:
-    """按规范化后的路径匹配：忽略大小写、多余的斜杠和 . / .. 段，防止换个写法绕过。"""
+    """形状不合规的路径一律拦截；合规的再按小写匹配拦截清单与前缀（normpath 留作兜底）。"""
+    if not SAFE_PATH.fullmatch(path):
+        return True
     norm = posixpath.normpath("/" + path).strip("/").lower()
     return norm in BLOCKED_PATHS or norm.split("/", 1)[0] in BLOCKED_PREFIXES
 

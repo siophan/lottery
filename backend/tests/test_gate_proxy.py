@@ -179,3 +179,19 @@ def test_proxy_blocks_upstream_orders():
         assert r.json() == {"code": 1, "msg": "该功能暂不可用"}, p
     assert tc.post("/api/orders/list", headers={"token": tok}).json() == {"code": 0}   # 前缀按段匹配
     assert calls == ["/api/orders/list"]
+
+def test_proxy_rejects_path_tricks_that_upstream_frameworks_may_normalise():
+    # 上游若按 Servlet / Spring 规则去掉 ;参数、匹配后缀，这些写法到上游就是被拦的接口；
+    # 转发层只接受「字母数字下划线连字符」组成的非空路径段，其余一律不转发
+    calls = []
+    conn, tc = build(lambda r: calls.append(r.url.path) or httpx.Response(200, json={"code": 0}))
+    tok = _session_for(conn)
+    for p in ("user/updatePwd;a=1", "user;x/updatePwd", "user/updatePwd%3B", "user/updatePwd.",
+              "user/updatePwd.json", "user/updatePwd.html", "order;x/create", "order/create;jsessionid=1",
+              "user/info%09", "user/info%00", "user/%20updatePwd", "user\\updatePwd", "user/info/",
+              "user//info", "", "user/info%2e"):
+        r = tc.post("/api/" + p, json={}, headers={"token": tok})
+        assert r.json() == {"code": 1, "msg": "该功能暂不可用"}, p
+    assert tc.post("/api/user/info", headers={"token": tok}).json() == {"code": 0}
+    assert tc.post("/api/sportExpertPlan/footballJc/plan", headers={"token": tok}).json() == {"code": 0}
+    assert calls == ["/api/user/info", "/api/sportExpertPlan/footballJc/plan"]
