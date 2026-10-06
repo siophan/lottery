@@ -23,6 +23,7 @@ from .routes import ds as ds_routes
 from .routes import admin_datasources as admin_ds_routes
 from .routes import admin_agents as admin_agents_routes
 from .routes import admin_staff as admin_staff_routes
+from .routes import admin_segments as admin_segments_routes
 
 METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 
@@ -95,6 +96,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
     app.include_router(admin_ds_routes.router, prefix="/admin")
     app.include_router(admin_agents_routes.router, prefix="/admin")
     app.include_router(admin_staff_routes.router, prefix="/admin")
+    app.include_router(admin_segments_routes.router, prefix="/admin")
 
     _static_dir = os.path.join(os.path.dirname(__file__), "static")
     _downloads_dir = os.path.join(_static_dir, "downloads")
