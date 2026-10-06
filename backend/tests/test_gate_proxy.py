@@ -195,3 +195,17 @@ def test_proxy_rejects_path_tricks_that_upstream_frameworks_may_normalise():
     assert tc.post("/api/user/info", headers={"token": tok}).json() == {"code": 0}
     assert tc.post("/api/sportExpertPlan/footballJc/plan", headers={"token": tok}).json() == {"code": 0}
     assert calls == ["/api/user/info", "/api/sportExpertPlan/footballJc/plan"]
+
+def test_proxy_does_not_forward_rewrite_or_override_headers():
+    seen = {}
+    def handler(req):
+        seen.update({k.lower(): v for k, v in req.headers.items()})
+        return httpx.Response(200, json={"code": 0})
+    conn, tc = build(handler)
+    tok = _session_for(conn)
+    tc.post("/api/user/info", json={}, headers={
+        "token": tok, "X-Original-URL": "/order/create", "X-Rewrite-URL": "/order/create",
+        "X-HTTP-Method-Override": "DELETE", "X-Forwarded-For": "1.1.1.1", "Forwarded": "for=1.1.1.1"})
+    assert seen["token"] == "DYTOK" and seen["fromid"]
+    assert not {"x-original-url", "x-rewrite-url", "x-http-method-override",
+                "x-forwarded-for", "forwarded"} & set(seen)

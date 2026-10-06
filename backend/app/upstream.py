@@ -13,8 +13,12 @@ HOP_BY_HOP = {
 # who would otherwise try (and fail) to decode already-decoded bytes.
 RESPONSE_DROP = HOP_BY_HOP | {"content-encoding"}
 
+# 请求头只转发客户端实际用到的几个（token / fromId 由代理改写）。其余一律丢弃：上游网关若认
+# X-Original-URL / X-Rewrite-URL / X-HTTP-Method-Override 等头，可借此绕过路径拦截
+FORWARD_REQUEST = {"content-type", "accept", "accept-language", "user-agent", "token", "fromid"}
+
 def filter_request_headers(headers: Mapping[str, str]) -> dict:
-    return {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP}
+    return {k: v for k, v in headers.items() if k.lower() in FORWARD_REQUEST}
 
 def filter_response_headers(headers: Mapping[str, str]) -> dict:
     return {k: v for k, v in headers.items() if k.lower() not in RESPONSE_DROP}
