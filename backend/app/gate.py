@@ -10,12 +10,14 @@ POINTS_EMPTY = {"code": 10025, "msg": "无积分，无权操作，请充值积�
 # 否则任一用户在旧客户端「个人信息 / 修改密码」里的操作会改掉全体共用的上游账号。
 BLOCKED_PATHS = {"user/updatepwd", "user/updatemobile", "user/updateinfo", "user/realname",
                  "user/forgotpwd", "auth/forgetpwd", "auth/checkuserinfo", "sms/send"}
+# 上游下单 / 续费 / 订单查询同样以共用账号的身份进行（含「积分支付」直接扣共用账号余额，订单列表人人可见），整段拦截
+BLOCKED_PREFIXES = ("order",)
 BLOCKED = {"code": 1, "msg": "该功能暂不可用"}
 
 def is_blocked(path: str) -> bool:
     """按规范化后的路径匹配：忽略大小写、多余的斜杠和 . / .. 段，防止换个写法绕过。"""
     norm = posixpath.normpath("/" + path).strip("/").lower()
-    return norm in BLOCKED_PATHS
+    return norm in BLOCKED_PATHS or norm.split("/", 1)[0] in BLOCKED_PREFIXES
 
 def authorize_user(conn, token_header: str):
     """与 authorize 相同的校验；通过 → (User, None)，否则 (None, 错误响应)。"""

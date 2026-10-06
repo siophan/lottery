@@ -166,3 +166,16 @@ def test_proxy_blocks_shared_upstream_account_changes():
     assert r.json() == {"code": 1, "msg": "该功能暂不可用"}
     assert tc.get("/api/user/info", headers={"token": tok}).json() == {"code": 0}
     assert calls == ["/api/user/info"]
+
+def test_proxy_blocks_upstream_orders():
+    # 下单 / 续费 / 订单查询都以共用上游账号的身份进行（含「积分支付」扣共用账号余额），整个 order/ 一律不转发
+    calls = []
+    conn, tc = build(lambda r: calls.append(r.url.path) or httpx.Response(200, json={"code": 0}))
+    tok = _session_for(conn)
+    for p in ("order/newCreate", "order/create", "order/createPlanNum", "order/createPlanJc",
+              "order/createVipPlanJc", "order/page", "order/info", "order/anythingNew",
+              "ORDER/NEWCREATE", "order//create", "x/../order/create", "order"):
+        r = tc.post("/api/" + p, json={"productId": 1}, headers={"token": tok})
+        assert r.json() == {"code": 1, "msg": "该功能暂不可用"}, p
+    assert tc.post("/api/orders/list", headers={"token": tok}).json() == {"code": 0}   # 前缀按段匹配
+    assert calls == ["/api/orders/list"]

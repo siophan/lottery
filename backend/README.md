@@ -117,6 +117,10 @@ DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
 - **上游账号保护**：所有用户共用一个上游账号，客户端旧菜单里的改密、改手机、改资料、实名、找回密码、发短信
   （`user/updatePwd`、`user/updateMobile`、`user/updateInfo`、`user/realName`、`user/forgotPwd`、`auth/forgetPwd`、
   `auth/checkUserInfo`、`sms/send`）不转发，直接返回 `{"code":1,"msg":"该功能暂不可用"}`。
+  上游下单同样记在共用账号上（续费、买方案、VIP、培训报名，含「积分支付」直接扣共用账号余额，订单列表人人可见），
+  整个 `order/`（`order/newCreate`、`order/create`、`order/createPlanNum`、`order/createPlanJc`、`order/createVipPlanJc`、
+  `order/page`、`order/info` 等）一律不转发。客户端侧的入口也已隐藏：续费页、订单列表页由主进程拦截不建窗
+  （`electron/page-guard.js`），方案页的购买按钮由 `scripts/patch-ds-client.js` 的 shop 补丁层去掉。
 - **暂停 / 封禁**：不删会话，每个请求都按状态拒绝（封禁 10024、暂停/到期 10022），客户端据此踢下线并显示对应提示；
   恢复后未过期的会话重新可用。所有后台操作与用户首登都写入「操作日志」（审计保留三年，手机号只存脱敏值）。
 
