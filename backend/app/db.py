@@ -356,6 +356,26 @@ def update_user(conn, code: str, *, expires_at=_UNSET, status=_UNSET, password=_
     conn.commit()
     return True
 
+def apply_user_changes(conn, u: User, *, actor_type: str, actor: str, now: int,
+                       status=_UNSET, expires_at=_UNSET) -> None:
+    """管理员改状态/到期：更新、（暂停/封禁时）删会话、审计在同一事务里一次提交，失败整体回滚。
+    只对真实变化的字段写审计；值没变则什么都不写。"""
+    try:
+        if status is not _UNSET and status != u.status:
+            conn.execute("UPDATE users SET status=? WHERE id=?", (status, u.id))
+            if status in ("disabled", "banned"):
+                conn.execute("DELETE FROM sessions WHERE user_id=?", (u.id,))
+            _audit_nocommit(conn, actor_type, actor, "user.status", u.code,
+                            {"from": u.status, "to": status}, now)
+        if expires_at is not _UNSET and expires_at != u.expires_at:
+            conn.execute("UPDATE users SET expires_at=? WHERE id=?", (expires_at, u.id))
+            _audit_nocommit(conn, actor_type, actor, "user.expires", u.code,
+                            {"from": u.expires_at, "to": expires_at}, now)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
 def list_users(conn) -> list[User]:
     return [_row_to_user(r) for r in conn.execute("SELECT * FROM users ORDER BY id").fetchall()]
 
@@ -477,14 +497,18 @@ def check_sms_code(conn, phone: str, purpose: str, code: str, now: int,
 
 # ---------------- 审计日志 ----------------
 
-def add_audit(conn, actor_type: str, actor: str, action: str, target: str | None,
-              detail: dict, now: int | None = None) -> None:
+def _audit_nocommit(conn, actor_type: str, actor: str, action: str, target: str | None,
+                    detail: dict, now: int | None = None) -> None:
     conn.execute(
         "INSERT INTO audit_logs(actor_type,actor,action,target,detail_json,created_at)"
         " VALUES(?,?,?,?,?,?)",
         (actor_type, actor, action, target, json.dumps(detail, ensure_ascii=False),
          int(time.time()) if now is None else now),
     )
+
+def add_audit(conn, actor_type: str, actor: str, action: str, target: str | None,
+              detail: dict, now: int | None = None) -> None:
+    _audit_nocommit(conn, actor_type, actor, action, target, detail, now)
     conn.commit()
 
 def list_audit(conn, limit: int, offset: int, target: str | None = None) -> tuple[list[dict], int]:

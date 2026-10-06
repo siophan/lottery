@@ -265,10 +265,43 @@ def test_audit_logs_limit_clamped():
     assert len(logs(tc)["logs"]) == 50
     assert len(logs(tc, limit=100000)["logs"]) == 63
 
-def test_audit_logs_negative_offset_treated_as_zero():
+def test_audit_logs_offset_out_of_range_400_and_limit_huge_clamped():
     conn, tc = build()
     _seed_logs(conn, 3)
-    assert len(logs(tc, offset=-4)["logs"]) == 3
+    for off in ("-4", str(2 ** 62 + 1), "99999999999999999999"):
+        assert tc.get("/admin/audit-logs", headers=H, params={"offset": off}).status_code == 400
+    assert tc.get("/admin/audit-logs", headers=H, params={"offset": str(2 ** 62)}).status_code == 200
+    assert len(logs(tc, limit="99999999999999999999")["logs"]) == 3
+
+def test_expires_at_out_of_range_400():
+    conn, tc = build()
+    mk_active(conn)
+    for bad in (99999999999999999999, -1, 2 ** 62):
+        assert tc.post("/admin/users", headers=H, json={"code": "n1", "expires_at": bad}).status_code == 400
+        r = tc.patch("/admin/users/U1", headers=H, json={"expires_at": bad})
+        assert r.status_code == 400 and r.json() == {"ok": False, "error": "到期时间无效"}
+    assert db.get_user_by_code(conn, "N1") is None
+    assert tc.patch("/admin/users/U1", headers=H, json={"expires_at": 0}).status_code == 200
+
+def test_patch_is_atomic_when_audit_insert_fails(monkeypatch):
+    import json as _json
+    import pytest
+    conn, tc = build()
+    u = mk_active(conn)
+    db.create_session(conn, u.id, 3600)
+    real = _json.dumps
+    def boom(obj, *a, **k):
+        if isinstance(obj, dict) and "from" in obj:      # 仅让审计 detail 序列化失败
+            raise RuntimeError("audit boom")
+        return real(obj, *a, **k)
+    monkeypatch.setattr(db.json, "dumps", boom)
+    with pytest.raises(RuntimeError):
+        tc.patch("/admin/users/U1", headers=H, json={"status": "banned", "expires_at": 5})
+    monkeypatch.undo()
+    after = db.get_user_by_code(conn, "U1")
+    assert after.status == "active" and after.expires_at is None      # 状态/到期均回滚
+    assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1   # 会话未被删
+    assert logs(tc)["total"] == 0
 
 def test_audit_logs_non_integer_params_400():
     _, tc = build()

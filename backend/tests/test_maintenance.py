@@ -48,7 +48,6 @@ def test_run_maintenance_swallows_exceptions(monkeypatch, capsys):
 
 def test_lifespan_runs_maintenance_at_startup_and_shuts_down_cleanly():
     conn = mem()
-    now = 5 * 365 * DAY
     # 启动时就应清掉过期审计（用真实时间，足够老即可）
     db.add_audit(conn, "admin", "root", "user.create", "U1", {}, now=1)
     client = httpx.AsyncClient(base_url="https://up.example/api",

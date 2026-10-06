@@ -31,8 +31,14 @@ def _err(error: str, status: int):
 def _not_found():
     return _err("账号不存在", 404)
 
+MAX_INT = 2 ** 62      # SQLite INTEGER 为 64 位有符号；留足余量，避免 OverflowError 变 500
+
 def _is_int(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
+
+def _valid_expires(v) -> bool:
+    # 到期时间：null（永不过期）或 0 <= v < 2**62 的整数
+    return v is None or (_is_int(v) and 0 <= v < MAX_INT)
 
 def _audit(request: Request, action: str, target: str, detail: dict) -> None:
     db.add_audit(request.app.state.db_conn, "admin", admin_auth.actor_of(request),
@@ -47,7 +53,7 @@ async def create_user(request: Request, payload: dict = Body(...)):
     if not isinstance(code, str) or not code.strip():
         return JSONResponse({"ok": False, "error": "code required"}, status_code=400)
     expires_at = payload.get("expires_at")
-    if expires_at is not None and not _is_int(expires_at):
+    if not _valid_expires(expires_at):
         return _err("到期时间无效", 400)
     conn = request.app.state.db_conn
     code = code.strip()
@@ -118,17 +124,13 @@ async def patch_user(code: str, request: Request, payload: dict = Body(...)):
         kwargs["status"] = status
     if "expires_at" in payload:
         exp = payload["expires_at"]
-        if exp is not None and not _is_int(exp):
+        if not _valid_expires(exp):
             return _err("到期时间无效", 400)
         kwargs["expires_at"] = exp
+    # 状态/到期更新、踢会话（暂停/封禁）与审计同一事务
     if kwargs:
-        db.update_user(conn, code, **kwargs)
-    if "status" in kwargs and kwargs["status"] != u.status:
-        if kwargs["status"] in ("disabled", "banned"):
-            db.delete_user_sessions(conn, u.id)      # 暂停/封禁立即踢下线
-        _audit(request, "user.status", u.code, {"from": u.status, "to": kwargs["status"]})
-    if "expires_at" in kwargs and kwargs["expires_at"] != u.expires_at:
-        _audit(request, "user.expires", u.code, {"from": u.expires_at, "to": kwargs["expires_at"]})
+        db.apply_user_changes(conn, u, actor_type="admin", actor=admin_auth.actor_of(request),
+                              now=int(time.time()), **kwargs)
     return {"ok": True}
 
 @router.delete("/users/{code}")
@@ -151,8 +153,9 @@ async def audit_logs(request: Request):
         offset = int(q.get("offset", 0))
     except ValueError:
         return _err("参数无效", 400)
+    if not 0 <= offset <= MAX_INT:      # 负数/超出 SQLite 整数范围（会 OverflowError）一律 400
+        return _err("参数无效", 400)
     limit = max(1, min(limit, 200))
-    offset = max(0, offset)
     target = q.get("target")
     target = target.strip().upper() if target and target.strip() else None
     rows, total = db.list_audit(request.app.state.db_conn, limit, offset, target)
