@@ -166,6 +166,18 @@ ADMIN_COOKIE_SECURE=false DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
 相关环境变量：`ADMIN_SESSION_TTL`（默认 86400）、`ADMIN_COOKIE_SECURE`（默认 true）、
 `ADMIN_COOKIE_NAME`（默认 admin_session）。
 
+### 后台角色（最高权限者 / 管理员 / 代理）
+
+- 三类身份统一登录 `/admin/`：最高权限者（全局唯一）、管理员、代理（用户名即代理名称）。
+  菜单按角色显示，但**所有 `/admin/*` 接口都在服务端校验角色与数据范围**；`X-Admin-Key` 视为最高权限者。
+- 最高权限者只能用服务器命令指定，原最高权限者在同一事务内自动降为管理员；后台界面不能转让：
+  ```bash
+  .venv/bin/python manage.py set-super <用户名>
+  ```
+- **升级到本版本后，现有管理员全部是普通管理员。部署后必须执行一次 `set-super`**，
+  否则没有人能在后台管理管理员账号与授权（`X-Admin-Key` 仍可调用全部接口）。
+- 资格暂停 / 取消的代理不能登录后台（提示「代理资格已暂停/已取消，无法登录」），已登录的会话在下一次请求即失效。
+
 ## 多数据源采集
 
 服务启动后，进程内为每个启用的数据源单独定时拉取开奖号（默认 5 秒，`rows=10`），按数据源隔离存入 SQLite

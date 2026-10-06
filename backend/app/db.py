@@ -26,6 +26,9 @@ class User:
     activated_at: int | None = None         # 当前有效激活时间
     phone: str | None = None                # 绑定的实名手机号（明文，对外一律脱敏）
     onboarded_at: int | None = None         # 完成首登改密+绑定手机号的时间；None = 未完成
+    agent_id: int | None = None             # 当前归属代理；None = 无归属（存量账号 / 回收后的号）
+    activated_by_agent_id: int | None = None  # 首次激活操作者为代理时记其 id；后台人员激活为 None
+    agent_chain_json: str | None = None     # 首次激活时的 [直接, 间接, 次间接] 上级代理 id（JSON）
 
 @dataclass
 class Session:
@@ -41,6 +44,7 @@ class Admin:
     password_hash: str
     salt: str
     created_at: int
+    role: str = "admin"                     # super 最高权限者 | admin 管理员 | agent 代理
 
 @dataclass
 class AdminSession:
@@ -192,11 +196,55 @@ def init_db(conn: sqlite3.Connection) -> None:
           created_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_logs(target, id);
+        CREATE TABLE IF NOT EXISTS agents(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          admin_id INTEGER UNIQUE NOT NULL,
+          name TEXT NOT NULL,
+          name_key TEXT UNIQUE,
+          region TEXT NOT NULL,
+          tier TEXT NOT NULL,
+          parent_agent_id INTEGER,
+          status TEXT NOT NULL DEFAULT 'active',
+          status_by TEXT,
+          status_at INTEGER,
+          status_reason TEXT,
+          created_at INTEGER NOT NULL,
+          recycled_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_agent_id);
+        CREATE TABLE IF NOT EXISTS agent_name_reservations(
+          name_key TEXT PRIMARY KEY,
+          agent_id INTEGER NOT NULL,
+          reserved_until INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS segment_ops(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          op TEXT NOT NULL,
+          start_no INTEGER,
+          end_no INTEGER,
+          count INTEGER NOT NULL,
+          from_agent_id INTEGER,
+          to_agent_id INTEGER,
+          actor TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS admin_grants(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          admin_id INTEGER NOT NULL,
+          grant TEXT NOT NULL,
+          granted_by TEXT NOT NULL,
+          granted_at INTEGER NOT NULL,
+          revoked_at INTEGER
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_grants_active
+          ON admin_grants(admin_id, grant) WHERE revoked_at IS NULL;
         """
     )
     conn.commit()
     _migrate_users(conn)
     _migrate_sms_send_log(conn)
+    _migrate_users_agents(conn)
+    _migrate_admins(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
@@ -233,6 +281,26 @@ def _migrate_sms_send_log(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sms_send_user ON sms_send_log(user_id, sent_at)")
     conn.commit()
 
+def _migrate_users_agents(conn) -> None:
+    # 子项目 B 的 users 新列。必须与 _migrate_users 分开：那里「缺列即回填为已激活」，
+    # 若把这三列塞进去，A 之后的库升级时会把所有待激活账号误回填成已激活。这里只加列、不回填。
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    for name, ddl in (("agent_id", "INTEGER"), ("activated_by_agent_id", "INTEGER"),
+                      ("agent_chain_json", "TEXT")):
+        if name not in cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_agent ON users(agent_id)")
+    conn.commit()
+
+def _migrate_admins(conn) -> None:
+    # 现有管理员一律迁移为普通管理员（列默认值）；最高权限者由 manage.py set-super 指定
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(admins)")}
+    if "role" not in cols:
+        conn.execute("ALTER TABLE admins ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
+    # 最高权限者唯一：部分唯一索引在库层兜底
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_admins_one_super ON admins(role) WHERE role='super'")
+    conn.commit()
+
 def mask_phone(phone: str | None) -> str | None:
     if phone is None:
         return None
@@ -241,7 +309,8 @@ def mask_phone(phone: str | None) -> str | None:
 def _row_to_user(r: sqlite3.Row) -> User:
     return User(r["id"], r["code"], r["password_hash"], r["salt"],
                 r["expires_at"], r["status"], r["created_at"],
-                r["first_activated_at"], r["activated_at"], r["phone"], r["onboarded_at"])
+                r["first_activated_at"], r["activated_at"], r["phone"], r["onboarded_at"],
+                r["agent_id"], r["activated_by_agent_id"], r["agent_chain_json"])
 
 def get_user_by_code(conn, code: str) -> User | None:
     r = conn.execute("SELECT * FROM users WHERE code=?", (code.upper(),)).fetchone()
@@ -533,7 +602,7 @@ def purge_old_audit_logs(conn, now: int) -> int:
     return cur.rowcount
 
 def _row_to_admin(r: sqlite3.Row) -> Admin:
-    return Admin(r["id"], r["username"], r["password_hash"], r["salt"], r["created_at"])
+    return Admin(r["id"], r["username"], r["password_hash"], r["salt"], r["created_at"], r["role"])
 
 def get_admin_by_username(conn, username: str) -> Admin | None:
     r = conn.execute("SELECT * FROM admins WHERE username=?", (username,)).fetchone()
@@ -550,14 +619,43 @@ def upsert_admin(conn, username: str, password: str) -> Admin:
         conn.execute("UPDATE admins SET password_hash=?, salt=? WHERE id=?",
                      (h, salt, existing.id))
         conn.commit()
-        return Admin(existing.id, username, h, salt, existing.created_at)
+        return Admin(existing.id, username, h, salt, existing.created_at, existing.role)
     now = int(time.time())
     cur = conn.execute(
         "INSERT INTO admins(username,password_hash,salt,created_at) VALUES(?,?,?,?)",
         (username, h, salt, now),
     )
     conn.commit()
-    return Admin(cur.lastrowid, username, h, salt, now)
+    return Admin(cur.lastrowid, username, h, salt, now, "admin")
+
+def set_super(conn, username: str) -> str:
+    """指定唯一的最高权限者，原最高权限者同一事务内降为管理员。
+    返回 ok | not_found | is_agent（代理身份不能成为最高权限者）。"""
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        r = conn.execute("SELECT id, role FROM admins WHERE username=?", (username,)).fetchone()
+        if r is None or r["role"] == "agent":
+            conn.rollback()
+            return "not_found" if r is None else "is_agent"
+        prev = conn.execute("SELECT username FROM admins WHERE role='super'").fetchone()
+        conn.execute("UPDATE admins SET role='admin' WHERE role='super'")
+        conn.execute("UPDATE admins SET role='super' WHERE id=?", (r["id"],))
+        _audit_nocommit(conn, "system", "manage.py", "admin.set_super", username,
+                        {"previous": prev["username"] if prev else None})
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return "ok"
+
+def list_active_grants(conn, admin_id: int | None) -> list[str]:
+    """该后台账号当前有效的授权项（如 agent.rename）；X-Admin-Key（admin_id=None）返回空。"""
+    if admin_id is None:
+        return []
+    return [r["grant"] for r in conn.execute(
+        "SELECT grant FROM admin_grants WHERE admin_id=? AND revoked_at IS NULL ORDER BY grant",
+        (admin_id,))]
 
 def create_admin_session(conn, token: str, admin_id: int, ttl: int) -> int:
     now = int(time.time())

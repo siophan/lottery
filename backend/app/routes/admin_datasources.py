@@ -1,12 +1,14 @@
-# 管理后台：数据源增删改、启停、最新开奖。鉴权沿用 cookie-or-key；写操作后让采集器按新配置重载。
+# 管理后台：数据源增删改、启停、最新开奖。仅后台人员（最高权限者/管理员，或 X-Admin-Key）可访问；写操作后让采集器按新配置重载。
 import re
 from dataclasses import asdict
-from fastapi import APIRouter, Request, Body
+from fastapi import APIRouter, Request, Body, Depends
 from fastapi.responses import JSONResponse
 from .. import db, admin_auth
 from ..adapters import ADAPTERS
 
 router = APIRouter()
+# 数据源只对后台人员开放（代理不可见）
+STAFF_ONLY = Depends(admin_auth.require_role(*admin_auth.STAFF))
 
 # 一律 fullmatch：re.match + $ 会放过结尾的换行符
 KEY_RE = re.compile(r"[a-z0-9_-]{1,32}")
@@ -14,9 +16,6 @@ URL_RE = re.compile(r"https?://[^\s?]+")
 CATS = {"hash", "1105", "animals"}
 MIN_INTERVAL = 3
 MAX_DRAW_ROWS = 300
-
-def _forbidden():
-    return JSONResponse({"error": "forbidden"}, status_code=403)
 
 def _bad(msg: str):
     return JSONResponse({"ok": False, "error": msg}, status_code=400)
@@ -70,15 +69,11 @@ def _parse_source(p: dict):
                 headers=headers, interval_sec=interval, enabled=enabled, lotteries=lots), None
 
 @router.get("/data-sources")
-async def list_sources(request: Request):
-    if not admin_auth.cookie_or_key_ok(request):
-        return _forbidden()
+async def list_sources(request: Request, _p=STAFF_ONLY):
     return {"sources": [asdict(s) for s in db.list_data_sources(request.app.state.db_conn)]}
 
 @router.post("/data-sources")
-async def create_source(request: Request, payload: dict = Body(...)):
-    if not admin_auth.cookie_or_key_ok(request):
-        return _forbidden()
+async def create_source(request: Request, payload: dict = Body(...), _p=STAFF_ONLY):
     fields, err = _parse_source(payload)
     if err:
         return _bad(err)
@@ -90,9 +85,7 @@ async def create_source(request: Request, payload: dict = Body(...)):
     return {"ok": True, "source": asdict(s)}
 
 @router.put("/data-sources/{source_id}")
-async def update_source(source_id: int, request: Request, payload: dict = Body(...)):
-    if not admin_auth.cookie_or_key_ok(request):
-        return _forbidden()
+async def update_source(source_id: int, request: Request, payload: dict = Body(...), _p=STAFF_ONLY):
     conn = request.app.state.db_conn
     if db.get_data_source(conn, source_id) is None:
         return _not_found()
@@ -107,9 +100,7 @@ async def update_source(source_id: int, request: Request, payload: dict = Body(.
     return {"ok": True, "source": asdict(db.get_data_source(conn, source_id))}
 
 @router.patch("/data-sources/{source_id}/enabled")
-async def toggle_source(source_id: int, request: Request, payload: dict = Body(...)):
-    if not admin_auth.cookie_or_key_ok(request):
-        return _forbidden()
+async def toggle_source(source_id: int, request: Request, payload: dict = Body(...), _p=STAFF_ONLY):
     enabled = payload.get("enabled")
     if not isinstance(enabled, bool):
         return _bad("enabled 必须是布尔值")
@@ -119,18 +110,15 @@ async def toggle_source(source_id: int, request: Request, payload: dict = Body(.
     return {"ok": True}
 
 @router.delete("/data-sources/{source_id}")
-async def delete_source(source_id: int, request: Request):
-    if not admin_auth.cookie_or_key_ok(request):
-        return _forbidden()
+async def delete_source(source_id: int, request: Request, _p=STAFF_ONLY):
     if not db.delete_data_source(request.app.state.db_conn, source_id):
         return _not_found()
     await request.app.state.collector.reload(source_id)   # 源已删除：只取消任务
     return {"ok": True}
 
 @router.get("/data-sources/{source_id}/draws")
-async def latest_draws(source_id: int, request: Request, code: str = "", rows: int = 20):
-    if not admin_auth.cookie_or_key_ok(request):
-        return _forbidden()
+async def latest_draws(source_id: int, request: Request, code: str = "", rows: int = 20,
+                       _p=STAFF_ONLY):
     conn = request.app.state.db_conn
     if db.get_data_source(conn, source_id) is None:
         return _not_found()

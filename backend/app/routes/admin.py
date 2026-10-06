@@ -1,24 +1,20 @@
 import os
 import sqlite3
 import time
-from fastapi import APIRouter, Request, Body, Response
+from fastapi import APIRouter, Request, Body, Response, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from .. import db
-from .. import admin_auth
+from .. import admin_auth, db_agents
+from ..admin_auth import Principal
 
 router = APIRouter()
+STAFF_ONLY = Depends(admin_auth.require_role(*admin_auth.STAFF))
 
 ALLOWED_STATUS = ("active", "disabled", "banned")   # 使用控制：正常 / 暂停 / 封禁
 
 _ADMIN_INDEX = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "static", "admin-dist", "index.html"
 )
-
-def _check(request: Request):
-    return admin_auth.cookie_or_key_ok(request)
-
-def _forbidden():
-    return JSONResponse({"error": "forbidden"}, status_code=403)
 
 @router.get("/")
 async def admin_index():
@@ -46,14 +42,11 @@ def _valid_expires(v) -> bool:
     # 到期时间：null（永不过期）或 0 <= v < 2**62 的整数
     return v is None or (_is_int(v) and 0 <= v < MAX_INT)
 
-def _audit(request: Request, action: str, target: str, detail: dict) -> None:
-    db.add_audit(request.app.state.db_conn, "admin", admin_auth.actor_of(request),
-                 action, target, detail)
+def _audit(request: Request, p: Principal, action: str, target: str, detail: dict) -> None:
+    db.add_audit(request.app.state.db_conn, p.actor_type, p.username, action, target, detail)
 
 @router.post("/users")
-async def create_user(request: Request, payload: dict = Body(...)):
-    if not _check(request):
-        return _forbidden()
+async def create_user(request: Request, payload: dict = Body(...), p: Principal = STAFF_ONLY):
     rejected = _password_rejected(payload)
     if rejected is not None:
         return rejected
@@ -73,13 +66,11 @@ async def create_user(request: Request, payload: dict = Body(...)):
         u = db.create_user(conn, code, db.INITIAL_PASSWORD, expires_at, pending=True)
     except sqlite3.IntegrityError:      # 并发下同编号抢先插入
         return _err("账号已存在", 409)
-    _audit(request, "user.create", u.code, {"expires_at": expires_at})
+    _audit(request, p, "user.create", u.code, {"expires_at": expires_at})
     return {"ok": True, "code": u.code}
 
 @router.get("/users")
-async def list_users(request: Request):
-    if not _check(request):
-        return _forbidden()
+async def list_users(request: Request, p: Principal = STAFF_ONLY):
     conn = request.app.state.db_conn
     return {"users": [
         {"code": u.code, "status": u.status, "expires_at": u.expires_at, "created_at": u.created_at,
@@ -91,35 +82,30 @@ async def list_users(request: Request):
     ]}
 
 @router.post("/users/{code}/activate")
-async def activate_user(code: str, request: Request):
-    if not _check(request):
-        return _forbidden()
+async def activate_user(code: str, request: Request, p: Principal = STAFF_ONLY):
     conn = request.app.state.db_conn
     res = db.activate_user(conn, code, int(time.time()))
     if res == "not_found":
         return _not_found()
     if res == "already":
         return _err("账号已激活", 409)
-    _audit(request, "user.activate", code.upper(), {})
+    _audit(request, p, "user.activate", code.upper(), {})
     return {"ok": True}
 
 @router.post("/users/{code}/reset-password")
-async def reset_password(code: str, request: Request):
-    if not _check(request):
-        return _forbidden()
+async def reset_password(code: str, request: Request, p: Principal = STAFF_ONLY):
     conn = request.app.state.db_conn
     res = db.reset_user_password(conn, code)
     if res == "not_found":
         return _not_found()
     if res == "pending":
         return _err("账号未激活", 409)
-    _audit(request, "user.reset_password", code.upper(), {})
+    _audit(request, p, "user.reset_password", code.upper(), {})
     return {"ok": True}
 
 @router.patch("/users/{code}")
-async def patch_user(code: str, request: Request, payload: dict = Body(...)):
-    if not _check(request):
-        return _forbidden()
+async def patch_user(code: str, request: Request, payload: dict = Body(...),
+                     p: Principal = STAFF_ONLY):
     rejected = _password_rejected(payload)
     if rejected is not None:
         return rejected
@@ -141,24 +127,20 @@ async def patch_user(code: str, request: Request, payload: dict = Body(...)):
         kwargs["expires_at"] = exp
     # 状态/到期更新与审计同一事务；暂停/封禁不删会话，由 gate 按状态逐请求拒绝
     if kwargs:
-        db.apply_user_changes(conn, u, actor_type="admin", actor=admin_auth.actor_of(request),
+        db.apply_user_changes(conn, u, actor_type=p.actor_type, actor=p.username,
                               now=int(time.time()), **kwargs)
     return {"ok": True}
 
 @router.delete("/users/{code}")
-async def delete_user(code: str, request: Request):
-    if not _check(request):
-        return _forbidden()
+async def delete_user(code: str, request: Request, p: Principal = STAFF_ONLY):
     conn = request.app.state.db_conn
     if not db.delete_user(conn, code):
         return _not_found()
-    _audit(request, "user.delete", code.upper(), {})
+    _audit(request, p, "user.delete", code.upper(), {})
     return {"ok": True}
 
 @router.get("/audit-logs")
-async def audit_logs(request: Request):
-    if not _check(request):
-        return _forbidden()
+async def audit_logs(request: Request, p: Principal = STAFF_ONLY):
     q = request.query_params
     try:
         limit = int(q.get("limit", 50))
@@ -184,6 +166,10 @@ async def admin_login(request: Request, response: Response, payload: dict = Body
     admin = admin_auth.authenticate(conn, username, password)
     if not admin:
         return JSONResponse({"ok": False}, status_code=401)
+    # 密码正确后才区分代理资格：暂停/取消的代理不能登录后台
+    blocked = admin_auth.agent_login_problem(conn, admin)
+    if blocked:
+        return JSONResponse({"ok": False, "error": blocked}, status_code=403)
     token = admin_auth.issue_session(conn, settings, admin)
     response.set_cookie(
         settings.admin_cookie_name, token,
@@ -207,6 +193,10 @@ async def admin_me(request: Request):
     conn = request.app.state.db_conn
     settings = request.app.state.settings
     admin = admin_auth.current_admin(conn, request.cookies.get(settings.admin_cookie_name))
-    if not admin:
+    p = admin_auth.principal_for_admin(conn, admin) if admin else None
+    if p is None:       # 未登录，或代理资格已暂停/取消（已有会话同样失效）
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return {"username": admin.username}
+    agent = db_agents.get_agent(conn, p.agent_id) if p.agent_id is not None else None
+    return {"username": p.username, "role": p.role,
+            "grants": db.list_active_grants(conn, p.admin_id),
+            "agent": db_agents.agent_to_dict(agent) if agent else None}

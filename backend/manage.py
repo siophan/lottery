@@ -21,6 +21,7 @@ def main(argv: list, conn=None) -> int:
     di = sub.add_parser("disable"); di.add_argument("code")
     en = sub.add_parser("enable"); en.add_argument("code")
     ads = sub.add_parser("admin-set"); ads.add_argument("username"); ads.add_argument("password")
+    ss = sub.add_parser("set-super"); ss.add_argument("username")
     sub.add_parser("list")
     args = p.parse_args(argv)
 
@@ -40,6 +41,12 @@ def main(argv: list, conn=None) -> int:
         print("ok" if db.update_user(conn, args.code, status="active") else "not found")
     elif args.cmd == "admin-set":
         db.upsert_admin(conn, args.username, args.password); print(f"admin set: {args.username}")
+    elif args.cmd == "set-super":
+        res = db.set_super(conn, args.username)
+        if res != "ok":
+            print({"not_found": "not found", "is_agent": "agent cannot be super"}[res])
+            return 1
+        print(f"super set: {args.username}")
     elif args.cmd == "list":
         for u in db.list_users(conn):
             exp = "never" if u.expires_at is None else time.strftime("%Y-%m-%d", time.gmtime(u.expires_at))

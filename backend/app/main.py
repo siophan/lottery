@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from .config import Settings, load_settings
 from .upstream import build_client, forward, filter_response_headers
@@ -17,6 +17,7 @@ from .throttle import LoginThrottle
 from .routes import auth as auth_routes
 from .routes import admin as admin_routes
 from .collector import Collector
+from .admin_auth import AdminDenied
 from .maintenance import run_maintenance, maintenance_loop
 from .routes import ds as ds_routes
 from .routes import admin_datasources as admin_ds_routes
@@ -51,6 +52,11 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
                     await app.state.sms_client.aclose()
 
     app = FastAPI(lifespan=lifespan)
+
+    @app.exception_handler(AdminDenied)
+    async def _admin_denied(request: Request, exc: AdminDenied):
+        # 后台接口统一的未登录 / 越权响应（与原 _forbidden() 形状一致）
+        return JSONResponse({"error": "forbidden"}, status_code=403)
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",

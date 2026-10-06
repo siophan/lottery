@@ -58,6 +58,11 @@ set -a; . /etc/ys-backend.env; set +a
 
 （`admin-set` 幂等，重复执行即重置该管理员密码。终端用户用 `manage.py add <CODE> <密码> [--expires YYYY-MM-DD]` 创建，或登录后在网页后台里管理。）
 
+指定唯一的最高权限者（**首次部署本版本时必做**；以后要更换最高权限者也用它，原最高权限者自动降为管理员）：
+```bash
+.venv/bin/python manage.py set-super admin
+```
+
 ## 5. systemd 常驻 uvicorn
 
 ```bash
@@ -181,6 +186,9 @@ cd /srv/ys && git pull
 cd backend && .venv/bin/pip install -r requirements.txt
 sudo systemctl restart ys-backend
 ```
+
+> 从「无角色」旧版本升级（含代理与号段功能）后：现有管理员全部迁移为普通管理员，
+> 重启后执行一次 `.venv/bin/python manage.py set-super <用户名>` 指定最高权限者（见第 4 节）。
 
 ## 备份
 
