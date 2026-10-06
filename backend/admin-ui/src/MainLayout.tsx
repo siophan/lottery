@@ -114,10 +114,7 @@ export default function MainLayout({ me, onLoggedOut }: { me: Me; onLoggedOut: (
       avatarProps={{
         icon: <UserOutlined />,
         size: 'small',
-        // 代理显示登录时的积分余额（各页面操作后自行刷新；此处随 /me 重新读取而更新）
-        title:
-          `${me.username}（${ROLE_LABEL[me.role] ?? me.role}）` +
-          (me.agent ? ` · 积分 ${me.agent.points}` : ''),
+        title: `${me.username}（${ROLE_LABEL[me.role] ?? me.role}）`,
         render: (_, dom) => (
           <Dropdown
             menu={{

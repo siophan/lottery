@@ -106,7 +106,7 @@ export default function UsersTable({ me }: { me: Me }) {
       title: '积分余额',
       dataIndex: 'points',
       hideInSearch: true,
-      sorter: (a, b) => a.points - b.points,
+      sorter: true, // 排序在 request 里对全表做（分页前），不是只排当前页
     },
     {
       title: '归属代理',
@@ -334,7 +334,7 @@ export default function UsersTable({ me }: { me: Me }) {
       // 跨页保留勾选，批量充值可一次选多页（单次最多 1000 个）
       rowSelection={{ selectedRowKeys: selected, onChange: setSelected, preserveSelectedRowKeys: true }}
       tableAlertOptionRender={() => <a onClick={() => setSelected([])}>清空选择</a>}
-      request={async (params) => {
+      request={async (params, sort) => {
         if (isAgent) {
           getMe()
             .then((m) => setMyPoints(m?.agent?.points ?? null))
@@ -354,6 +354,10 @@ export default function UsersTable({ me }: { me: Me }) {
         }
         if (params.number_status) {
           rows = rows.filter((u) => u.number_status === params.number_status)
+        }
+        if (sort.points) {
+          const dir = sort.points === 'ascend' ? 1 : -1
+          rows = [...rows].sort((a, b) => dir * (a.points - b.points))
         }
         const current = params.current ?? 1
         const pageSize = params.pageSize ?? 10

@@ -59,6 +59,16 @@ function fmtDetail(r: AuditLogRow): string {
   if (r.action === 'user.expires') {
     return `${fmtExpire(d.from)} → ${fmtExpire(d.to)}`
   }
+  if (r.action === 'points.resumed') {
+    return `余额 ${String(d.balance)}`
+  }
+  if (r.action === 'settings.trial') {
+    const side = (v: unknown) => {
+      const o = (v ?? {}) as { trial_enabled?: boolean; trial_points?: number }
+      return `${o.trial_enabled ? '开启' : '关闭'} / ${String(o.trial_points)} 分`
+    }
+    return `体验期：${side(d.from)} → ${side(d.to)}`
+  }
   if (r.action === 'points.batch') {
     return `${String(d.count)} 个账号各 ${String(d.amount)} 分，共 ${String(d.total)} 分`
   }
