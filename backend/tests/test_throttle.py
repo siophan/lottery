@@ -82,8 +82,10 @@ def test_client_ip_behind_local_nginx_prefers_x_real_ip():
     assert client_ip(req("127.0.0.1", x_real_ip="9.9.9.9", x_forwarded_for="8.8.8.8")) == "9.9.9.9"
     assert client_ip(req("::1", x_real_ip=" 9.9.9.9 , 7.7.7.7")) == "9.9.9.9"
 
-def test_client_ip_behind_local_nginx_falls_back_to_leftmost_xff():
-    assert client_ip(req("127.0.0.1", x_forwarded_for="8.8.8.8, 10.0.0.1")) == "8.8.8.8"
+def test_client_ip_behind_local_nginx_falls_back_to_rightmost_xff():
+    # 最左项由客户端自带、可伪造；nginx 追加的最右项才是真实对端
+    assert client_ip(req("127.0.0.1", x_forwarded_for="8.8.8.8, 10.0.0.1")) == "10.0.0.1"
+    assert client_ip(req("127.0.0.1", x_forwarded_for="10.0.0.1")) == "10.0.0.1"
 
 def test_client_ip_behind_local_nginx_without_headers():
     assert client_ip(req("127.0.0.1")) == "127.0.0.1"

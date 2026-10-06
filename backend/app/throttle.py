@@ -98,11 +98,15 @@ class LoginThrottle:
 
 
 def client_ip(request) -> str:
-    """生产环境在本机 nginx 之后：对端是本机时才信任 X-Real-IP / X-Forwarded-For（取最左）。"""
+    """生产环境在本机 nginx 之后：对端是本机时才信任转发头。
+    X-Real-IP 由 nginx 用 $remote_addr 覆盖写入，可直接用；X-Forwarded-For 经 $proxy_add_x_forwarded_for
+    会保留客户端自带的值并在最右追加 $remote_addr，所以只取最右一项（最左可被伪造）。"""
     host = request.client.host if request.client else ""
     if host in _LOCAL_PEERS:
-        for name in ("x-real-ip", "x-forwarded-for"):
-            v = request.headers.get(name)
-            if v and v.split(",")[0].strip():
-                return v.split(",")[0].strip()
+        v = (request.headers.get("x-real-ip") or "").split(",")[0].strip()
+        if v:
+            return v
+        v = (request.headers.get("x-forwarded-for") or "").split(",")[-1].strip()
+        if v:
+            return v
     return host

@@ -140,8 +140,9 @@ journalctl -u ys-middleware -f | grep '\[sms\]'
 
 锁定期间直接返回 `{"code":1,"msg":"登录失败次数过多，请15分钟后再试"}`，不再校验密码（省 CPU）；密码校验通过即清零该账号的计数。
 计数在进程内存里（单进程 uvicorn，重启即清零，最多记 1 万个键）。服务在本机 nginx 之后时（对端为 `127.0.0.1` / `::1`），
-客户端 IP 取 `X-Real-IP`，没有再取 `X-Forwarded-For` 最左一项——nginx 需配置 `proxy_set_header X-Real-IP $remote_addr;`
-（见 DEPLOY.md），否则 `X-Forwarded-For` 最左项可被客户端伪造，按 IP 的限流会失效（按账号的限流不受影响）。
+客户端 IP（仅当对端是本机反代时才看转发头）取 `X-Real-IP`，没有再取 `X-Forwarded-For` 最右一项
+（nginx 的 `$proxy_add_x_forwarded_for` 在最右追加真实对端地址；最左项可被客户端伪造，不用）。
+建议 nginx 同时配置 `proxy_set_header X-Real-IP $remote_addr;`（见 DEPLOY.md）。
 
 ### 上线顺序
 
