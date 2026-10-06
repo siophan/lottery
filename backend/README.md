@@ -176,6 +176,12 @@ ADMIN_COOKIE_SECURE=false DATA_YS_CODE=xxx DATA_YS_PASSWORD=xxx ADMIN_KEY=xxx \
   ```
 - **升级到本版本后，现有管理员全部是普通管理员。部署后必须执行一次 `set-super`**，
   否则没有人能在后台管理管理员账号与授权（`X-Admin-Key` 仍可调用全部接口）。
+  `set-super` 必须在 backend 目录下、载入服务环境变量后运行（否则读写的是另一个空数据库），例如：
+  `cd <backend 目录> && set -a && . <环境变量文件> && set +a && .venv/bin/python manage.py set-super <用户名>`。
+  升级顺序：备份数据库 → 部署代码 → 重启服务（自动迁移）→ `set-super` → 用该用户登录并确认出现「管理员与授权」菜单。
+- **回滚警告**：已存在代理（`role='agent'`）后，不要把代码直接回退到本版本之前的旧版——旧版不认识角色，
+  会让代理拥有完整管理员权限。回滚前须先恢复升级前的数据库备份，或删除 `role='agent'` 的 admins 行及其 admin_sessions。
+- 后台登录（`POST /admin/login`）带失败限流：同一用户名 15 分钟内失败 5 次、同一 IP 失败 30 次即锁定 15 分钟（HTTP 429）。
 - 资格暂停 / 取消的代理不能登录后台（提示「代理资格已暂停/已取消，无法登录」），已登录的会话在下一次请求即失效。
 
 ### 代理与账号编号段

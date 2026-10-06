@@ -58,10 +58,14 @@ set -a; . /etc/ys-backend.env; set +a
 
 （`admin-set` 幂等，重复执行即重置该管理员密码。终端用户用 `manage.py add <CODE> <密码> [--expires YYYY-MM-DD]` 创建，或登录后在网页后台里管理。）
 
-指定唯一的最高权限者（**首次部署本版本时必做**；以后要更换最高权限者也用它，原最高权限者自动降为管理员）：
+指定唯一的最高权限者（**首次部署本版本时必做**；以后要更换最高权限者也用它，原最高权限者自动降为管理员）。
+同样须在 backend 目录并载入环境变量文件（上面已执行）后运行，否则会操作另一个空数据库：
 ```bash
 .venv/bin/python manage.py set-super admin
 ```
+
+> `admin-set` 只能新建管理员或重置已有后台人员的密码；该用户名属于代理账号时会拒绝，
+> 新建用户名与代理名称共用命名空间（不区分大小写）。
 
 ## 5. systemd 常驻 uvicorn
 
@@ -187,8 +191,28 @@ cd backend && .venv/bin/pip install -r requirements.txt
 sudo systemctl restart ys-backend
 ```
 
-> 从「无角色」旧版本升级（含代理与号段功能）后：现有管理员全部迁移为普通管理员，
-> 重启后执行一次 `.venv/bin/python manage.py set-super <用户名>` 指定最高权限者（见第 4 节）。
+### 从「无角色」旧版本升级到含代理与号段的版本
+
+现有管理员全部迁移为普通管理员，必须指定最高权限者。**严格按此顺序**：
+
+1. **备份数据库**（见「备份」一节），升级前务必先备份。
+2. 部署新代码并安装依赖（上面的 `git pull` + `pip install`）。
+3. `sudo systemctl restart ys-backend`：重启时自动执行数据库迁移。
+4. 指定最高权限者（**必须在 backend 目录下、并载入服务的环境变量文件**，否则会读写另一个空的数据库）：
+   ```bash
+   cd /srv/ys/backend
+   set -a; . /etc/ys-backend.env; set +a
+   .venv/bin/python manage.py set-super <用户名>
+   ```
+5. 用该用户登录 `/admin/`，确认出现「管理员与授权」菜单。
+
+在执行 `set-super` 之前没有最高权限者：管理员管理与授权类接口只能用 `X-Admin-Key` 调用
+（`X-Admin-Key` 始终视为最高权限者，拥有全部权限）。
+
+> **回滚警告**：一旦已创建代理（`admins.role='agent'`），**不要直接把代码回退到本版本之前的旧版**。
+> 旧版不认识 `role` 字段，会把所有后台账号都当作完整管理员，代理将因此获得全部后台权限。
+> 需要回滚时，必须先**恢复升级前的数据库备份**，或先删除 `role='agent'` 的 `admins` 行及其
+> `admin_sessions` 会话，再回退代码。
 
 ## 备份
 
