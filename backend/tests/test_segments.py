@@ -191,7 +191,7 @@ def test_recycle_only_cancelled_and_effects():
     assert db_agents.get_agent(conn, top).recycled_at is not None
     op = conn.execute("SELECT * FROM segment_ops WHERE op='recycle'").fetchone()
     assert (op["start_no"], op["end_no"], op["count"], op["from_agent_id"]) == (1_000_001, 1_000_009, 9, top)
-    assert audit(conn, "agent.recycle")[0]["detail"] == {"count": 9, "children": [kid]}
+    assert audit(conn, "agent.recycle")[0]["detail"] == {"count": 9, "children": [kid], "refunded": 0}
     assert tc.post(f"/admin/agents/{top}/recycle").json()["error"] == "该代理已回收"
     r = tc.post(f"/admin/agents/{top}/status", json={"status": "active", "reason": "回来"})
     assert r.status_code == 409 and r.json()["error"] == "该代理已回收，不能恢复"

@@ -259,6 +259,7 @@ export default function UsersTable({ me }: { me: Me }) {
             onClick: () =>
               modal.confirm({
                 title: `确认删除用户 ${record.code}？`,
+                content: record.points > 0 ? `剩余 ${record.points} 积分将一并扣回清零。` : undefined,
                 okText: '删除',
                 okButtonProps: { danger: true },
                 cancelText: '取消',

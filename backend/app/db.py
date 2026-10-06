@@ -508,14 +508,29 @@ def delete_user_sessions(conn, user_id: int) -> None:
     conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
     conn.commit()
 
-def delete_user(conn, code: str) -> bool:
-    u = get_user_by_code(conn, code)
-    if not u:
-        return False
-    conn.execute("DELETE FROM sessions WHERE user_id=?", (u.id,))
-    conn.execute("DELETE FROM user_avatars WHERE user_id=?", (u.id,))
-    conn.execute("DELETE FROM users WHERE id=?", (u.id,))
-    conn.commit()
+def delete_user(conn, code: str, *, actor_type: str = "system", actor: str = "manage.py",
+                now: int | None = None) -> bool:
+    """删除账号：剩余积分先记一笔扣回流水（账本与余额保持一致），删除与审计同一事务。
+    流水按账号编号记账：之后用同一编号重建的账号会接续这段流水（以 0 结尾，余额链不断）。"""
+    from . import db_points      # 函数内导入：db_points 依赖 db
+    now = int(time.time()) if now is None else now
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        u = get_user_by_code(conn, code)
+        if not u:
+            conn.rollback()
+            return False
+        if u.points > 0:
+            db_points.apply_delta_nocommit(conn, "user", u.code, -u.points, "revoke",
+                                           actor_type=actor_type, actor=actor, now=now, reason="删除账号")
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (u.id,))
+        conn.execute("DELETE FROM user_avatars WHERE user_id=?", (u.id,))
+        conn.execute("DELETE FROM users WHERE id=?", (u.id,))
+        _audit_nocommit(conn, actor_type, actor, "user.delete", u.code, {"points": u.points}, now)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return True
 
 def get_user_avatar(conn, user_id: int) -> str | None:

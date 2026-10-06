@@ -1,5 +1,5 @@
 # 账号编号段（子项目 B）：分配即建档、划拨、回收、流水。归属只看 users.agent_id；segment_ops 只是流水。
-from . import db
+from . import db, db_points
 from .db_agents import BizError, begin_write, get_agent
 from .security import hash_password
 
@@ -107,7 +107,9 @@ def transfer_segment(conn, from_agent_id: int, to_agent_id, start, end, *, actor
 
 def recycle_agent(conn, agent_id: int, *, actor_type: str, actor: str, now: int) -> dict:
     """回收（仅资格已取消的代理）：名下未激活账号变为无归属待激活号，下级代理解除上级关系；
-    已激活账号保持原归属。回收后该代理不能再恢复资格。"""
+    已激活账号保持原归属。回收后该代理不能再恢复资格。
+    未激活账号上预充的积分同一事务退回该代理（转出/转入流水各一条），
+    否则这些号再分配给别的代理时，积分会被白白带走且账本无记录。"""
     begin_write(conn)
     try:
         a = get_agent(conn, agent_id)
@@ -117,8 +119,21 @@ def recycle_agent(conn, agent_id: int, *, actor_type: str, actor: str, now: int)
             raise BizError("只能回收资格已取消的代理", 409)
         if a.recycled_at is not None:
             raise BizError("该代理已回收", 409)
-        nums = sorted(int(r["code"]) for r in conn.execute(
-            "SELECT code FROM users WHERE agent_id=? AND first_activated_at IS NULL", (a.id,)))
+        pending = conn.execute("SELECT code, points FROM users WHERE agent_id=? AND first_activated_at IS NULL",
+                               (a.id,)).fetchall()
+        nums = sorted(int(r["code"]) for r in pending)
+        refunded = 0
+        for r in pending:
+            if r["points"] > 0:
+                db_points.apply_delta_nocommit(conn, "user", r["code"], -r["points"], "transfer_out",
+                                               actor_type=actor_type, actor=actor, now=now,
+                                               counterparty_type="agent", counterparty_id=str(a.id),
+                                               reason="回收编号退回")
+                db_points.apply_delta_nocommit(conn, "agent", str(a.id), r["points"], "transfer_in",
+                                               actor_type=actor_type, actor=actor, now=now,
+                                               counterparty_type="user", counterparty_id=r["code"],
+                                               reason="回收编号退回")
+                refunded += r["points"]
         conn.execute("UPDATE users SET agent_id=NULL WHERE agent_id=? AND first_activated_at IS NULL",
                      (a.id,))
         children = [r["id"] for r in conn.execute("SELECT id FROM agents WHERE parent_agent_id=?",
@@ -128,7 +143,7 @@ def recycle_agent(conn, agent_id: int, *, actor_type: str, actor: str, now: int)
         _log_op(conn, "recycle", nums[0] if nums else None, nums[-1] if nums else None, len(nums),
                 a.id, None, actor, now)
         db._audit_nocommit(conn, actor_type, actor, "agent.recycle", a.name,
-                           {"count": len(nums), "children": children}, now)
+                           {"count": len(nums), "children": children, "refunded": refunded}, now)
         conn.commit()
     except Exception:
         conn.rollback()

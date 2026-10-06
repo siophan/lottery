@@ -185,9 +185,8 @@ async def patch_user(code: str, request: Request, payload: dict = Body(...),
 @router.delete("/users/{code}")
 async def delete_user(code: str, request: Request, p: Principal = STAFF_ONLY):
     conn = request.app.state.db_conn
-    if not db.delete_user(conn, code):
+    if not db.delete_user(conn, code, actor_type=p.actor_type, actor=p.username):
         return _not_found()
-    _audit(request, p, "user.delete", code.upper(), {})
     return {"ok": True}
 
 @router.get("/audit-logs")

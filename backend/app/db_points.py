@@ -330,10 +330,14 @@ def list_ledger(conn, limit: int, offset: int, *, holder_type: str | None = None
 
 def grant_trial_nocommit(conn, code: str, now: int) -> int:
     """体验期开启且该账号从未赠送过 → 赠送设定分数（流水 trial、审计 points.trial，操作者 system）。
-    返回赠送分数（未赠送为 0）。每账号仅一次：以 trial_granted_at 为准。"""
+    返回赠送分数（未赠送为 0）。每个编号仅一次：以 trial_granted_at 为准，
+    并且该编号的流水里已有体验赠送（删除后用同一编号重建的账号）也不再赠送。"""
     cfg = get_trial_settings(conn)
     r = conn.execute("SELECT trial_granted_at FROM users WHERE code=?", (code.upper(),)).fetchone()
     if not cfg["trial_enabled"] or r is None or r["trial_granted_at"] is not None:
+        return 0
+    if conn.execute("SELECT 1 FROM points_ledger WHERE holder_type='user' AND holder_id=? AND kind='trial'",
+                    (code.upper(),)).fetchone():
         return 0
     n = cfg["trial_points"]
     apply_delta_nocommit(conn, "user", code, n, "trial", actor_type="system", actor=SYSTEM_ACTOR, now=now)
