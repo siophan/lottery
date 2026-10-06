@@ -13,6 +13,7 @@ from .routes import local_router
 from .db import connect, init_db
 from .dayys_session import DataYsSession
 from .sms import build_sms_sender
+from .throttle import LoginThrottle
 from .routes import auth as auth_routes
 from .routes import admin as admin_routes
 from .collector import Collector
@@ -75,6 +76,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
         app.state.sms_client = httpx.AsyncClient(timeout=10)
         sms = build_sms_sender(settings, app.state.sms_client)
     app.state.sms = sms
+    app.state.login_throttle = LoginThrottle()      # 登录失败限流（进程内）
     app.state.maintenance_task = None
     app.state.collector = collector or Collector(app.state.db_conn, enabled=settings.collector_enabled)
 

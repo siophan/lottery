@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from .. import db
 from ..security import verify_password
+from ..throttle import LOCKED_MSG, client_ip
 from ..dayys_session import DataYsLoginError
 
 router = APIRouter()
@@ -78,9 +79,17 @@ async def login(request: Request):
     settings = request.app.state.settings
     dayys = request.app.state.dayys
 
+    throttle = request.app.state.login_throttle
+    ip = client_ip(request)
+    # 先查限流再验密码：锁定期间不做 PBKDF2，既挡暴力猜测也省 CPU
+    if throttle.locked(username, ip):
+        return JSONResponse({"code": 1, "msg": LOCKED_MSG})
+
     user = db.get_user_by_code(conn, username)
     if user is None or not verify_password(password, user.salt, user.password_hash):
+        throttle.failed(username, ip)
         return JSONResponse({"code": 1, "msg": "账号或密码错误"})
+    throttle.succeeded(username)        # 密码正确即清零该账号的失败计数
     now = int(time.time())
     if user.first_activated_at is None:     # 待激活账号预置了初始密码，输对密码才会走到这里
         return JSONResponse({"code": 10023, "msg": "账号未激活，请联系有激活权限的人员激活"})
