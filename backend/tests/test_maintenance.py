@@ -31,7 +31,7 @@ def test_run_maintenance_purges_everything():
     conn.commit()
 
     res = maintenance.run_maintenance(conn, now)
-    assert res == {"audit_logs": 1, "sms_send_log": 1, "onboard_tickets": 1,
+    assert res == {"audit_logs": 1, "points_ledger": 0, "sms_send_log": 1, "onboard_tickets": 1,
                    "sessions": 1, "admin_sessions": 1}
     assert db.list_audit(conn, 10, 0)[1] == 1
     assert [r["token"] for r in conn.execute("SELECT token FROM onboard_tickets")] == ["new"]
@@ -43,7 +43,8 @@ def test_run_maintenance_swallows_exceptions(monkeypatch, capsys):
         raise RuntimeError("db locked")
     monkeypatch.setattr(db, "purge_old_audit_logs", boom)
     res = maintenance.run_maintenance(conn, 1000)       # 不抛
-    assert "audit_logs" not in res and set(res) == {"sms_send_log", "onboard_tickets", "sessions", "admin_sessions"}
+    assert "audit_logs" not in res and set(res) == {"points_ledger", "sms_send_log", "onboard_tickets",
+                                                     "sessions", "admin_sessions"}
     assert "maintenance audit_logs failed" in capsys.readouterr().out
 
 def test_lifespan_runs_maintenance_at_startup_and_shuts_down_cleanly():

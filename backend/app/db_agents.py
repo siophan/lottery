@@ -38,6 +38,7 @@ class Agent:
     status_reason: str | None
     created_at: int
     recycled_at: int | None   # 资格取消后执行回收的时间；回收后不可再恢复
+    points: int = 0           # 代理积分余额（不做每日扣减；永不为负）
 
 _AGENT_FIELDS = tuple(f.name for f in fields(Agent))
 

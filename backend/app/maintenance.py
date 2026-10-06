@@ -1,14 +1,15 @@
 import asyncio
 import time
-from . import db
+from . import db, db_points
 
 MAINTENANCE_INTERVAL = 86400    # 每日一次
 
 def run_maintenance(conn, now: int) -> dict:
-    """清理过期数据：审计日志（三年）、短信发送记录（24h）、首登票据、用户/管理员会话。
+    """清理过期数据：审计日志与积分流水（三年）、短信发送记录（24h）、首登票据、用户/管理员会话。
     每一步独立 try：某一步失败只打印，不影响其余清理；返回各步删除行数（失败的步骤不在结果里）。"""
     steps = (
         ("audit_logs", lambda: db.purge_old_audit_logs(conn, now)),
+        ("points_ledger", lambda: db_points.purge_old_ledger(conn, now)),
         ("sms_send_log", lambda: db.purge_old_sms_send_log(conn, now)),
         ("onboard_tickets", lambda: db.purge_expired_onboard_tickets(conn, now)),
         ("sessions", lambda: db.purge_expired_sessions(conn)),

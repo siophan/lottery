@@ -29,6 +29,10 @@ class User:
     agent_id: int | None = None             # 当前归属代理；None = 无归属（存量账号 / 回收后的号）
     activated_by_agent_id: int | None = None  # 首次激活操作者为代理时记其 id；后台人员激活为 None
     agent_chain_json: str | None = None     # 首次激活时的 [直接, 间接, 次间接] 上级代理 id（JSON）
+    points: int = 0                         # 积分余额（永不为负）
+    charge_anchor_at: int | None = None     # 当前计费起点
+    next_charge_at: int | None = None       # 下次扣费时间；None = 当前不计费
+    trial_granted_at: int | None = None     # 体验赠送时间；None = 未赠送过
 
 @dataclass
 class Session:
@@ -238,6 +242,32 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_grants_active
           ON admin_grants(admin_id, grant) WHERE revoked_at IS NULL;
+        CREATE TABLE IF NOT EXISTS points_ledger(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          holder_type TEXT NOT NULL,
+          holder_id TEXT NOT NULL,
+          delta INTEGER NOT NULL,
+          balance_before INTEGER NOT NULL,
+          balance_after INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          counterparty_type TEXT,
+          counterparty_id TEXT,
+          actor_type TEXT NOT NULL,
+          actor TEXT NOT NULL,
+          reason TEXT,
+          batch_id TEXT,
+          cycle_key INTEGER,
+          created_at INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_charge_cycle
+          ON points_ledger(holder_id, cycle_key) WHERE kind='charge';
+        CREATE INDEX IF NOT EXISTS idx_ledger_holder ON points_ledger(holder_type, holder_id, id);
+        CREATE INDEX IF NOT EXISTS idx_ledger_counterparty ON points_ledger(counterparty_type, counterparty_id, id);
+        CREATE INDEX IF NOT EXISTS idx_ledger_created ON points_ledger(created_at);
+        CREATE TABLE IF NOT EXISTS settings(
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
         """
     )
     conn.commit()
@@ -245,6 +275,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_sms_send_log(conn)
     _migrate_users_agents(conn)
     _migrate_admins(conn)
+    _migrate_points(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
@@ -301,6 +332,21 @@ def _migrate_admins(conn) -> None:
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_admins_one_super ON admins(role) WHERE role='super'")
     conn.commit()
 
+def _migrate_points(conn) -> None:
+    # 子项目 C：积分余额与计费字段。同样独立于 _migrate_users（不得触发其「缺列即回填已激活」）。
+    # 只加列、不回填：存量账号与代理余额为 0、next_charge_at 为 NULL（不计费）、没有体验赠送。
+    # CHECK 在库层兜底「余额永不为负」。
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    for name, ddl in (("points", "INTEGER NOT NULL DEFAULT 0 CHECK(points >= 0)"),
+                      ("charge_anchor_at", "INTEGER"), ("next_charge_at", "INTEGER"),
+                      ("trial_granted_at", "INTEGER")):
+        if name not in cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {name} {ddl}")
+    if "points" not in {r["name"] for r in conn.execute("PRAGMA table_info(agents)")}:
+        conn.execute("ALTER TABLE agents ADD COLUMN points INTEGER NOT NULL DEFAULT 0 CHECK(points >= 0)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_next_charge ON users(next_charge_at)")
+    conn.commit()
+
 def mask_phone(phone: str | None) -> str | None:
     if phone is None:
         return None
@@ -310,7 +356,8 @@ def _row_to_user(r: sqlite3.Row) -> User:
     return User(r["id"], r["code"], r["password_hash"], r["salt"],
                 r["expires_at"], r["status"], r["created_at"],
                 r["first_activated_at"], r["activated_at"], r["phone"], r["onboarded_at"],
-                r["agent_id"], r["activated_by_agent_id"], r["agent_chain_json"])
+                r["agent_id"], r["activated_by_agent_id"], r["agent_chain_json"],
+                r["points"], r["charge_anchor_at"], r["next_charge_at"], r["trial_granted_at"])
 
 def get_user_by_code(conn, code: str) -> User | None:
     r = conn.execute("SELECT * FROM users WHERE code=?", (code.upper(),)).fetchone()
