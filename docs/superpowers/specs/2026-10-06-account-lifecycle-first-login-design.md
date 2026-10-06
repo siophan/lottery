@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS audit_logs(
 ## 5 短信服务
 
 `app/sms.py`：`SmsSender` 协议 `async send_code(phone, code) -> None`（失败抛 `SmsError`）。
-- `LogSmsSender`：把验证码打印到服务日志（开发/测试用）。
+- `LogSmsSender`：把验证码打印到服务日志（开发/测试用；手机号脱敏为 `138****1234`，运维从 journald 读码）。
 - `AliyunSmsSender`：阿里云 Dysmsapi `SendSms`（RPC 签名 V1，HMAC-SHA1），用现有 httpx 客户端，`TemplateParam={"code": "..."}`。
 
 配置（`/etc/ys-middleware.env`）：`SMS_PROVIDER=log|aliyun`（默认 `log`）、`SMS_ALIYUN_ACCESS_KEY_ID`、`SMS_ALIYUN_ACCESS_KEY_SECRET`、`SMS_ALIYUN_SIGN_NAME`、`SMS_ALIYUN_TEMPLATE_CODE`。`aliyun` 缺任一配置 → 启动时打印告警并退回 `log`。

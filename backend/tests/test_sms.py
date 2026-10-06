@@ -102,7 +102,10 @@ def test_aliyun_error_message_does_not_leak_secret():
 
 def test_log_sender_prints_code(capsys):
     asyncio.run(LogSmsSender().send_code("13812341234", "654321"))
-    assert "[sms] 13812341234 code=654321" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # 运维从 journald 读验证码；手机号脱敏，不在日志里留完整号码
+    assert "[sms] 138****1234 code=654321" in out
+    assert "13812341234" not in out
 
 def test_build_sms_sender_default_is_log():
     assert isinstance(build_sms_sender(Settings(), None), LogSmsSender)

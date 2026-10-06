@@ -3,6 +3,7 @@ import base64, hashlib, hmac, json, sys, uuid
 from datetime import datetime, timezone
 from urllib.parse import quote
 import httpx
+from .db import mask_phone
 
 ALIYUN_ENDPOINT = "https://dysmsapi.aliyuncs.com/"
 
@@ -30,7 +31,8 @@ def aliyun_signature(params: dict, secret: str) -> str:
 
 class LogSmsSender:
     async def send_code(self, phone: str, code: str) -> None:
-        print(f"[sms] {phone} code={code}")
+        # 运维从 journald 读验证码；手机号脱敏打印，日志里不留完整号码
+        print(f"[sms] {mask_phone(phone)} code={code}")
 
 
 class AliyunSmsSender:
