@@ -163,3 +163,7 @@
 - [ ] **Step 1:** 失败测试：`patchLogin` 后标记存在；二次 patch 原样返回；用现有 `loadComponent` 夹具加载补丁后的登录模块（提供 `window.dsOnboard` 假实现、`user.h` login 假实现返回 `{code:10030,data:{onboardToken:'T'}}`、config `apiURL`），调用 `login()`（`$refs.loginForm.validate` 假实现回调 true，`checked=true`）后断言 `open` 被调用且 `apiURL/onboardToken` 正确，调用 `onDone('X')` 后密码清空、`$message` 收到 success；返回 code 0 时行为不变（路由跳 `/index`）；规则 max 为 20。
 - [ ] **Step 2–4:** 跑失败 → 实现 → 运行 `node scripts/patch-ds-client.js` 写盘 → `npm test` 全绿 → 再运行一次脚本应全部 skip。
 - [ ] **Step 5:** Commit `feat(client): route first-login response on the login page to the onboarding dialog`。
+
+### Task 7 补充（控制者在实现前追加）
+
+3. app chunk 新增补丁层 `kick v1`（`APP_LAYERS` 中 locator 同 AUTH 层）：响应拦截器把 `10024`（封禁）也纳入踢下线分支，提示文案「账号已封禁！」。原因：gate 对使用中被封禁的账号返回 10024，原拦截器只处理 10020/10021/10022，客户端不会退出。同时修正该分支回调里 `userInfo` 为空时 `userInfo.username` 抛错（用 `userInfo && userInfo.username`）。
