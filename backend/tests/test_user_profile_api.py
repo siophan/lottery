@@ -72,7 +72,7 @@ def test_invalid_input_is_rejected_without_partial_write(payload, msg):
     d = tc.get("/api/user/profile", headers=h).json()["data"]
     assert d["nicknameIsDefault"] and d["avatarIsDefault"]
 
-@pytest.mark.parametrize("raw", [b"[1]", b"{", b"\"x\""])
+@pytest.mark.parametrize("raw", [b"[1]", b"{", b"\"x\"", b"[" * 100000 + b"]" * 100000])
 def test_non_object_body_is_parameter_error(raw):
     conn, tc, calls, h = logged_in()
     r = tc.post("/api/user/profile", headers={**h, "Content-Type": "application/json"}, content=raw)

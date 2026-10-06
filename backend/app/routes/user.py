@@ -44,7 +44,7 @@ async def save_profile(request: Request):
         return err
     try:
         payload = json.loads(await request.body() or b"{}")
-    except ValueError:
+    except (ValueError, RecursionError):
         return _fail("参数错误")
     if not isinstance(payload, dict):
         return _fail("参数错误")

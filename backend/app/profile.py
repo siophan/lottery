@@ -55,7 +55,7 @@ def default_avatar(code: str) -> str:
     return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
 
 _BAD_CATEGORIES = {"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"}
-_ZWJ = "‍"      # 零宽连接符：组合 emoji 需要，放行
+_ZWJ = "\u200d"      # 零宽连接符：组合 emoji 需要，放行
 
 def clean_nickname(v) -> tuple[str | None, str | None]:
     if v is None:
