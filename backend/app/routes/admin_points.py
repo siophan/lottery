@@ -103,3 +103,24 @@ async def ledger(request: Request, p: Principal = ANY_ROLE):
         holder_id=holder_id, kind=kind, since=since, until=until,
         agent_id=p.agent_id if p.role == "agent" else None, hide_staff=p.role == "agent")
     return {"ledger": rows, "total": total}
+
+# ---------------- 体验期设置（仅后台人员） ----------------
+
+def _trial_view(cfg: dict) -> dict:
+    # 首次扣减延迟与扣减周期固定 24 小时，设置页只读显示
+    return {**cfg, "first_charge_delay_hours": db_points.CHARGE_PERIOD // 3600,
+            "charge_period_hours": db_points.CHARGE_PERIOD // 3600}
+
+@router.get("/settings/trial")
+async def get_trial(request: Request, p: Principal = STAFF_ONLY):
+    return _trial_view(db_points.get_trial_settings(request.app.state.db_conn))
+
+@router.put("/settings/trial")
+async def put_trial(request: Request, payload: dict = Body(...), p: Principal = STAFF_ONLY):
+    try:
+        cfg = db_points.set_trial_settings(request.app.state.db_conn, payload.get("trial_enabled"),
+                                           payload.get("trial_points"), actor_type=p.actor_type,
+                                           actor=p.username, now=int(time.time()))
+    except BizError as e:
+        return _err(e)
+    return {"ok": True, **_trial_view(cfg)}

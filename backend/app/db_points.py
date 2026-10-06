@@ -321,3 +321,18 @@ def list_ledger(conn, limit: int, offset: int, *, holder_type: str | None = None
             d["actor"] = STAFF_ACTOR_LABEL
         out.append(d)
     return out, total
+
+# ---------------- 体验赠送（首次激活时，在 db.activate_user 的事务内调用） ----------------
+
+def grant_trial_nocommit(conn, code: str, now: int) -> int:
+    """体验期开启且该账号从未赠送过 → 赠送设定分数（流水 trial、审计 points.trial，操作者 system）。
+    返回赠送分数（未赠送为 0）。每账号仅一次：以 trial_granted_at 为准。"""
+    cfg = get_trial_settings(conn)
+    r = conn.execute("SELECT trial_granted_at FROM users WHERE code=?", (code.upper(),)).fetchone()
+    if not cfg["trial_enabled"] or r is None or r["trial_granted_at"] is not None:
+        return 0
+    n = cfg["trial_points"]
+    apply_delta_nocommit(conn, "user", code, n, "trial", actor_type="system", actor=SYSTEM_ACTOR, now=now)
+    conn.execute("UPDATE users SET trial_granted_at=? WHERE code=?", (now, code.upper()))
+    db._audit_nocommit(conn, "system", SYSTEM_ACTOR, "points.trial", code.upper(), {"amount": n}, now)
+    return n

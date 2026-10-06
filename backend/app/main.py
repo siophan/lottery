@@ -19,6 +19,7 @@ from .routes import admin as admin_routes
 from .collector import Collector
 from .admin_auth import AdminDenied
 from .maintenance import run_maintenance, maintenance_loop
+from .points_worker import charge_loop
 from .routes import ds as ds_routes
 from .routes import admin_datasources as admin_ds_routes
 from .routes import admin_agents as admin_agents_routes
@@ -41,15 +42,18 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
         # 每日维护（清理过期审计/会话/票据等）：启动时先跑一次，之后每 24h 一次
         run_maintenance(app.state.db_conn, int(time.time()))
         app.state.maintenance_task = asyncio.create_task(maintenance_loop(app.state.db_conn))
+        # 积分每日扣减：启动即跑一轮，之后每 60 秒一轮（进程内，单实例部署）
+        app.state.charge_task = asyncio.create_task(charge_loop(app.state.db_conn))
         try:
             yield
         finally:
             try:
-                app.state.maintenance_task.cancel()
-                try:
-                    await app.state.maintenance_task
-                except asyncio.CancelledError:
-                    pass
+                for task in (app.state.maintenance_task, app.state.charge_task):
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
                 await app.state.collector.stop()
             finally:       # collector.stop() 抛异常也要关掉短信客户端
                 if app.state.sms_client is not None:
@@ -88,6 +92,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
     app.state.sms = sms
     app.state.login_throttle = LoginThrottle()      # 登录失败限流（进程内）
     app.state.maintenance_task = None
+    app.state.charge_task = None
     app.state.collector = collector or Collector(app.state.db_conn, enabled=settings.collector_enabled)
 
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all
