@@ -9,6 +9,7 @@ from ..admin_auth import Principal
 
 router = APIRouter()
 STAFF_ONLY = Depends(admin_auth.require_role(*admin_auth.STAFF))
+ANY_ROLE = Depends(admin_auth.require_role(*admin_auth.ALL_ROLES))
 
 ALLOWED_STATUS = ("active", "disabled", "banned")   # 使用控制：正常 / 暂停 / 封禁
 
@@ -70,21 +71,34 @@ async def create_user(request: Request, payload: dict = Body(...), p: Principal 
     return {"ok": True, "code": u.code}
 
 @router.get("/users")
-async def list_users(request: Request, p: Principal = STAFF_ONLY):
+async def list_users(request: Request, p: Principal = ANY_ROLE):
     conn = request.app.state.db_conn
+    raw = request.query_params.get("agent_id")
+    try:
+        agent_id = int(raw) if raw else None
+    except ValueError:
+        return _err("参数无效", 400)
+    if agent_id is not None and not 0 <= agent_id <= MAX_INT:
+        return _err("参数无效", 400)
+    if p.role == "agent":            # 代理只读本人名下账号，忽略传入的 agent_id
+        agent_id = p.agent_id
     return {"users": [
         {"code": u.code, "status": u.status, "expires_at": u.expires_at, "created_at": u.created_at,
          "activated": u.first_activated_at is not None,
          "first_activated_at": u.first_activated_at,
          "phone": db.mask_phone(u.phone),
-         "onboarded": u.onboarded_at is not None}
-        for u in db.list_users(conn)
+         "onboarded": u.onboarded_at is not None,
+         "agent_id": u.agent_id, "agent_name": agent_name,
+         "number_status": db.number_status(u, agent_status)}
+        for u, agent_name, agent_status in db.list_users_with_agent(conn, agent_id)
     ]}
 
 @router.post("/users/{code}/activate")
-async def activate_user(code: str, request: Request, p: Principal = STAFF_ONLY):
+async def activate_user(code: str, request: Request, p: Principal = ANY_ROLE):
     conn = request.app.state.db_conn
-    res = db.activate_user(conn, code, int(time.time()))
+    # 代理只能激活本人名下账号（他人账号按不存在处理）；后台人员不限
+    by_agent = p.agent_id if p.role == "agent" else None
+    res = db.activate_user(conn, code, int(time.time()), by_agent_id=by_agent)
     if res == "not_found":
         return _not_found()
     if res == "already":

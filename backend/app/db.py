@@ -341,19 +341,36 @@ def create_user(conn, code: str, password: str, expires_at: int | None,
     return User(cur.lastrowid, code.upper(), h, salt, expires_at, "active", now,
                 stamp, stamp, None, stamp)
 
-def activate_user(conn, code: str, now: int) -> str:
+def agent_chain(conn, agent_id: int | None) -> list[int]:
+    """从归属代理起沿上级链取最多三层：[直接, 间接, 次间接]。"""
+    chain, cur = [], agent_id
+    while cur is not None and len(chain) < 3:
+        chain.append(cur)
+        r = conn.execute("SELECT parent_agent_id FROM agents WHERE id=?", (cur,)).fetchone()
+        cur = r["parent_agent_id"] if r else None
+    return chain
+
+def activate_user(conn, code: str, now: int, *, by_agent_id: int | None = None) -> str:
+    """首次激活。by_agent_id 不为 None 表示代理本人操作：只能激活归属自己的账号，
+    否则按 not_found 处理（不暴露他人账号是否存在）。
+    首次激活时记录归属代理的关系链（直接/间接/次间接上级）与操作代理。"""
     u = get_user_by_code(conn, code)
-    if not u:
+    if not u or (by_agent_id is not None and u.agent_id != by_agent_id):
         return "not_found"
     h, salt = hash_password(INITIAL_PASSWORD)
-    # 条件更新保证并发下只有一次激活成功
+    chain = json.dumps(agent_chain(conn, u.agent_id)) if u.agent_id is not None else None
+    # 条件更新保证并发下只有一次激活成功；归属在检查后被划走则不激活
     cur = conn.execute(
         "UPDATE users SET password_hash=?, salt=?, first_activated_at=?, activated_at=?,"
-        " status='active', onboarded_at=NULL WHERE id=? AND first_activated_at IS NULL",
-        (h, salt, now, now, u.id),
+        " status='active', onboarded_at=NULL, activated_by_agent_id=?, agent_chain_json=?"
+        " WHERE id=? AND first_activated_at IS NULL AND agent_id IS ?",
+        (h, salt, now, now, by_agent_id, chain, u.id, u.agent_id),
     )
     conn.commit()
-    return "ok" if cur.rowcount == 1 else "already"
+    if cur.rowcount == 1:
+        return "ok"
+    again = get_user_by_code(conn, code)      # 并发下可能已被他人激活、划走或删除
+    return "already" if again and again.first_activated_at is not None else "not_found"
 
 def reset_user_password(conn, code: str) -> str:
     u = get_user_by_code(conn, code)
@@ -448,6 +465,26 @@ def apply_user_changes(conn, u: User, *, actor_type: str, actor: str, now: int,
 
 def list_users(conn) -> list[User]:
     return [_row_to_user(r) for r in conn.execute("SELECT * FROM users ORDER BY id").fetchall()]
+
+def list_users_with_agent(conn, agent_id: int | None = None) -> list[tuple[User, str | None, str | None]]:
+    """账号 + 归属代理名称 + 归属代理资格状态；agent_id 不为 None 时只列该代理名下账号。"""
+    sql = ("SELECT u.*, a.name AS agent_name, a.status AS agent_status FROM users u"
+           " LEFT JOIN agents a ON a.id=u.agent_id")
+    args = []
+    if agent_id is not None:
+        sql += " WHERE u.agent_id=?"
+        args.append(agent_id)
+    return [(_row_to_user(r), r["agent_name"], r["agent_status"])
+            for r in conn.execute(sql + " ORDER BY u.id", args).fetchall()]
+
+def number_status(u: User, agent_status: str | None) -> str:
+    """编号五态（由数据推导，不另存）：pending 待激活 | activated 已激活 | arrears 已欠费 |
+    to_recycle 待回收 | unassigned 未分配。余额在子项目 C 实现，此前已激活一律为 activated。"""
+    if u.first_activated_at is not None:
+        return "activated"
+    if u.agent_id is None:
+        return "unassigned"
+    return "to_recycle" if agent_status == "cancelled" else "pending"
 
 def create_session(conn, user_id: int, ttl: int) -> str:
     tok = new_token()
