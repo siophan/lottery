@@ -1,8 +1,9 @@
 """登录失败限流：进程内滑动窗口计数（生产为单个 uvicorn 进程，无需共享存储）。
 
 按账号编号（大写）与客户端 IP 分别计数；窗口内失败次数达到上限即锁定一段时间。
+密码正确但没拿到会话的登录（未激活、首登、暂停、封禁、无积分）只计入 IP。
 锁定期间直接拒绝，不再做 PBKDF2 校验，顺带节省 CPU。内存有界：访问时清理过期记录，
-键数超过上限时丢弃最久未失败的键。
+键数超过上限时丢弃最久未失败、且不在锁定期的键。
 """
 import time
 from collections import OrderedDict, deque
@@ -56,8 +57,8 @@ class FailureCounter:
         self._prune_oldest(now)
         entry = self._entries.get(key)
         if entry is None:
-            while len(self._entries) >= self.max_keys:
-                self._entries.popitem(last=False)
+            if len(self._entries) >= self.max_keys:
+                self._evict(now)
             entry = self._entries[key] = [deque(), 0]
         else:
             self._entries.move_to_end(key)
@@ -71,6 +72,14 @@ class FailureCounter:
         if len(hits) >= self.limit:
             entry[1] = now + self.lockout
             hits.clear()
+
+    def _evict(self, now: float) -> None:
+        # 优先丢最久未失败、且不在锁定期的键：灌满键数不能让已锁定的账号/IP 提前解锁
+        for key, entry in self._entries.items():
+            if entry[1] <= now:
+                del self._entries[key]
+                return
+        self._entries.popitem(last=False)     # 全部都在锁定期：退而丢最旧的
 
     def clear(self, key: str) -> None:
         self._entries.pop(key, None)
@@ -91,6 +100,10 @@ class LoginThrottle:
 
     def failed(self, code: str, ip: str) -> None:
         self.code.hit(code)
+        self.ip.hit(ip)
+
+    def attempted(self, ip: str) -> None:
+        """密码正确但不发会话的登录：只计入 IP，不锁账号（否则别人可借此锁住真实用户）。"""
         self.ip.hit(ip)
 
     def succeeded(self, code: str) -> None:

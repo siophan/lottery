@@ -2,6 +2,7 @@ import hmac
 import time
 from dataclasses import dataclass
 from fastapi import Request
+from fastapi.concurrency import run_in_threadpool
 from . import db, db_agents, security
 
 STAFF = ("super", "admin")      # 后台人员：最高权限者 + 管理员
@@ -35,11 +36,12 @@ def _find_login(conn, username: str):
                      (db_agents.name_key(username),)).fetchone()
     return db.get_admin_by_id(conn, r["admin_id"]) if r else None
 
-def authenticate(conn, username: str, password: str):
+async def authenticate(conn, username: str, password: str):
     admin = _find_login(conn, username)
     if not admin:
         return None
-    if not security.verify_password(password, admin.salt, admin.password_hash):
+    # PBKDF2 放到线程池，不阻塞事件循环；线程里只做哈希，数据库读取留在事件循环线程
+    if not await run_in_threadpool(security.verify_password, password, admin.salt, admin.password_hash):
         return None
     return admin
 

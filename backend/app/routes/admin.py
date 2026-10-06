@@ -211,7 +211,7 @@ async def admin_login(request: Request, response: Response, payload: dict = Body
     # 先查限流再验密码：锁定期间不做 PBKDF2
     if throttle.locked(key, ip):
         return JSONResponse({"ok": False, "error": LOCKED_MSG}, status_code=429)
-    admin = admin_auth.authenticate(conn, username, password)
+    admin = await admin_auth.authenticate(conn, username, password)
     if not admin:
         throttle.failed(key, ip)
         return JSONResponse({"ok": False}, status_code=401)

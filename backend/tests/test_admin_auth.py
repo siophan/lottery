@@ -1,3 +1,4 @@
+import asyncio
 from app import db, admin_auth
 from app.config import Settings
 
@@ -6,9 +7,10 @@ def _conn():
 
 def test_authenticate_ok_wrong_and_unknown():
     conn = _conn(); db.upsert_admin(conn, "root", "pw")
-    assert admin_auth.authenticate(conn, "root", "pw") is not None
-    assert admin_auth.authenticate(conn, "root", "bad") is None
-    assert admin_auth.authenticate(conn, "nobody", "pw") is None
+    auth = lambda u, p: asyncio.run(admin_auth.authenticate(conn, u, p))
+    assert auth("root", "pw") is not None
+    assert auth("root", "bad") is None
+    assert auth("nobody", "pw") is None
 
 def test_issue_and_current_admin():
     conn = _conn(); a = db.upsert_admin(conn, "root", "pw")

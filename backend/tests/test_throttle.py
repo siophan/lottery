@@ -62,6 +62,17 @@ def test_counter_size_is_capped_dropping_oldest():
     assert len(c) == 3
     assert "A" not in c and "D" in c
 
+def test_counter_eviction_keeps_locked_keys():
+    # 灌满键数不能把仍在锁定期的键挤掉（否则可借此提前解锁）
+    clk = Clock()
+    c = FailureCounter(limit=2, window=900, lockout=900, max_keys=3, clock=clk)
+    c.hit("VICTIM"); c.hit("VICTIM")
+    assert c.locked("VICTIM")
+    for k in ("A", "B", "C", "D", "E"):
+        clk.t += 1
+        c.hit(k)
+    assert c.locked("VICTIM") and len(c) == 3
+
 def test_counter_prunes_stale_keys():
     clk = Clock()
     c = FailureCounter(limit=5, window=900, lockout=900, clock=clk)
@@ -178,8 +189,50 @@ def test_ip_counter_uses_forwarded_ip_behind_local_proxy():
         login(tc, user=f"X{i}", **{"X-Real-IP": "9.9.9.9"})
     assert th.ip.locked("testclient") and not th.ip.locked("9.9.9.9")
 
-def test_successful_but_rejected_logins_do_not_count():
+def test_rejected_logins_with_right_password_do_not_lock_the_account():
     conn, tc, clk = build()
     db.create_user(conn, "USER01", "x", None, pending=True)
     for _ in range(6):
         assert login(tc, pw="123456")["code"] == 10023
+    assert not tc.app.state.login_throttle.code.locked("USER01")
+
+def test_scanning_numbers_with_initial_password_locks_the_ip():
+    # 号段编号连续、初始密码公开：密码对但没拿到会话的尝试也计入 IP，扫号 30 次即锁
+    conn, tc, clk = build()
+    for i in range(20):
+        db.create_user(conn, f"P{i}", "x", None, pending=True)          # 10023
+    for i in range(10):
+        u = db.create_user(conn, f"N{i}", "123456", None)               # 已激活未首登 → 10030
+        conn.execute("UPDATE users SET onboarded_at=NULL WHERE id=?", (u.id,)); conn.commit()
+    codes = [login(tc, user=f"P{i}", pw="123456")["code"] for i in range(20)]
+    codes += [login(tc, user=f"N{i}", pw="123456")["code"] for i in range(10)]
+    assert codes == [10023] * 20 + [10030] * 10
+    db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 10)
+    assert login(tc, pw="pw") == LOCKED
+    clk.t += 901
+    assert login(tc, pw="pw")["code"] == 0
+
+def test_each_no_session_outcome_counts_against_the_ip():
+    conn, tc, clk = build()
+    db.create_user(conn, "BAN", "pw", None); db.update_user(conn, "BAN", status="banned")       # 10024
+    db.create_user(conn, "OFF", "pw", None); db.update_user(conn, "OFF", status="disabled")     # 10022
+    db.create_user(conn, "ZERO", "pw", None)                                                     # 10025
+    th = tc.app.state.login_throttle
+    for _ in range(10):
+        assert [login(tc, user=u, pw="pw")["code"] for u in ("BAN", "OFF", "ZERO")] == [10024, 10022, 10025]
+    assert th.ip.locked("testclient")
+
+def test_successful_login_does_not_count_against_the_ip():
+    conn, tc, clk = build()
+    db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 10)
+    for _ in range(40):
+        assert login(tc, pw="pw")["code"] == 0
+
+def test_malformed_login_bodies_are_plain_failures():
+    conn, tc, clk = build()
+    for body in ([1, 2], {"username": 5, "password": 6}, {"username": "U", "password": ["x"]}):
+        assert tc.post("/api/auth/login", json=body).json() == {"code": 1, "msg": "账号或密码错误"}
+    r = tc.post("/api/auth/login", content=b"not json", headers={"content-type": "application/json"})
+    assert r.json() == {"code": 1, "msg": "账号或密码错误"}

@@ -3,6 +3,7 @@ import secrets
 import sys
 import time
 from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from .. import db
 from ..security import verify_password
@@ -80,9 +81,9 @@ def password_problem(old: str, new: str, confirm: str) -> str | None:
 
 @router.post("/auth/login")
 async def login(request: Request):
-    payload = await request.json()
-    username = (payload.get("username") or "").upper()
-    password = payload.get("password") or ""
+    payload = await _json_dict(request)
+    username = _str(payload, "username").upper()
+    password = _str(payload, "password")
     conn = request.app.state.db_conn
     settings = request.app.state.settings
     dayys = request.app.state.dayys
@@ -94,24 +95,33 @@ async def login(request: Request):
         return JSONResponse({"code": 1, "msg": LOCKED_MSG})
 
     user = db.get_user_by_code(conn, username)
-    if user is None or not verify_password(password, user.salt, user.password_hash):
+    # PBKDF2 放到线程池：不阻塞事件循环（线程里只做哈希，不碰共享的数据库连接）
+    if user is None or not await run_in_threadpool(verify_password, password, user.salt, user.password_hash):
         throttle.failed(username, ip)
         return JSONResponse({"code": 1, "msg": "账号或密码错误"})
     throttle.succeeded(username)        # 密码正确即清零该账号的失败计数
+    user = db.get_user_by_code(conn, username) or user     # 哈希期间状态可能已变，重新读取
+
+    def deny(body: dict) -> JSONResponse:
+        # 密码对但不发会话（未激活/封禁/暂停/首登/无积分）也计入该 IP 的尝试次数：
+        # 号段编号连续且初始密码公开，只统计密码错误会让人用 123456 按段扫号、抢先完成首登
+        throttle.attempted(ip)
+        return JSONResponse(body)
+
     now = int(time.time())
     if user.first_activated_at is None:     # 待激活账号预置了初始密码，输对密码才会走到这里
-        return JSONResponse({"code": 10023, "msg": "账号未激活，请联系有激活权限的人员激活"})
+        return deny({"code": 10023, "msg": "账号未激活，请联系有激活权限的人员激活"})
     if user.status == "banned":      # 封禁优先于暂停/到期
-        return JSONResponse({"code": 10024, "msg": "账号已封禁，无法登录"})
+        return deny({"code": 10024, "msg": "账号已封禁，无法登录"})
     if user.status != "active" or (user.expires_at is not None and user.expires_at < now):
-        return JSONResponse({"code": 10022, "msg": "账号已停用或已到期"})
+        return deny({"code": 10022, "msg": "账号已停用或已到期"})
     if user.onboarded_at is None:
         # 未完成首登：不建会话、不触达上游，只发只能用于改密/发短信的临时票据
         ticket = db.create_onboard_ticket(conn, user.id, ONBOARD_TICKET_TTL)
-        return JSONResponse({"code": 10030, "msg": "首次登录请修改密码并绑定手机号",
-                             "data": {"onboardToken": ticket}})
+        return deny({"code": 10030, "msg": "首次登录请修改密码并绑定手机号",
+                     "data": {"onboardToken": ticket}})
     if user.points <= 0:            # 已激活且余额为 0（积分暂停）：不发会话
-        return JSONResponse(POINTS_EMPTY)
+        return deny(POINTS_EMPTY)
 
     # 取共享 data-ys 账号的 userInfo（确保服务端已登录上游）
     try:
@@ -176,7 +186,7 @@ async def onboard(request: Request):
     if blocked is not None:
         return blocked
     old = _str(payload, "oldPassword")
-    if not verify_password(old, user.salt, user.password_hash):
+    if not await run_in_threadpool(verify_password, old, user.salt, user.password_hash):
         return _fail("旧密码错误")
     new = _str(payload, "newPassword")
     problem = password_problem(old, new, _str(payload, "confirmPassword"))

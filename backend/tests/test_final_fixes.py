@@ -49,7 +49,9 @@ def test_admin_login_skips_password_verify_when_locked(monkeypatch):
         login(tc, "ag1")
     from app import admin_auth
     calls = []
-    monkeypatch.setattr(admin_auth, "authenticate", lambda *a: calls.append(a) or None)
+    async def fake_auth(*a):
+        calls.append(a)
+    monkeypatch.setattr(admin_auth, "authenticate", fake_auth)
     assert login(tc, "ag1", "pw").status_code == 429
     assert calls == []
 
