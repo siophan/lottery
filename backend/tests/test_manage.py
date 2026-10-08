@@ -89,3 +89,14 @@ def test_recharge_arrears_skips_accounts_that_ever_had_points(capsys):
     assert "accounts to recharge: 1" in capsys.readouterr().out
     from tests.points_helpers import points_of
     assert [points_of(conn, c) for c in ("A1", "SPENT", "TRIAL")] == [30, 0, 0]
+
+def test_recharge_arrears_skips_legacy_blank_codes(capsys):
+    # 旧版本可能遗留编号为空的账号：批量充值会整批拒绝空编号，初始充值跳过它们
+    conn = mem()
+    db.create_user(conn, "A1", "pw", None)
+    conn.execute("INSERT INTO users(code, password_hash, salt, status, created_at, first_activated_at, onboarded_at)"
+                 " VALUES ('', 'h', 's', 'active', 1, 1, 1)"); conn.commit()
+    assert manage.main(["recharge-arrears", "30"], conn=conn) == 0
+    assert "accounts to recharge: 1" in capsys.readouterr().out
+    from tests.points_helpers import points_of
+    assert points_of(conn, "A1") == 30

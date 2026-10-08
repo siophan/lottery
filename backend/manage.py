@@ -29,6 +29,7 @@ def _recharge_arrears(conn, points: int, dry_run: bool) -> int:
     now = int(time.time())
     codes = [r["code"] for r in conn.execute(
         "SELECT code FROM users WHERE first_activated_at IS NOT NULL AND points=0 AND status='active'"
+        " AND trim(code) <> ''"                 # 旧版本遗留的空编号账号：批量充值会整批拒绝，跳过
         " AND (expires_at IS NULL OR expires_at >= ?)"
         " AND NOT EXISTS (SELECT 1 FROM points_ledger l WHERE l.holder_type='user' AND l.holder_id=users.code)"
         " ORDER BY id", (now,))]
