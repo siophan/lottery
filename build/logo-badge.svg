@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="ball" cx="38%" cy="34%" r="75%">
+      <stop offset="0" stop-color="#FF7A45"/>
+      <stop offset="0.55" stop-color="#F0301E"/>
+      <stop offset="1" stop-color="#B8140C"/>
+    </radialGradient>
+    <linearGradient id="ear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFB13B"/>
+      <stop offset="1" stop-color="#FF7A1A"/>
+    </linearGradient>
+  </defs>
+  <!-- cream outline so the mark reads on red title bars -->
+  <path fill="#fff6e0" stroke="#fff6e0" stroke-width="36" stroke-linejoin="round" d="M96 196 L84 74 Q82 46 108 56 L214 112 Q256 102 298 112 L404 56 Q430 46 428 74 L416 196 Q448 248 448 300 A192 192 0 0 1 64 300 Q64 248 96 196 Z"/>
+  <!-- head with ears -->
+  <path fill="url(#ball)" d="M96 196 L84 74 Q82 46 108 56 L214 112 Q256 102 298 112 L404 56 Q430 46 428 74 L416 196 Q448 248 448 300 A192 192 0 0 1 64 300 Q64 248 96 196 Z"/>
+  <!-- inner ears -->
+  <path fill="url(#ear)" d="M118 172 L112 96 L184 132 Z"/>
+  <path fill="url(#ear)" d="M394 172 L400 96 L328 132 Z"/>
+  <!-- gloss -->
+  <path fill="#fff" opacity=".22" d="M120 250 Q150 160 250 150 Q180 180 150 270 Z"/>
+  <!-- happy eyes -->
+  <g fill="none" stroke="#fff" stroke-width="22" stroke-linecap="round">
+    <path d="M150 292 Q182 252 214 292"/>
+    <path d="M298 292 Q330 252 362 292"/>
+  </g>
+  <!-- nose + mouth -->
+  <path fill="#FFD23F" d="M240 318 h32 l-16 18 z"/>
+  <path fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" d="M256 336 v8 q-12 18 -28 6 M256 344 q12 18 28 6"/>
+  <!-- whiskers -->
+  <g stroke="#fff" stroke-width="9" stroke-linecap="round" opacity=".9">
+    <path d="M136 334 L90 326"/><path d="M138 358 L94 366"/>
+    <path d="M376 334 L422 326"/><path d="M374 358 L418 366"/>
+  </g>
+</svg>
