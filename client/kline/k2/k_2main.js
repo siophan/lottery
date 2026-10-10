@@ -92,7 +92,7 @@ function getkjname(cat) {
 	$("#houtui").val("后退");
 	$("#qianjin").val("前进");
 	$("#zdy").html("自定义");
-	$("#tjding").html("固定");
+	$("#tjding").html("关联");
 	playId = $('#wf').val();
 	loadingPlan();
 }
@@ -208,6 +208,10 @@ function loadingData(f) {
 		}
 
 		myChart.clear();
+		// 记下本屏当前方案，供「后退 / 前进」切换（k_history.js）
+		kHistory.record();
+		// 方案号码画完前「提交」置灰（k_submit.js）
+		kSubmit.loading();
 
 		//薛贵平修改
 		window.onresize = function() {
@@ -230,7 +234,7 @@ function loadingData(f) {
 		syqEma12 = 0,
 			syqEma26 = 0,
 			syqDea = 0;
-		var fa = $("input[name='fa']:checked").val();
+		var fa = k.planMode(); // 关联到保存方案时按自定义方案取数
 		var Id = "";
 		// typeZs();
 		wfType = $('#wf').val();
@@ -243,7 +247,6 @@ function loadingData(f) {
 			data.coefficient = 2;
 			data.macd = 0;
 			data.cycle = 9;
-			data.backIndex = 1;
 		} else {
 			data = JSON.parse(info);
 		}
@@ -265,16 +268,6 @@ function loadingData(f) {
 		}
 		var rows = data.dataRange;
 		var rowNum = $("#jdqqs").val();
-		var qianjin = localStorage.getItem(userName + "_Kxtqianjin");
-		var fyzb = data.backIndex; // 前后步长
-		if (fyzb == "" || fyzb == null) {
-			fyzb = 20;
-		}
-
-		if (qianjin != null && qianjin != "") {
-			rows = parseInt(rows) + (parseInt(qianjin) * parseInt(fyzb));
-
-		}
 		// planList[playId].forEach(itme=>{
 		// 	if(ShiFouKong(localStorage.getItem(itme))){
 		// 		parent.setPlan(itme);
@@ -307,30 +300,13 @@ function loadingData(f) {
 				var successRes = function(res) { //智能数据
 					k_util.getyesAndno(res.data, cat, pageId, Id, onBack)
 				};
-				let mantissa = getQueryVariable("mantissa");
-				
-				if (null != mantissa && typeof mantissa != undefined && mantissa != "undefined" && mantissa) {
-					k_util.request('/lotteryNumber/mantissaTopRows', {
-						code: main_id,
-						rows: rows,
-						mantissa: mantissa
-					}, "", successRes, true)
-
-
-				} else if ("null" != requestUrl && null != requestUrl && typeof requestUrl != undefined && requestUrl !=
-					"undefined" &&
-					requestUrl) {
-
-					k_util.requestA(requestUrl + '?code=' + main_id + "&rows=" + rows, successRes)
-				} else {
-
-					k_util.request('/lotteryNumber/topRows', {
-						code: main_id,
-						rows: rows
-					}, "", successRes, true)
-
-
-				}
+				// 取数失败时显示失败状态和重试入口（k_sync.js），重试即重新加载本屏
+				kSync.fetchDraws({
+					code: main_id,
+					rows: rows,
+					mantissa: getQueryVariable("mantissa"),
+					requestUrl: requestUrl
+				}, successRes, function() { loadingData(); });
 
 
 
@@ -364,32 +340,15 @@ function loadingData(f) {
 			// parent.getPlan(zdyfa3, zdyfa4, data);
 
 			var successRes = function(res) { //智能数据
-				parent.getPlan(zdyfa3, zdyfa4, res.data);
+				parent.getPlan(zdyfa3, zdyfa4, res.data, kScreenNo());
 			};
-			let mantissa = getQueryVariable("mantissa");
-
-			if (null != mantissa && typeof mantissa != undefined && mantissa != "undefined" && mantissa) {
-				k_util.request('/lotteryNumber/mantissaTopRows', {
-					code: main_id,
-					rows: rows,
-					mantissa: mantissa
-				}, "", successRes, true)
-
-
-			} else if ("null" != requestUrl && null != requestUrl && typeof requestUrl != undefined && requestUrl !=
-				"undefined" &&
-				requestUrl) {
-
-				k_util.requestA(requestUrl + '?code=' + main_id + "&rows=" + rows, successRes)
-			} else {
-
-				k_util.request('/lotteryNumber/topRows', {
-					code: main_id,
-					rows: rows
-				}, "", successRes, true)
-
-
-			}
+			// 取数失败时显示失败状态和重试入口（k_sync.js），重试即重新加载本屏
+			kSync.fetchDraws({
+				code: main_id,
+				rows: rows,
+				mantissa: getQueryVariable("mantissa"),
+				requestUrl: requestUrl
+			}, successRes, function() { loadingData(); });
 
 
 			// //发送请求
@@ -424,7 +383,6 @@ function onBack(data) {
 		infoData.coefficient = 2;
 		infoData.macd = 0;
 		infoData.cycle = 9;
-		infoData.backIndex = 1;
 	}
 	faZs = data.len;
 	let userName = localStorage.getItem("userName");
@@ -447,28 +405,18 @@ function onBack(data) {
 	}
 
 
-	var fa = $("input[name='fa']:checked").val() // /fa：==1（自定义方案） ==2（推荐方案）
+	var fa = k.planMode() // /fa：==1（自定义方案，含关联到保存方案） ==2（推荐方案）
 	if (fa == 1) {
 		faName = $("#zdyfa4").text();
 	} else {
 		faName = $("#tjfa3").find("option:selected").text();
 	}
 
-	var rowStart = 1;
-	var qianjin = localStorage.getItem(userName + "_Kxtqianjin");
-	var fyzb = localStorage.getItem(userName + "_Kxtfyzb"); // 前进参数
-	if (fyzb == "" || fyzb == null) {
-		fyzb = 20;
-	}
-	if (qianjin != null && qianjin != "") {
-		rowStart = (parseInt(qianjin) * fyzb);
-	}
-
 	var rows = infoData.dataRange;
 	ksc = 0;
 
 
-	var val = $('input:radio[name="fa"]:checked').val();
+	var val = k.planMode();
 	if ((Id == "f001" || Id == "f002") && parseInt(val) == 2) {
 		faZs = data[1].data.length;
 	}
@@ -716,6 +664,10 @@ function addMainData(data23) {
  * @备注：同屏
  */
 function TongPing() {
+	if (kScreenNo() && parent.toggleTongPing) {
+		parent.toggleTongPing();
+		return;
+	}
 	screenStatus = 'moreScreen';
 	var myChartarr = [];
 	var fa = $("input[name='fa']:checked").val();
@@ -858,11 +810,12 @@ function QuXiaoTP(id) {
  * @备注：提交到主页面
  */
 function tj() {
-	var fa = $("input[name='fa']:checked").val();
+	var fa = k.planMode();
 	if (($("#tjfa3").val() == "f001" || $("#tjfa3").val() == "f002") && fa == 2) {
 		layer.msg("原智能数据不能提交");
 		return false;
 	}
+	if (!kSubmit.begin()) return false;
 	/*	console.log($("#wf").val());
 		console.log(window.parent);
 		if ($("#wf").val() == "q2zh") {
@@ -876,7 +829,7 @@ function tj() {
 	var wfid = $("#wf").val();
 
 	var id = "";
-	var fa = $("input[name='fa']:checked").val();
+	var fa = k.planMode();
 	if (fa == 2) {
 		id = $("#tjfa3").val();
 		// window.opener.onCallBackFatj(id, "-1", "1", "0",wfid); //固定方案

@@ -111,3 +111,84 @@ body{
 	padding: 5px;
 	
 }
+
+/* 数据同步失败提示（k_sync.js）：盖住整个图表区域，不显示旧数据 */
+#k1 {
+	position: relative;
+}
+.k-sync-fail {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	z-index: 10;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0.65);
+	color: #fff;
+	font-size: 16px;
+}
+.k-sync-fail .k-sync-retry {
+	margin: 12px 0 0;
+	cursor: pointer;
+}
+.k-sync-fail .k-sync-retry:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
+/* 后退 / 前进没有可切换的方案时置灰（k_history.js） */
+.buttonK:disabled {
+	background-color: #7f9db5;
+	color: #d6e0e8;
+	cursor: default;
+}
+/* 方案搜索（k_search.js）：结果列表盖在图表上方 */
+.fa-search {
+	position: relative;
+	float: left;
+	margin: 10px 0 0 5px;
+}
+.fa-search input {
+	height: 30px;
+	width: 120px;
+	box-sizing: border-box;
+	padding: 0 6px;
+	border: 0;
+	border-radius: 3px;
+}
+.fa-search ul {
+	position: absolute;
+	z-index: 20;
+	left: 0;
+	top: 32px;
+	min-width: 200px;
+	max-height: 260px;
+	overflow-y: auto;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	background: #fff;
+	color: #000;
+	text-align: left;
+	border-radius: 3px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.fa-search li {
+	padding: 6px 10px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.fa-search li:hover {
+	background: #e6f0fa;
+}
+.fa-search li.empty {
+	color: #999;
+	cursor: default;
+}
+.fa-search li.empty:hover {
+	background: none;
+}

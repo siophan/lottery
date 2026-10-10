@@ -74,7 +74,7 @@ def test_login_pending_user_rejected_10023():
     conn, tc = build()
     db.create_user(conn, "USER01", "x", None, pending=True)
     r = tc.post("/api/auth/login", json={"username": "USER01", "password": "123456"})
-    assert r.json() == {"code": 10023, "msg": "账号未激活，请联系有激活权限的人员激活"}
+    assert r.json() == {"code": 10023, "msg": "该账号未激活，请联系代理或管理员激活后使用！"}
 
 def test_login_pending_user_wrong_password_is_generic_error():
     # 密码不对仍是通用错误，不能用任意密码探测出待激活账号

@@ -3,16 +3,25 @@ from . import db, db_points
 from .db_agents import BizError, begin_write, get_agent
 from .security import hash_password
 
-NO_MIN, NO_MAX = 1_000_000, 9_999_999     # 新号统一 7 位纯数字，不允许前导 0
+PREFIX = "Z"                              # 新号统一「Z + 7 位数字」：Z0000001–Z9999999
+NO_MIN, NO_MAX = 1, 9_999_999             # 接口与号段流水只用数字部分
 MAX_BATCH = 10_000                        # 单次分配 / 划拨上限
-_SEVEN_DIGITS = "[0-9]" * 7               # GLOB：只匹配 7 位纯数字编号，存量字母编号不会落入区间
+_Z_CODE = PREFIX + "[0-9]" * 7            # GLOB：只匹配 Z 编号；老的纯数字 / 字母编号不迁移、不落入区间
+
+def code_of(n: int) -> str:
+    return f"{PREFIX}{n:07d}"
+
+def _no_of(code: str) -> int | None:
+    """Z 编号 → 数字部分；老编号返回 None。"""
+    tail = code[len(PREFIX):]
+    return int(tail) if code.startswith(PREFIX) and len(tail) == 7 and tail.isdigit() else None
 
 def _is_int(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 def parse_range(start, end) -> tuple[int, int]:
     if not (_is_int(start) and _is_int(end) and NO_MIN <= start <= NO_MAX and NO_MIN <= end <= NO_MAX):
-        raise BizError("编号必须是 1000000–9999999 之间的整数")
+        raise BizError("编号必须是 1–9999999 之间的整数（即 Z0000001–Z9999999）")
     if start > end:
         raise BizError("起始编号不能大于结束编号")
     if end - start + 1 > MAX_BATCH:
@@ -22,12 +31,12 @@ def parse_range(start, end) -> tuple[int, int]:
 def _rows_in_range(conn, start: int, end: int) -> dict:
     rs = conn.execute(
         f"SELECT id, code, agent_id, first_activated_at FROM users"
-        f" WHERE code GLOB '{_SEVEN_DIGITS}' AND code BETWEEN ? AND ?",
-        (str(start), str(end))).fetchall()
-    return {int(r["code"]): r for r in rs}
+        f" WHERE code GLOB '{_Z_CODE}' AND code BETWEEN ? AND ?",
+        (code_of(start), code_of(end))).fetchall()
+    return {_no_of(r["code"]): r for r in rs}
 
 def _fmt_codes(nums: list[int]) -> str:
-    head = "、".join(str(n) for n in nums[:10])
+    head = "、".join(code_of(n) for n in nums[:10])
     return head + (f" 等 {len(nums)} 个" if len(nums) > 10 else "")
 
 def _log_op(conn, op, start, end, count, from_id, to_id, actor, now) -> None:
@@ -53,18 +62,19 @@ def assign_segment(conn, agent_id: int, start, end, *, actor_type: str, actor: s
                      if r["agent_id"] is not None or r["first_activated_at"] is not None)
         if bad:
             raise BizError("以下编号已存在，不能分配：" + _fmt_codes(bad), 409)
-        # 吸收的无归属待激活号与新建号一致：恢复为正常状态、永久有效
-        conn.executemany("UPDATE users SET agent_id=?, status='active', expires_at=NULL WHERE id=?",
+        # 吸收的无归属待激活号与新建号一致：永久有效；使用控制（封禁 / 暂停）保持不变，分配不顺带解除
+        conn.executemany("UPDATE users SET agent_id=?, expires_at=NULL WHERE id=?",
                          [(ag.id, r["id"]) for r in existing.values()])
         new = [n for n in range(start, end + 1) if n not in existing]
         conn.executemany(
             "INSERT INTO users(code,password_hash,salt,expires_at,status,created_at,agent_id)"
             " VALUES(?,?,?,NULL,'active',?,?)",
-            [(str(n), h, salt, now, ag.id) for n in new])
+            [(code_of(n), h, salt, now, ag.id) for n in new])
         count = end - start + 1
         _log_op(conn, "assign", start, end, count, None, ag.id, actor, now)
         detail = {"agent": ag.name, "count": count, "created": len(new), "reassigned": len(existing)}
-        db._audit_nocommit(conn, actor_type, actor, "segment.assign", f"{start}-{end}", detail, now)
+        db._audit_nocommit(conn, actor_type, actor, "segment.assign", f"{code_of(start)}-{code_of(end)}",
+                           detail, now)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -97,7 +107,7 @@ def transfer_segment(conn, from_agent_id: int, to_agent_id, start, end, *, actor
                          [(to.id, r["id"]) for r in existing.values()])
         count = end - start + 1
         _log_op(conn, "transfer", start, end, count, me.id, to.id, actor, now)
-        db._audit_nocommit(conn, "agent", actor, "segment.transfer", f"{start}-{end}",
+        db._audit_nocommit(conn, "agent", actor, "segment.transfer", f"{code_of(start)}-{code_of(end)}",
                            {"from": me.name, "to": to.name, "count": count}, now)
         conn.commit()
     except Exception:
@@ -121,7 +131,7 @@ def recycle_agent(conn, agent_id: int, *, actor_type: str, actor: str, now: int)
             raise BizError("该代理已回收", 409)
         pending = conn.execute("SELECT code, points FROM users WHERE agent_id=? AND first_activated_at IS NULL",
                                (a.id,)).fetchall()
-        nums = sorted(int(r["code"]) for r in pending)
+        nums = sorted(n for n in (_no_of(r["code"]) for r in pending) if n is not None)   # 流水起止只记 Z 号
         refunded = 0
         for r in pending:
             if r["points"] > 0:
@@ -140,15 +150,15 @@ def recycle_agent(conn, agent_id: int, *, actor_type: str, actor: str, now: int)
                                                   (a.id,))]
         conn.execute("UPDATE agents SET parent_agent_id=NULL WHERE parent_agent_id=?", (a.id,))
         conn.execute("UPDATE agents SET recycled_at=? WHERE id=?", (now, a.id))
-        _log_op(conn, "recycle", nums[0] if nums else None, nums[-1] if nums else None, len(nums),
+        _log_op(conn, "recycle", nums[0] if nums else None, nums[-1] if nums else None, len(pending),
                 a.id, None, actor, now)
         db._audit_nocommit(conn, actor_type, actor, "agent.recycle", a.name,
-                           {"count": len(nums), "children": children, "refunded": refunded}, now)
+                           {"count": len(pending), "children": children, "refunded": refunded}, now)
         conn.commit()
     except Exception:
         conn.rollback()
         raise
-    return {"count": len(nums), "children": len(children)}
+    return {"count": len(pending), "children": len(children)}
 
 STAFF_ACTOR_LABEL = "后台"       # 代理视图里替代后台人员用户名的显示
 

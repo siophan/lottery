@@ -44,7 +44,7 @@ var k_util = function() {
 		 * @参数async： true:异步,false:同步
 		 * @返回值：返回response对象
 		 */
-		request : function(url, data, beforeSend, successRes, async) {
+		request : function(url, data, beforeSend, successRes, async, failRes) {
 			if (typeof (async) != "boolean") {
 				async = true;
 			}
@@ -104,13 +104,16 @@ var k_util = function() {
 					}
 				},
 				error : function(XMLHttpRequest, textStatus, errorThrown) {
-
+					// 网络错误、超时：交给调用方显示失败状态（见 k_sync.js）
+					if (typeof (failRes) == "function") {
+						failRes(textStatus);
+					}
 				}
 			});
 			return ption;
 		},
 		
-		requestA : function(url, successRes) {
+		requestA : function(url, successRes, failRes) {
 			var ption="";
 			$.ajax({
 				// 服务端下发的数据源接口需要 token，第三方地址返回 {}
@@ -166,7 +169,10 @@ var k_util = function() {
 					}
 				},
 				error : function(XMLHttpRequest, textStatus, errorThrown) {
-		
+					// 网络错误、超时：交给调用方显示失败状态（见 k_sync.js）
+					if (typeof (failRes) == "function") {
+						failRes(textStatus);
+					}
 				}
 			});
 			return ption;
@@ -181,7 +187,7 @@ var k_util = function() {
 		getyesAndno : function(data,cat,play_id,fa_id,onBack){
 			
 			var  opengudingarr;
-			var fa = $("input[name='fa']:checked").val();
+			var fa = k.planMode();
 			if(fa == 1){
 				opengudingarr = fa_id.split("-")
 			}else{
@@ -189,6 +195,7 @@ var k_util = function() {
 				opengudingarr =  JSON.parse(localStorage.getItem(fa_id));
 			}
 			zdyfa_plan = opengudingarr;
+			if (typeof kSubmit != "undefined") kSubmit.ready();
 			
 			for(var i=0;i<data.length;i++){
 				var opennumber = data[i].opennumber;

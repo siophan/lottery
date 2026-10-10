@@ -11,6 +11,7 @@ from ..throttle import LOCKED_MSG, client_ip
 router = APIRouter()
 STAFF_ONLY = Depends(admin_auth.require_role(*admin_auth.STAFF))
 ANY_ROLE = Depends(admin_auth.require_role(*admin_auth.ALL_ROLES))
+AGENT_ONLY = Depends(admin_auth.require_role("agent"))
 
 ALLOWED_STATUS = ("active", "disabled", "banned")   # 使用控制：正常 / 暂停 / 封禁
 
@@ -84,7 +85,7 @@ async def list_users(request: Request, p: Principal = ANY_ROLE):
     if p.role == "agent":            # 代理只读本人名下账号，忽略传入的 agent_id
         agent_id = p.agent_id
     return {"users": [
-        {"code": u.code, "status": u.status, "expires_at": u.expires_at, "created_at": u.created_at,
+        {"code": u.code, "status": u.status, "status_by": u.status_by, "expires_at": u.expires_at, "created_at": u.created_at,
          "activated": u.first_activated_at is not None,
          "first_activated_at": u.first_activated_at,
          "phone": db.mask_phone(u.phone),
@@ -130,8 +131,31 @@ async def activate_user(code: str, request: Request, p: Principal = ANY_ROLE):
         return _not_found()
     if res == "already":
         return _err("账号已激活", 409)
+    if res == "blocked":
+        return _err("账号已封禁或暂停，需先恢复后再激活", 409)
     _audit(request, p, "user.activate", code.upper(), {})
     return {"ok": True}
+
+# 代理暂停 / 恢复本人名下账号；后台人员走 PATCH /users/{code}。管理员暂停或封禁的，代理无权恢复。
+_PAUSE_ERRORS = {"busy": ("账号已暂停或封禁", 409), "not_paused": ("账号未暂停", 409),
+                 "forbidden": ("该账号由管理员暂停或封禁，代理无权恢复", 403)}
+
+def _agent_pause(request: Request, p: Principal, code: str, pause: bool):
+    res = db.agent_set_pause(request.app.state.db_conn, p.agent_id, code, pause,
+                             actor=p.username, now=int(time.time()))
+    if res == "not_found":
+        return _not_found()
+    if res != "ok":
+        return _err(*_PAUSE_ERRORS[res])
+    return {"ok": True}
+
+@router.post("/users/{code}/pause")
+async def agent_pause_user(code: str, request: Request, p: Principal = AGENT_ONLY):
+    return _agent_pause(request, p, code, True)
+
+@router.post("/users/{code}/resume")
+async def agent_resume_user(code: str, request: Request, p: Principal = AGENT_ONLY):
+    return _agent_pause(request, p, code, False)
 
 @router.post("/users/{code}/reset-password")
 async def reset_password(code: str, request: Request, p: Principal = STAFF_ONLY):

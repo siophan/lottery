@@ -28,11 +28,13 @@ import {
   PointsResult,
   rechargeUser,
   resetUserPassword,
+  setUserPaused,
   unbindUserPhone,
   UserRow,
 } from '../api'
 import {
   fmtDate,
+  confirmSpendAll,
   fmtDateTime,
   NUMBER_STATUS_LABEL,
   POINTS_AMOUNT_PROPS,
@@ -45,7 +47,8 @@ import UserProfileLink from './UserProfileLink'
 const AMOUNT_RULES = [{ required: true, message: '请输入积分数量' }]
 
 // 后台人员：全部账号 + 全部操作（含加分 / 扣分 / 批量充值）；
-// 代理：只读本人名下账号，可激活待激活账号、用自身积分给名下账号充值 / 批量充值。
+// 代理：只读本人名下账号，可激活待激活账号、暂停 / 恢复（管理员暂停或封禁的不能恢复）、
+// 用自身积分给名下账号充值 / 批量充值。
 export default function UsersTable({ me }: { me: Me }) {
   const { message, modal } = App.useApp()
   const actionRef = useRef<ActionType>()
@@ -147,6 +150,9 @@ export default function UsersTable({ me }: { me: Me }) {
         disabled: { text: STATUS_LABEL.disabled, status: 'Warning' },
         banned: { text: STATUS_LABEL.banned, status: 'Error' },
       },
+      // 暂停 / 封禁注明操作方：管理员的代理无权恢复，代理的管理员可以恢复
+      render: (dom, r) =>
+        r.status === 'active' ? dom : <>{dom}（{r.status_by === 'agent' ? '代理' : '管理员'}）</>,
     },
     {
       title: '手机号',
@@ -177,7 +183,8 @@ export default function UsersTable({ me }: { me: Me }) {
       valueType: 'option',
       key: 'option',
       render: (_, record) => {
-        const activate = !record.activated && (
+        // 暂停 / 封禁中的待激活账号须先恢复才能激活（后端会 409），这里不显示入口
+        const activate = !record.activated && record.status === 'active' && (
           <Popconfirm
             key="activate"
             title="激活后初始密码为 123456，确认激活？"
@@ -189,8 +196,28 @@ export default function UsersTable({ me }: { me: Me }) {
           </Popconfirm>
         )
         if (isAgent) {
+          const pauseOp =
+            record.status === 'active' ? (
+              <Popconfirm
+                key="pause"
+                title="暂停后该账号立即下线且无法登录，确认暂停？"
+                okText="暂停"
+                cancelText="取消"
+                onConfirm={() => run(setUserPaused(record.code, true), '已暂停', '暂停失败')}
+              >
+                <a>暂停</a>
+              </Popconfirm>
+            ) : (
+              record.status === 'disabled' &&
+              record.status_by === 'agent' && (
+                <a key="resume" onClick={() => run(setUserPaused(record.code, false), '已恢复', '恢复失败')}>
+                  恢复
+                </a>
+              )
+            )
           return [
             activate,
+            pauseOp,
             <ModalForm
               key="recharge"
               title={`充值 · ${record.code}`}
@@ -198,6 +225,7 @@ export default function UsersTable({ me }: { me: Me }) {
               width={360}
               modalProps={{ destroyOnClose: true }}
               onFinish={async (v: { amount: number }) =>
+                (await confirmSpendAll(modal, myPoints, v.amount)) &&
                 runPoints(rechargeUser(record.code, v.amount), (r) => `已充值，你的剩余积分 ${r.balance}`)
               }
             >
@@ -405,6 +433,7 @@ export default function UsersTable({ me }: { me: Me }) {
             </Button>
           }
           onFinish={async (v: { amount: number; reason?: string }) => {
+            if (isAgent && !(await confirmSpendAll(modal, myPoints, v.amount * selected.length))) return false
             const ok = await runPoints(
               batchRecharge(selected.map(String), v.amount, v.reason),
               (r) => `已为 ${r.count} 个账号各充值 ${v.amount} 分` + (isAgent ? `，你的剩余积分 ${r.balance}` : ''),

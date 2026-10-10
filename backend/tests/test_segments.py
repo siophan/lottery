@@ -22,11 +22,13 @@ def biz(fn, *a, **k) -> BizError:
 
 # ---------------- 号段校验 ----------------
 
+RANGE_MSG = "编号必须是 1–9999999 之间的整数（即 Z0000001–Z9999999）"
+
 @pytest.mark.parametrize("start,end,msg", [
-    (999_999, 1_000_000, "编号必须是 1000000–9999999 之间的整数"),
-    (9_999_999, 10_000_000, "编号必须是 1000000–9999999 之间的整数"),
-    ("1000000", 1_000_001, "编号必须是 1000000–9999999 之间的整数"),
-    (True, 1_000_001, "编号必须是 1000000–9999999 之间的整数"),
+    (0, 1, RANGE_MSG),
+    (9_999_999, 10_000_000, RANGE_MSG),
+    ("Z1000000", 1_000_001, RANGE_MSG),
+    (True, 1_000_001, RANGE_MSG),
     (1_000_005, 1_000_004, "起始编号不能大于结束编号"),
     (1_000_000, 1_010_000, "单次最多 10000 个编号"),
 ])
@@ -34,8 +36,41 @@ def test_parse_range_rejects(start, end, msg):
     assert biz(db_segments.parse_range, start, end).msg == msg
 
 def test_parse_range_accepts_bounds():
-    assert db_segments.parse_range(1_000_000, 1_009_999) == (1_000_000, 1_009_999)
+    assert db_segments.parse_range(1, 10_000) == (1, 10_000)
     assert db_segments.parse_range(9_999_999, 9_999_999) == (9_999_999, 9_999_999)
+
+# ---------------- Z 编号 ----------------
+
+def test_code_format_is_z_plus_seven_digits():
+    assert db_segments.code_of(1) == "Z0000001"
+    assert db_segments.code_of(9_999_999) == "Z9999999"
+
+def test_assign_creates_z_codes():
+    conn, _ = build_app()
+    aid = mk_agent_raw(conn, "ag")
+    assign(conn, aid, 1, 3)
+    assert owned(conn, aid) == ["Z0000001", "Z0000002", "Z0000003"]
+    assert audit(conn, "segment.assign")[0]["target"] == "Z0000001-Z0000003"
+
+def test_legacy_numeric_codes_are_outside_segments():
+    # 老的 7 位纯数字编号不迁移、不落入号段：同数字的 Z 号照常新建，老号归属不变
+    conn, _ = build_app()
+    aid = mk_agent_raw(conn, "ag")
+    db.create_user(conn, "1000001", "x", None, pending=True)
+    assert assign(conn, aid, 1_000_000, 1_000_002) == {"count": 3, "created": 3, "reassigned": 0}
+    assert db.get_user_by_code(conn, "1000001").agent_id is None
+
+def test_recycle_tolerates_legacy_numeric_pending_codes():
+    conn, _ = build_app()
+    top = mk_agent_raw(conn, "top")
+    assign(conn, top, 5, 6)
+    db.create_user(conn, "1000001", "x", None, pending=True)
+    conn.execute("UPDATE users SET agent_id=? WHERE code='1000001'", (top,)); conn.commit()
+    db_agents.set_agent_status(conn, top, "cancelled", "退出", actor_type="admin", actor="r", now=NOW)
+    assert db_segments.recycle_agent(conn, top, actor_type="admin", actor="r", now=NOW)["count"] == 3
+    op = conn.execute("SELECT * FROM segment_ops WHERE op='recycle'").fetchone()
+    assert (op["start_no"], op["end_no"], op["count"]) == (5, 6, 3)
+    assert db.get_user_by_code(conn, "1000001").agent_id is None
 
 # ---------------- 分配 ----------------
 
@@ -43,8 +78,8 @@ def test_assign_creates_pending_accounts_with_initial_password():
     conn, _ = build_app()
     aid = mk_agent_raw(conn, "ag")
     assert assign(conn, aid, 1_000_000, 1_000_002) == {"count": 3, "created": 3, "reassigned": 0}
-    assert owned(conn, aid) == ["1000000", "1000001", "1000002"]
-    u = db.get_user_by_code(conn, "1000001")
+    assert owned(conn, aid) == ["Z1000000", "Z1000001", "Z1000002"]
+    u = db.get_user_by_code(conn, "Z1000001")
     assert u.first_activated_at is None and u.activated_at is None and u.onboarded_at is None
     assert u.status == "active" and u.expires_at is None
     assert verify_password(db.INITIAL_PASSWORD, u.salt, u.password_hash)
@@ -52,7 +87,7 @@ def test_assign_creates_pending_accounts_with_initial_password():
     assert (op["op"], op["start_no"], op["end_no"], op["count"], op["to_agent_id"], op["actor"]) == (
         "assign", 1_000_000, 1_000_002, 3, aid, "root")
     e = audit(conn, "segment.assign")[0]
-    assert e["target"] == "1000000-1000002" and e["detail"] == {
+    assert e["target"] == "Z1000000-Z1000002" and e["detail"] == {
         "agent": "ag", "count": 3, "created": 3, "reassigned": 0}
 
 def test_assign_10000_in_one_go_shares_one_hash():
@@ -65,9 +100,9 @@ def test_assign_conflict_rejects_whole_batch():
     conn, _ = build_app()
     a1 = mk_agent_raw(conn, "a1"); a2 = mk_agent_raw(conn, "a2")
     assign(conn, a1, 1_000_005, 1_000_006)
-    db.create_user(conn, "1000008", "pw", None)               # 存量已激活的 7 位编号
+    db.create_user(conn, "Z1000008", "pw", None)               # 存量已激活的 7 位编号
     e = biz(assign, conn, a2, 1_000_000, 1_000_009)
-    assert e.status == 409 and e.msg == "以下编号已存在，不能分配：1000005、1000006、1000008"
+    assert e.status == 409 and e.msg == "以下编号已存在，不能分配：Z1000005、Z1000006、Z1000008"
     assert owned(conn, a2) == []
     assert conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 3     # 无任何新建
     assert conn.execute("SELECT COUNT(*) FROM segment_ops").fetchone()[0] == 1
@@ -76,7 +111,7 @@ def test_assign_conflict_message_truncates():
     conn, _ = build_app()
     a1 = mk_agent_raw(conn, "a1"); a2 = mk_agent_raw(conn, "a2")
     assign(conn, a1, 1_000_000, 1_000_011)
-    assert biz(assign, conn, a2, 1_000_000, 1_000_011).msg.endswith("1000009 等 12 个")
+    assert biz(assign, conn, a2, 1_000_000, 1_000_011).msg.endswith("Z1000009 等 12 个")
 
 def test_assign_ignores_non_numeric_legacy_codes():
     conn, _ = build_app()
@@ -91,7 +126,20 @@ def test_assign_reuses_unowned_pending_numbers():
     assign(conn, a1, 1_000_000, 1_000_001)
     conn.execute("UPDATE users SET agent_id=NULL"); conn.commit()   # 模拟回收后的号
     assert assign(conn, a2, 1_000_000, 1_000_002) == {"count": 3, "created": 1, "reassigned": 2}
-    assert owned(conn, a2) == ["1000000", "1000001", "1000002"]
+    assert owned(conn, a2) == ["Z1000000", "Z1000001", "Z1000002"]
+
+def test_assign_keeps_ban_and_pause_on_reused_numbers():
+    # 再分配无归属待激活号只改归属，不能顺带解除后台设置的封禁 / 暂停
+    conn, _ = build_app()
+    a1 = mk_agent_raw(conn, "a1"); a2 = mk_agent_raw(conn, "a2")
+    assign(conn, a1, 1_000_000, 1_000_001)
+    conn.execute("UPDATE users SET agent_id=NULL"); conn.commit()
+    conn.execute("UPDATE users SET status='banned' WHERE code='Z1000000'")
+    conn.execute("UPDATE users SET status='disabled' WHERE code='Z1000001'"); conn.commit()
+    assign(conn, a2, 1_000_000, 1_000_001)
+    assert owned(conn, a2) == ["Z1000000", "Z1000001"]
+    assert db.get_user_by_code(conn, "Z1000000").status == "banned"
+    assert db.get_user_by_code(conn, "Z1000001").status == "disabled"
 
 def test_assign_requires_active_agent():
     conn, _ = build_app()
@@ -106,8 +154,8 @@ def test_assign_route_staff_only():
     r = key_client(app).post("/admin/segments/assign", json={"agent_id": aid, "start": 1_000_000,
                                                                "end": 1_000_009})
     assert r.status_code == 200 and r.json() == {"ok": True, "count": 10, "created": 10, "reassigned": 0}
-    r = key_client(app).post("/admin/segments/assign", json={"agent_id": aid, "start": 1, "end": 2})
-    assert r.status_code == 400 and r.json()["error"] == "编号必须是 1000000–9999999 之间的整数"
+    r = key_client(app).post("/admin/segments/assign", json={"agent_id": aid, "start": 0, "end": 2})
+    assert r.status_code == 400 and r.json()["error"] == RANGE_MSG
     r = login_client(app, "ag").post("/admin/segments/assign",
                                      json={"agent_id": aid, "start": 1_000_100, "end": 1_000_100})
     assert r.status_code == 403
@@ -127,7 +175,7 @@ def test_senior_transfers_own_pending_range_to_direct_child():
     r = login_client(app, "top").post("/admin/segments/transfer",
                                       json={"to_agent_id": kid, "start": 1_000_002, "end": 1_000_004})
     assert r.status_code == 200 and r.json() == {"ok": True, "count": 3}
-    assert owned(conn, kid) == ["1000002", "1000003", "1000004"]
+    assert owned(conn, kid) == ["Z1000002", "Z1000003", "Z1000004"]
     op = conn.execute("SELECT * FROM segment_ops WHERE op='transfer'").fetchone()
     assert (op["from_agent_id"], op["to_agent_id"], op["count"], op["actor"]) == (top, kid, 3, "top")
     e = audit(conn, "segment.transfer")[0]
@@ -142,8 +190,8 @@ def test_transfer_scope_rules():
     r = tc.post("/admin/segments/transfer", json=body(grand, 1_000_000, 1_000_000))
     assert r.status_code == 400 and r.json()["error"] == "只能划拨给自己的直属下级"
     r = tc.post("/admin/segments/transfer", json=body(kid, 1_000_008, 1_000_011))
-    assert r.status_code == 409 and r.json()["error"] == "以下编号不在你名下或已激活，不能划拨：1000010、1000011"
-    db.activate_user(conn, "1000005", NOW)
+    assert r.status_code == 409 and r.json()["error"] == "以下编号不在你名下或已激活，不能划拨：Z1000010、Z1000011"
+    db.activate_user(conn, "Z1000005", NOW)
     r = tc.post("/admin/segments/transfer", json=body(kid, 1_000_005, 1_000_005))
     assert r.status_code == 409
     set_agent_status_raw(conn, kid, "paused")
@@ -178,15 +226,15 @@ def test_staff_cannot_transfer():
 def test_recycle_only_cancelled_and_effects():
     conn, app = build_app()
     top, kid, grand = setup_tree(conn)
-    db.activate_user(conn, "1000000", NOW)
+    db.activate_user(conn, "Z1000000", NOW)
     tc = key_client(app)
     r = tc.post(f"/admin/agents/{top}/recycle")
     assert r.status_code == 409 and r.json()["error"] == "只能回收资格已取消的代理"
     db_agents.set_agent_status(conn, top, "cancelled", "退出", actor_type="admin", actor="r", now=NOW)
     r = tc.post(f"/admin/agents/{top}/recycle")
     assert r.status_code == 200 and r.json() == {"ok": True, "count": 9, "children": 1}
-    assert owned(conn, top) == ["1000000"]                         # 已激活的保持原归属
-    assert db.get_user_by_code(conn, "1000001").agent_id is None
+    assert owned(conn, top) == ["Z1000000"]                         # 已激活的保持原归属
+    assert db.get_user_by_code(conn, "Z1000001").agent_id is None
     assert db_agents.get_agent(conn, kid).parent_agent_id is None
     assert db_agents.get_agent(conn, top).recycled_at is not None
     op = conn.execute("SELECT * FROM segment_ops WHERE op='recycle'").fetchone()

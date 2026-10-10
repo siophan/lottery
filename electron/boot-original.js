@@ -9,6 +9,10 @@ const path = require('path');
 const { ipcMain, dialog, BrowserWindow } = require('electron');
 const { startServer, UPSTREAM_DEFAULT } = require('./server');
 const { guardNewPage, BLOCKED_MSG, GUARDED_CHANNELS } = require('./page-guard');
+const { createCopyRelay } = require('./kline-copies');
+
+// 复制出来的 K 线窗口直接从主进程收到发给 K 线窗口的消息（开奖刷新等），不依赖源 K 线窗口是否开着；见 kline-copies.js
+const copyRelay = createCopyRelay(() => BrowserWindow.getAllWindows());
 
 // 原生插件 shim：必须在 require 原版主进程之前挂到 global。
 // background.js 里的 a(131)("*.node") 已被改写为 global.__ys_native("*.node")。
@@ -33,6 +37,8 @@ ipcMain.on = function (channel, listener) {
       console.log('[update-stub] checkForUpdate 已拦截 -> 无需更新 (mac)');
     });
   }
+  if (channel === 'newPage') listener = copyRelay.wrapNewPage(listener);
+  if (channel === 'getsub') listener = copyRelay.wrapGetsub(listener);
   if (GUARDED_CHANNELS.includes(channel)) {
     // 续费页、订单列表页（上游下单入口）不建窗，提示功能暂不可用；见 page-guard.js
     return _ipcOn(channel, guardNewPage(listener, (event) => {

@@ -1,0 +1,375 @@
+// 「保存到K线」弹窗（kLineComp.vue）按需求回复第 1、2 条：
+//   - 按设计稿增加 1–6 号屏按钮，单选、每次打开默认 1 号屏；「新建分组」改为「新建组」
+//   - 方案保存成功后把 {分组, 方案} 追加到所选屏位的记录（userData/<user>/<id>/kline_screens.json），
+//     目标屏已有方案时追加、不覆盖；列表最后一项即该屏当前显示的方案
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+const CHUNK = path.join(__dirname, '..', 'client', 'js', 'chunk-213546c3.fe5d553d.js');
+
+function evalSources(raw) {
+  const captured = [];
+  const window = { webpackJsonp: [] };
+  const ctx = vm.createContext({ window, eval: (s) => { captured.push(s); } });
+  new vm.Script(raw).runInContext(ctx);
+  const req = Object.assign(() => ({}), { r() {}, d() {}, n: () => () => ({}) });
+  for (const fn of Object.values(window.webpackJsonp[0][1])) {
+    try { fn.call({}, { exports: {} }, {}, req); } catch (e) { /* 只关心 eval 源码 */ }
+  }
+  return captured;
+}
+
+// 载入组件；ipcRenderer 换成记录 send / on 的假对象
+function loadComp(storage = {}) {
+  const src = evalSources(fs.readFileSync(CHUNK, 'utf8'))
+    .find((s) => s.includes('src/components/kLineComp.vue?vue&type=template'));
+  const sent = [];
+  const handlers = {};
+  const ipcRenderer = { send: (ch, arg) => sent.push([ch, JSON.parse(JSON.stringify(arg))]), on: (ch, f) => { (handlers[ch] = handlers[ch] || []).push(f); } };
+  const fn = new vm.Script('(function(module, __webpack_exports__, __webpack_require__){' + src + '\n})')
+    .runInNewContext({ window: { electron: { ipcRenderer } }, JSON, Object, Date, String, Number, Array,
+      localStorage: { getItem: (k) => (k in storage ? storage[k] : null) } });
+  const exp = {};
+  const normalizer = { a: (o, render) => ({ exports: Object.assign({}, o, { render }) }) };
+  const req = Object.assign((id) => (id === '2877' ? normalizer : {}), {
+    r() {}, d(e, n, g) { Object.defineProperty(e, n, { get: g, enumerable: true }); },
+  });
+  fn({ exports: exp }, exp, req);
+  return { comp: exp.a, sent, handlers };
+}
+
+// 组装一个最小的 Vue 实例：data + methods + created
+function instance({ parent, storage } = {}) {
+  const { comp, sent, handlers } = loadComp(storage);
+  const errors = [];
+  const vmThis = Object.assign(comp.data(), {
+    $store: { getters: { userName: 'Z0000001' } },
+    $parent: parent,
+    $message: { error: (m) => errors.push(m) },
+    _v: (t) => ({ text: String(t) }),
+    _s: (x) => String(x),
+    _l: (arr, f) => arr.map(f),
+    _e: () => null,
+  });
+  vmThis._self = { _c: (tag, data, children) => ({ tag, data: Array.isArray(data) ? {} : data || {}, children: Array.isArray(data) ? data : children || [] }) };
+  for (const [k, f] of Object.entries(comp.methods)) vmThis[k] = f.bind(vmThis);
+  comp.created.call(vmThis);
+  const emit = (ch, arg) => (handlers[ch] || []).forEach((f) => f({}, arg));
+  return { vm: vmThis, comp, sent, emit, errors };
+}
+
+const texts = (node) => (!node ? [] : node.text !== undefined ? [node.text] : (node.children || []).flatMap(texts));
+const nodes = (node) => (!node || node.text !== undefined ? [] : [node, ...(node.children || []).flatMap(nodes)]);
+const screenBtns = (tree) => nodes(tree).filter((n) => n.data.attrs && n.data.attrs.role === 'radio');
+
+// 打开弹窗（config 里已有一个分组）
+function open(t, groups = { 老组: ['旧方案'] }) {
+  t.vm.showKLineComponent('{"k":1}', 'TOP1');
+  t.emit('initGroup', { result: true, context: JSON.stringify(groups) });
+}
+
+test('弹窗有 1–6 号屏按钮，单选，默认 1 号屏', () => {
+  const t = instance();
+  open(t);
+  const btns = screenBtns(t.comp.render.call(t.vm));
+  assert.deepStrictEqual(btns.map((b) => texts(b).join('')), ['1号', '2号', '3号', '4号', '5号', '6号']);
+  assert.deepStrictEqual(btns.map((b) => b.data.attrs['aria-checked']), ['true', 'false', 'false', 'false', 'false', 'false']);
+  assert.deepStrictEqual(btns.map((b) => b.data.attrs['aria-label']), ['1号屏', '2号屏', '3号屏', '4号屏', '5号屏', '6号屏']);
+  btns[3].data.on.click();
+  const after = screenBtns(t.comp.render.call(t.vm));
+  assert.deepStrictEqual(after.map((b) => b.data.attrs['aria-checked']), ['false', 'false', 'false', 'true', 'false', 'false']);
+});
+
+test('每次打开弹窗都重新默认 1 号屏', () => {
+  const t = instance();
+  open(t);
+  t.vm.screenNo = 5;
+  open(t);
+  assert.strictEqual(t.vm.screenNo, 1);
+});
+
+test('单选项文字为「已有组」「新建组」，默认新建组', () => {
+  const t = instance();
+  open(t);
+  const labels = nodes(t.comp.render.call(t.vm)).filter((n) => n.tag === 'el-radio').map((n) => n.data.attrs.label);
+  assert.deepStrictEqual(labels, ['已有组', '新建组']);
+  assert.strictEqual(t.vm.isSelectNewZu, '新建组');
+});
+
+function saveFlow(t, { screen, existing }) {
+  open(t);
+  t.vm.screenNo = screen;
+  t.vm.fenZuName = '分组A';
+  t.vm.fangAnName = '方案B';
+  t.vm.confirmClick();
+  const [ch, arg] = t.sent.find(([c]) => c === 'addkline');
+  assert.strictEqual(ch, 'addkline');
+  assert.deepStrictEqual([arg.group, arg.file, arg.id], ['分组A', '方案B', 'TOP1']);
+  t.emit('addKlineFinished', null);                       // 方案写入成功
+  const load = t.sent.find(([c, a]) => c === 'loadtempdata' && a.file === 'kline_screens');
+  assert.ok(load, '应读取屏位记录');
+  assert.deepStrictEqual([load[1].topid, load[1].id, load[1].user], ['TOP1', 'TOP1', 'Z0000001']);
+  t.emit(load[1].func, existing === undefined ? { result: false, context: 'kline_screens directory is not exist' }
+    : { result: true, context: JSON.stringify(existing) });
+  const save = t.sent.find(([c, a]) => c === 'addtempdata' && a.file === 'kline_screens');
+  assert.ok(save, '应写回屏位记录');
+  assert.deepStrictEqual([save[1].id, save[1].user, save[1].group], ['TOP1', 'Z0000001', '']);
+  return save[1].data;
+}
+
+test('保存成功后把方案记到所选屏位（首次保存时新建记录）', () => {
+  const t = instance();
+  const data = saveFlow(t, { screen: 3 });
+  assert.deepStrictEqual(Object.keys(data), ['3']);
+  assert.deepStrictEqual(data['3'].map(({ group, plan }) => [group, plan]), [['分组A', '方案B']]);
+  assert.strictEqual(typeof data['3'][0].savedAt, 'number');
+  assert.strictEqual(t.vm.showKLineDialog, false);
+});
+
+test('目标屏已有方案时追加到末尾（最新的即当前显示），其他屏不受影响', () => {
+  const t = instance();
+  const existing = { 3: [{ group: '老组', plan: '旧方案', savedAt: 1 }], 5: [{ group: 'x', plan: 'y', savedAt: 2 }] };
+  const data = saveFlow(t, { screen: 3, existing });
+  assert.deepStrictEqual(data['3'].map(({ group, plan }) => [group, plan]), [['老组', '旧方案'], ['分组A', '方案B']]);
+  assert.deepStrictEqual(data['5'], existing['5']);
+});
+
+test('选「已有组」保存时记录的是所选已有分组', () => {
+  const t = instance();
+  open(t, { 老组: ['旧方案'] });
+  t.vm.isSelectNewZu = '已有组';
+  t.vm.screenNo = 2;
+  t.vm.fangAnName = '方案C';
+  t.vm.confirmClick();
+  t.emit('addKlineFinished', null);
+  const load = t.sent.find(([c, a]) => c === 'loadtempdata' && a.file === 'kline_screens');
+  t.emit(load[1].func, { result: false });
+  const save = t.sent.find(([c, a]) => c === 'addtempdata' && a.file === 'kline_screens');
+  assert.deepStrictEqual(save[1].data['2'].map(({ group, plan }) => [group, plan]), [['老组', '方案C']]);
+});
+
+test('方案保存失败（如重名）时不写屏位记录', () => {
+  const t = instance();
+  open(t);
+  t.vm.confirmClick();
+  t.emit('addKlineFinished', { result: false, errcode: 1 });
+  assert.deepStrictEqual(t.errors, ['方案名重名,请修改方案名']);
+  assert.ok(!t.sent.some(([c, a]) => a && a.file === 'kline_screens'));
+});
+
+test('屏位记录文件损坏时按空记录处理，不影响保存', () => {
+  const t = instance();
+  open(t);
+  t.vm.screenNo = 1;
+  t.vm.confirmClick();
+  t.emit('addKlineFinished', null);
+  const load = t.sent.find(([c, a]) => c === 'loadtempdata' && a.file === 'kline_screens');
+  t.emit(load[1].func, { result: true, context: '{坏' });
+  const save = t.sent.find(([c, a]) => c === 'addtempdata' && a.file === 'kline_screens');
+  assert.deepStrictEqual(Object.keys(save[1].data), ['1']);
+});
+
+test('同一窗口里没发起保存的实例不会重复记录屏位', () => {
+  const t = instance();
+  open(t);
+  t.emit('addKlineFinished', null);                       // 别的实例的回调
+  assert.ok(!t.sent.some(([c, a]) => a && a.file === 'kline_screens'));
+  t.emit('klineScreensLoaded', { result: false });
+  assert.ok(!t.sent.some(([c]) => c === 'addtempdata'));
+});
+
+test('屏位记录写入失败时提示', () => {
+  const t = instance();
+  saveFlow(t, { screen: 1 });
+  t.emit('klineScreensSaved', { result: false, errcode: 5 });
+  assert.deepStrictEqual(t.errors, ['方案已保存，但屏号记录失败']);
+});
+
+// 第 011 章 5「保存到K线与命名弹窗」、7「按钮状态」：名称必填、校验重复和长度；保存中防重复提交
+const addklines = (t) => t.sent.filter(([c]) => c === 'addkline');
+function tryConfirm(t, { mode = '新建组', group, plan, existing = { 老组: ['旧方案'] } } = {}) {
+  open(t, existing);
+  t.vm.isSelectNewZu = mode;
+  if (group !== undefined) {
+    if (mode === '新建组') t.vm.fenZuName = group; else t.vm.kaiJiangQiHaoItem = group;
+  }
+  if (plan !== undefined) t.vm.fangAnName = plan;
+  t.vm.confirmClick();
+  return addklines(t);
+}
+
+test('名称为空（或只有空格）时提示必填，不保存', () => {
+  for (const [opts, msg] of [
+    [{ group: '' }, '请输入分组名称'],
+    [{ group: '   ' }, '请输入分组名称'],
+    [{ plan: '' }, '请输入方案名称'],
+    [{ plan: ' \t' }, '请输入方案名称'],
+  ]) {
+    const t = instance();
+    assert.strictEqual(tryConfirm(t, opts).length, 0, JSON.stringify(opts));
+    assert.deepStrictEqual(t.errors, [msg]);
+  }
+});
+
+test('选「已有组」时不看新建组输入框，但必须选了分组', () => {
+  const t = instance();
+  open(t);
+  t.vm.isSelectNewZu = '已有组';
+  t.vm.fenZuName = '';
+  t.vm.fangAnName = '方案C';
+  t.vm.confirmClick();
+  assert.strictEqual(addklines(t).length, 1);
+  const t2 = instance();
+  assert.strictEqual(tryConfirm(t2, { mode: '已有组', group: '' }).length, 0);
+  assert.deepStrictEqual(t2.errors, ['请选择分组']);
+});
+
+test('新建组与已有分组重名时提示，不会并进已有分组', () => {
+  const t = instance();
+  assert.strictEqual(tryConfirm(t, { group: '老组' }).length, 0);
+  assert.deepStrictEqual(t.errors, ['分组名已存在，请修改分组名或选择已有组']);
+  const t2 = instance();
+  assert.strictEqual(tryConfirm(t2, { group: ' 老组 ' }).length, 0, '前后空格不算不同的名字');
+});
+
+test('同组方案重名时提示；不同组可以用相同方案名', () => {
+  const t = instance();
+  assert.strictEqual(tryConfirm(t, { mode: '已有组', group: '老组', plan: '旧方案' }).length, 0);
+  assert.deepStrictEqual(t.errors, ['方案名重名,请修改方案名']);
+  const t2 = instance();
+  assert.strictEqual(tryConfirm(t2, { group: '新组', plan: '旧方案' }).length, 1);
+});
+
+test('名称最多 20 个字', () => {
+  const t = instance();
+  assert.strictEqual(tryConfirm(t, { group: '组'.repeat(21) }).length, 0);
+  assert.deepStrictEqual(t.errors, ['分组名称不能超过20个字']);
+  const t2 = instance();
+  assert.strictEqual(tryConfirm(t2, { plan: '方'.repeat(21) }).length, 0);
+  assert.deepStrictEqual(t2.errors, ['方案名称不能超过20个字']);
+  const t3 = instance();
+  assert.strictEqual(tryConfirm(t3, { group: '组'.repeat(20), plan: '方'.repeat(20) }).length, 1);
+});
+
+test('名称会成为本机文件名：不能含 \\ / : * ? " < > | 等字符，也不能只由点组成', () => {
+  for (const [opts, label] of [
+    [{ group: '分组/A' }, '分组'], [{ group: '..' }, '分组'], [{ plan: 'a\\b' }, '方案'],
+    [{ plan: 'x:y' }, '方案'], [{ plan: '方案?' }, '方案'], [{ plan: '.' }, '方案'],
+  ]) {
+    const t = instance();
+    assert.strictEqual(tryConfirm(t, opts).length, 0, JSON.stringify(opts));
+    assert.deepStrictEqual(t.errors, [label + '名称不能包含 \\ / : * ? " < > | 等字符，也不能只由“.”组成']);
+  }
+});
+
+test('保存时去掉名称前后的空格', () => {
+  const t = instance();
+  const [[, arg]] = tryConfirm(t, { group: ' 分组A ', plan: ' 方案B  ' });
+  assert.deepStrictEqual([arg.group, arg.file], ['分组A', '方案B']);
+});
+
+test('保存中「确定」显示加载状态，重复点击只提交一次；失败后可以再提交', () => {
+  const t = instance();
+  open(t);
+  t.vm.confirmClick();
+  t.vm.confirmClick();
+  assert.strictEqual(addklines(t).length, 1);
+  const confirmBtn = nodes(t.comp.render.call(t.vm)).find((n) => n.tag === 'el-button' && texts(n).join('') === '确 定');
+  assert.strictEqual(confirmBtn.data.attrs.loading, true);
+  t.emit('addKlineFinished', { result: false, errcode: 2 });
+  t.vm.confirmClick();
+  assert.strictEqual(addklines(t).length, 2);
+});
+
+test('重新打开弹窗时清掉没等到回应的保存状态', () => {
+  const t = instance();
+  open(t);
+  t.vm.confirmClick();
+  open(t);
+  t.vm.confirmClick();
+  assert.strictEqual(addklines(t).length, 2);
+});
+
+test('没发起保存的实例收到保存失败回调时不弹提示', () => {
+  const t = instance();
+  open(t);
+  t.emit('addKlineFinished', { result: false, errcode: 1 });
+  assert.deepStrictEqual(t.errors, []);
+});
+
+// 第 011 章 5「保存对象」：保存完整K线方案——号码结果、筛选条件（含启用状态）、数据源 / 玩法、分组、方案、
+// 容错个数及必要的显示配置；内容取自打开弹窗的工作台
+const WORKBENCH = () => ({
+  typeId: '1105r5', catId: '11x5', codeId: '201', codeName: '官方数据', requestUrl: 'https://x/api/ds/a/draw-result',
+  rongcuo: [{ value: 1, isSel: false }, { value: 2, isSel: true }, { value: 3, isSel: false }],
+  saveConditionUtils: [
+    { conditionName: 'k', exterior: { style: 3, isUse: 1 }, parameter: { tolerant: 1, reaction: 0 }, name: { title: 'K线方案', content: '方案1' } },
+    { conditionName: 'p', exterior: { style: 1, isUse: 0 }, parameter: { tolerant: 0, reaction: 0 }, name: { title: '012路个数', content: '1路：1' } },
+  ],
+});
+
+function savedData(t) {
+  open(t);
+  t.vm.screenNo = 4;
+  t.vm.fenZuName = '分组A';
+  t.vm.fangAnName = '方案B';
+  t.vm.confirmClick();
+  return t.sent.find(([c]) => c === 'addkline')[1].data;
+}
+
+test('保存完整方案：号码、分组 / 方案 / 屏号、玩法与数据源、容错个数、筛选条件及启用状态、K线参数', () => {
+  const wb = WORKBENCH();
+  const t = instance({ parent: wb, storage: { klink_info: JSON.stringify({ dataRange: 120, step: 20 }) } });
+  const data = savedData(t);
+  assert.strictEqual(data.version, 2);
+  assert.strictEqual(data.numbers, '{"k":1}');                 // 弹窗收到的号码结果原样保存
+  assert.deepStrictEqual([data.group, data.plan, data.screen], ['分组A', '方案B', 4]);
+  assert.deepStrictEqual([data.playId, data.cat, data.code, data.dataSource, data.requestUrl],
+    ['1105r5', '11x5', '201', '官方数据', 'https://x/api/ds/a/draw-result']);
+  assert.strictEqual(data.tolerant, 2);
+  assert.deepStrictEqual(data.conditions, JSON.parse(JSON.stringify(wb.saveConditionUtils)));
+  assert.deepStrictEqual(data.conditions.map((c) => c.exterior.isUse), [1, 0]);
+  assert.deepStrictEqual(data.display, { dataRange: 120, step: 20 });
+  assert.strictEqual(typeof data.savedAt, 'number');
+});
+
+test('保存的条件是副本：之后工作台改条件不影响已保存的方案', () => {
+  const wb = WORKBENCH();
+  const t = instance({ parent: wb });
+  const data = savedData(t);
+  wb.saveConditionUtils[0].exterior.isUse = 0;
+  assert.strictEqual(data.conditions[0].exterior.isUse, 1);
+});
+
+test('弹窗包在其他组件里时也能找到工作台；工作台缺字段时按空值保存', () => {
+  const t = instance({ parent: { $parent: WORKBENCH() } });
+  assert.strictEqual(savedData(t).playId, '1105r5');
+  const t2 = instance({ parent: { typeId: '3dr3', saveConditionUtils: [] } });
+  const d2 = savedData(t2);
+  assert.deepStrictEqual([d2.playId, d2.cat, d2.code, d2.dataSource, d2.requestUrl, d2.tolerant, d2.conditions, d2.display],
+    ['3dr3', '', '', '', '', 0, [], null]);
+  const t3 = instance({ storage: { klink_info: '{坏' } });
+  const d3 = savedData(t3);
+  assert.deepStrictEqual([d3.conditions, d3.display, d3.numbers], [[], null, '{"k":1}']);
+});
+
+// 第 011 章 8「弹窗宽高随内容自适应，超出视口时内容区滚动，标题及操作区固定可见」
+test('弹窗超出窗口高度时只滚动内容区，标题和确定 / 关闭固定可见；窄窗口里屏号按钮换行不撑出弹窗', () => {
+  const t = instance();
+  open(t);
+  const tree = t.comp.render.call(t.vm);
+  const dialog = nodes(tree).find((n) => n.tag === 'el-dialog');
+  assert.strictEqual(dialog.data.attrs['custom-class'], 'kline-save-dialog');
+  const row = nodes(tree).find((n) => n.data.staticClass === 'kline-screen-row');
+  assert.strictEqual(row.data.staticStyle['flex-wrap'], 'wrap');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'css', 'chunk-213546c3.f1eea18c.css'), 'utf8');
+  const rule = (sel) => (css.match(new RegExp(sel.replace(/[.]/g, '\\.') + '\\{([^}]*)\\}')) || [])[1] || '';
+  assert.match(rule('.kline-save-dialog'), /display:flex/);
+  assert.match(rule('.kline-save-dialog'), /flex-direction:column/);
+  assert.match(rule('.kline-save-dialog'), /max-height:calc\(/);
+  assert.match(rule('.kline-save-dialog .el-dialog__body'), /overflow-y:auto/);
+  assert.match(rule('.kline-save-dialog .el-dialog__body'), /min-height:0/);
+});

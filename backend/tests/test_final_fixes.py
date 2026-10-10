@@ -5,6 +5,7 @@ from app.throttle import LOCKED_MSG
 import manage
 from tests.agent_helpers import (build_app, key_client, login_client, mk_admin, mk_agent_raw,
                                  set_agent_status_raw)
+from tests.points_helpers import set_agent_points_raw
 
 NOW = 1_800_000_000
 BIG = 2 ** 70
@@ -57,7 +58,7 @@ def test_admin_login_skips_password_verify_when_locked(monkeypatch):
 
 def test_admin_login_success_clears_counter_and_namespace_is_separate():
     conn, app = build_app()
-    mk_agent_raw(conn, "ag1", "pw")
+    set_agent_points_raw(conn, mk_agent_raw(conn, "ag1", "pw"), 1)     # 0 分代理不能登录
     tc = TestClient(app)
     for _ in range(4):
         login(tc, "ag1")
@@ -75,6 +76,7 @@ def test_admin_login_success_clears_counter_and_namespace_is_separate():
 def test_admin_login_ip_lock_and_rejected_agent_does_not_count():
     conn, app = build_app()
     aid = mk_agent_raw(conn, "ag1", "pw", status="paused")
+    set_agent_points_raw(conn, aid, 1)
     tc = TestClient(app)
     for _ in range(6):
         assert login(tc, "ag1", "pw").status_code == 403    # 密码正确但被拒：不计失败
@@ -124,11 +126,13 @@ def test_agent_login_blocked_unless_status_active(monkeypatch):
     assert admin_auth.agent_login_problem(conn, admin) == "代理资格无效，无法登录"
     conn.execute("UPDATE agents SET status='active' WHERE id=?", (aid,))
     conn.commit()
+    assert admin_auth.agent_login_problem(conn, admin) == admin_auth.AGENT_NO_POINTS_MSG
+    set_agent_points_raw(conn, aid, 1)
     assert admin_auth.agent_login_problem(conn, admin) is None
 
 def test_agent_login_username_is_case_insensitive():
     conn, app = build_app()
-    mk_agent_raw(conn, "Alice", "pw")
+    set_agent_points_raw(conn, mk_agent_raw(conn, "Alice", "pw"), 1)
     tc = TestClient(app)
     assert login(tc, "alice", "pw").status_code == 200
     assert tc.get("/admin/me").json()["username"] == "Alice"
@@ -142,16 +146,17 @@ def test_staff_login_remains_case_sensitive():
 
 # ---------------- M5 吸收无归属待激活号 ----------------
 
-def test_assign_absorbing_unowned_pending_resets_status_and_expiry():
+def test_assign_absorbing_unowned_pending_resets_expiry_but_keeps_status():
+    # 有效期随分配清空；暂停 / 封禁属于后台使用控制，分配不顺带解除
     conn, app = build_app()
     a = mk_agent_raw(conn, "ag")
-    db.create_user(conn, "1000001", "x", 12345, pending=True)
-    conn.execute("UPDATE users SET status='disabled' WHERE code='1000001'")
+    db.create_user(conn, "Z1000001", "x", 12345, pending=True)
+    conn.execute("UPDATE users SET status='disabled' WHERE code='Z1000001'")
     conn.commit()
     assign(conn, a, 1_000_000, 1_000_002)
-    for code in ("1000000", "1000001", "1000002"):
+    for code, status in (("Z1000000", "active"), ("Z1000001", "disabled"), ("Z1000002", "active")):
         u = db.get_user_by_code(conn, code)
-        assert (u.agent_id, u.status, u.expires_at) == (a, "active", None), code
+        assert (u.agent_id, u.status, u.expires_at) == (a, status, None), code
 
 # ---------------- M6 manage.py admin-set ----------------
 

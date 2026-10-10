@@ -11,6 +11,8 @@ AGENT_BLOCKED_MSG = {
     "paused": "代理资格已暂停，无法登录",
     "cancelled": "代理资格已取消，无法登录",
 }
+# 需求回复第 12 条：代理积分归零自动暂停（与资格暂停一样不能登录后台），充值后自动恢复
+AGENT_NO_POINTS_MSG = "代理积分为 0，账号已自动暂停，请联系上级代理或管理员充值后使用"
 
 class AdminDenied(Exception):
     """未登录、角色不符或越权：main.py 统一转成 403 {"error": "forbidden"}。"""
@@ -63,22 +65,26 @@ def current_admin(conn, token):
     return db.get_admin_by_id(conn, sess.admin_id)
 
 def agent_login_problem(conn, admin) -> str | None:
-    """代理身份资格非激活（暂停/取消/未知状态）时返回提示文案；可登录或非代理返回 None。"""
+    """代理身份资格非激活（暂停/取消/未知状态）或积分为 0 时返回提示文案；可登录或非代理返回 None。
+    资格状态优先：资格暂停 / 取消的代理充值后也不能登录。"""
     if admin.role != "agent":
         return None
     agent = db_agents.get_agent_by_admin_id(conn, admin.id)
     if agent is None:
         return "代理资料不存在，无法登录"
-    if agent.status == "active":
-        return None
-    return AGENT_BLOCKED_MSG.get(agent.status, "代理资格无效，无法登录")
+    if agent.status != "active":
+        return AGENT_BLOCKED_MSG.get(agent.status, "代理资格无效，无法登录")
+    if agent.points <= 0:
+        return AGENT_NO_POINTS_MSG
+    return None
 
 def principal_for_admin(conn, admin) -> Principal | None:
-    """把已登录的后台账号转成当前身份；代理资格非激活时返回 None（已有会话逐请求拒绝）。"""
+    """把已登录的后台账号转成当前身份；代理资格非激活或积分为 0 时返回 None（已有会话逐请求拒绝，
+    充值后未过期的会话重新可用）。"""
     if admin.role != "agent":
         return Principal(admin.role, admin.username, admin.id)
     agent = db_agents.get_agent_by_admin_id(conn, admin.id)
-    if agent is None or agent.status != "active":
+    if agent is None or agent.status != "active" or agent.points <= 0:
         return None
     return Principal("agent", admin.username, admin.id, agent.id)
 

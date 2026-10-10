@@ -28,6 +28,7 @@ async function req(path: string, options: RequestInit = {}): Promise<Response> {
 export interface UserRow {
   code: string
   status: string // active 正常 | disabled 暂停 | banned 封禁
+  status_by: string | null // 暂停 / 封禁的操作方：admin | agent；null = 正常或存量（按 admin 处理）
   expires_at: number | null
   created_at: number
   activated: boolean // 是否已激活（false = 待激活）
@@ -36,7 +37,7 @@ export interface UserRow {
   onboarded: boolean // 是否完成首登改密 + 绑定手机号
   agent_id: number | null // 归属代理；null = 无归属
   agent_name: string | null
-  number_status: string // pending 待激活 | activated 已激活 | arrears 已欠费 | to_recycle 待回收 | unassigned 未分配
+  number_status: string // pending 待激活 | activated 已激活 | arrears 无余额 | to_recycle 待回收 | unassigned 未分配
   points: number // 积分余额
   nickname: string // 实际显示昵称（未设置时为默认昵称）
 }
@@ -132,6 +133,12 @@ export async function patchUser(
 
 export async function activateUser(code: string): Promise<ApiResult> {
   return result(await req('/users/' + encodeURIComponent(code) + '/activate', { method: 'POST' }))
+}
+
+// 代理暂停 / 恢复本人名下账号；管理员暂停或封禁的，代理无权恢复
+export async function setUserPaused(code: string, pause: boolean): Promise<ApiResult> {
+  const op = pause ? '/pause' : '/resume'
+  return result(await req('/users/' + encodeURIComponent(code) + op, { method: 'POST' }))
 }
 
 export async function resetUserPassword(code: string): Promise<ApiResult> {
