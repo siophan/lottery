@@ -19,13 +19,18 @@ function evalSources(raw) {
   return captured;
 }
 
-// 假 iframe 文档：记录各元素 innerHTML / checked / value，以及 k.useCustom / k.useFixed / loadingData 调用
+// 假 iframe 文档：记录各元素 innerHTML / checked / value，以及 k.useCustom / useFixed / useLinked / applyTheme / loadingData 调用
 function fakeFrame(n, calls) {
   const els = {};
   const doc = { getElementById: (id) => (els[id] = els[id] || { innerHTML: '' }) };
   const win = {
     document: doc,
-    k: { useCustom: () => calls.push(['useCustom', n]), useFixed: (id) => calls.push(['useFixed', n, id]) },
+    k: {
+      useCustom: () => calls.push(['useCustom', n]),
+      useFixed: (id) => calls.push(['useFixed', n, id]),
+      useLinked: (has) => calls.push(['useLinked', n, has]),
+      applyTheme: (name) => calls.push(['applyTheme', n, name]),
+    },
     loadingData: () => calls.push(['loadingData', n]),
     k_util: { getyesAndno: (data, cat, pid, res) => calls.push(['draw', n, res]) },
     onBack() {},
@@ -36,11 +41,11 @@ function fakeFrame(n, calls) {
 
 const QUERY = { topid: '1105r5_kline', typeId: '1105r5', pid: '1105r5', code: '201', cat: '11x5', title: 'K线走势' };
 
-function load({ query = QUERY, now = 1700000000000 } = {}) {
+function load({ query = QUERY, now = 1700000000000, stored = {} } = {}) {
   const src = evalSources(fs.readFileSync(CHUNK, 'utf8')).find((s) => s.includes('src/views/templetes/kLine.vue?vue&type=template'));
   assert.ok(src, 'kLine.vue 模块未找到');
   const sent = [];
-  const store = {};
+  const store = Object.assign({}, stored);
   const handlers = {};
   const calls = [];
   const frames = {};
@@ -82,7 +87,7 @@ function load({ query = QUERY, now = 1700000000000 } = {}) {
   for (const [k, f] of Object.entries(comp.methods)) self[k] = f.bind(self);
   for (const [k, f] of Object.entries(comp.computed || {})) Object.defineProperty(self, k, { get: f.bind(self) });
   const emit = (ch, arg) => (handlers[ch] || []).forEach((f) => f({}, arg));
-  return { comp, self, sent, emit, calls, frames, winObj, resolved };
+  return { comp, self, sent, emit, calls, frames, winObj, resolved, store };
 }
 
 function start(t, { screens, config } = {}) {

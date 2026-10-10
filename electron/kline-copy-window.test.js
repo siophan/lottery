@@ -68,8 +68,8 @@ test('复制时带上布局、大屏 / 放大的屏和每个屏的方案选择',
   t.self.copyWindow();
   const state = JSON.parse(t.resolved[0].query.state);
   assert.deepStrictEqual([state.layout, state.bigScreen, state.zoomed], ['grid', 1, 4]);
-  assert.deepStrictEqual(state.screens['1'], { custom: true, group: '分组A', plan: '方案C', fixed: '9' });
-  assert.deepStrictEqual(state.screens['2'], { custom: false, group: '分组A', plan: '方案B', fixed: '12' });
+  assert.deepStrictEqual(state.screens['1'], { custom: true, linked: false, group: '分组A', plan: '方案C', fixed: '9' });
+  assert.deepStrictEqual(state.screens['2'], { custom: false, linked: false, group: '分组A', plan: '方案B', fixed: '12' });
   assert.ok(!('3' in state.screens), '还没加载好的屏不记录');
 });
 
@@ -128,7 +128,7 @@ test('副本里源窗口的分组已被删掉时改用固定方案；没带状�
   );
   t.emit('initGroup_1', { result: true, context: JSON.stringify(config) });
   t.emit('initGroup_3', { result: true, context: JSON.stringify(config) });
-  assert.deepStrictEqual(t.calls.filter(([c]) => c === 'useCustom' || c === 'useFixed'), [['useFixed', 1, '9'], ['useCustom', 3]]);
+  assert.deepStrictEqual(t.calls.filter(([c]) => /^use/.test(c)), [['useFixed', 1, '9'], ['useLinked', 3, true]]);
 });
 
 test('副本状态损坏时按普通 K 线页打开', () => {

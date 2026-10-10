@@ -92,7 +92,7 @@ function getkjname(cat) {
 	$("#houtui").val("后退");
 	$("#qianjin").val("前进");
 	$("#zdy").html("自定义");
-	$("#tjding").html("固定");
+	$("#tjding").html("关联");
 	playId = $('#wf').val();
 	loadingPlan();
 }
@@ -230,7 +230,7 @@ function loadingData(f) {
 		syqEma12 = 0,
 			syqEma26 = 0,
 			syqDea = 0;
-		var fa = $("input[name='fa']:checked").val();
+		var fa = k.planMode(); // 关联到保存方案时按自定义方案取数
 		var Id = "";
 		// typeZs();
 		wfType = $('#wf').val();
@@ -447,7 +447,7 @@ function onBack(data) {
 	}
 
 
-	var fa = $("input[name='fa']:checked").val() // /fa：==1（自定义方案） ==2（推荐方案）
+	var fa = k.planMode() // /fa：==1（自定义方案，含关联到保存方案） ==2（推荐方案）
 	if (fa == 1) {
 		faName = $("#zdyfa4").text();
 	} else {
@@ -468,7 +468,7 @@ function onBack(data) {
 	ksc = 0;
 
 
-	var val = $('input:radio[name="fa"]:checked').val();
+	var val = k.planMode();
 	if ((Id == "f001" || Id == "f002") && parseInt(val) == 2) {
 		faZs = data[1].data.length;
 	}
@@ -862,7 +862,7 @@ function QuXiaoTP(id) {
  * @备注：提交到主页面
  */
 function tj() {
-	var fa = $("input[name='fa']:checked").val();
+	var fa = k.planMode();
 	if (($("#tjfa3").val() == "f001" || $("#tjfa3").val() == "f002") && fa == 2) {
 		layer.msg("原智能数据不能提交");
 		return false;
@@ -880,7 +880,7 @@ function tj() {
 	var wfid = $("#wf").val();
 
 	var id = "";
-	var fa = $("input[name='fa']:checked").val();
+	var fa = k.planMode();
 	if (fa == 2) {
 		id = $("#tjfa3").val();
 		// window.opener.onCallBackFatj(id, "-1", "1", "0",wfid); //固定方案

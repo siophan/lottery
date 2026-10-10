@@ -181,7 +181,7 @@ var k_util = function() {
 		getyesAndno : function(data,cat,play_id,fa_id,onBack){
 			
 			var  opengudingarr;
-			var fa = $("input[name='fa']:checked").val();
+			var fa = k.planMode();
 			if(fa == 1){
 				opengudingarr = fa_id.split("-")
 			}else{

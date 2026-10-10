@@ -151,14 +151,14 @@ test('各屏自动加载该屏最近保存的方案（列表最后一项），�
   assert.strictEqual(els.zdyfa3.innerHTML, '分组A');
   assert.strictEqual(els.zdyfa4.innerHTML, '方案C');
   assert.ok(els.zdyfa2.innerHTML.includes('方案B') && els.zdyfa2.innerHTML.includes('方案C'));
-  assert.deepStrictEqual(t.calls.filter(([c]) => c === 'useCustom'), [['useCustom', 3]]);
-  // 没有记录的屏照旧：第一个分组、第一个方案，不切自定义
+  assert.deepStrictEqual(t.calls.filter(([c]) => /^use/.test(c)), [['useLinked', 3, true]]);
+  // 没有记录的屏照旧：第一个分组、第一个方案，不切换
   t.emit('initGroup_2', { result: true, context: JSON.stringify(config) });
   assert.strictEqual(t.frames[2].els.zdyfa3.innerHTML, '老组');
   assert.strictEqual(t.frames[2].els.zdyfa4.innerHTML, '旧方案');
   // 再次加载分组（如删方案后刷新）不再强制切回记录的方案
   t.emit('initGroup_3', { result: true, context: JSON.stringify(config) });
-  assert.strictEqual(t.calls.filter(([c]) => c === 'useCustom').length, 1);
+  assert.strictEqual(t.calls.filter(([c]) => /^use/.test(c)).length, 1);
 });
 
 test('记录的方案已被删除时不自动切换，按默认显示', () => {
@@ -166,7 +166,7 @@ test('记录的方案已被删除时不自动切换，按默认显示', () => {
   start(t, { screens: { 1: [{ group: '分组A', plan: '已删' }] } });
   t.emit('initGroup_1', { result: true, context: JSON.stringify({ 分组A: ['方案B'] }) });
   assert.strictEqual(t.frames[1].els.zdyfa4.innerHTML, '方案B');
-  assert.deepStrictEqual(t.calls.filter(([c]) => c === 'useCustom'), []);
+  assert.deepStrictEqual(t.calls.filter(([c]) => /^use/.test(c)), []);
 });
 
 test('屏位记录损坏时按无记录处理，页面照常打开', () => {
@@ -215,7 +215,7 @@ test('单屏页面：kScreenNo 从地址取屏号，没有时为空', () => {
 test('单屏页面：六屏模式下「同屏」按钮交给父页面切换布局，且切自定义方案时不隐藏', () => {
   const kjs = fs.readFileSync(path.join(ROOT, 'kline', 'k2', 'k.js'), 'utf8');
   const main = fs.readFileSync(path.join(ROOT, 'kline', 'k2', 'k_2main.js'), 'utf8');
-  assert.ok(/function TongPing\(\) \{\n\tif \(kScreenNo\(\) && parent\.toggleTongPing\) \{\n\t\tparent\.toggleTongPing\(\);\n\t\treturn;\n\t\}/.test(main));
+  assert.ok(/function TongPing\(\) \{\r?\n\tif \(kScreenNo\(\) && parent\.toggleTongPing\) \{\r?\n\t\tparent\.toggleTongPing\(\);\r?\n\t\treturn;\r?\n\t\}/.test(main));
   assert.ok(kjs.includes('if (!kScreenNo()) $("#tongping").hide();'));
   assert.ok(kjs.includes('useCustom : function()'));
 });

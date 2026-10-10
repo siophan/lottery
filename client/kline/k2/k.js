@@ -143,10 +143,33 @@ var k = function() {
 				$("#tjfa3").attr("disabled", false);
 				 $("#tongping").show();
 				$("input[name='fa']:eq(1)").prop("checked", true);
-				if (x == 1) {
+				// 六屏：「关联」回到本屏最近保存的方案，父页面选好后调 useLinked 重画
+				if (kScreenNo() && parent.linkPlan) {
+					parent.linkPlan(kScreenNo());
+				} else if (x == 1) {
 					loadingData();
 				}
 			}
+		},
+		/**
+		 * 六屏：「关联」单选关联到本屏保存的方案时为 true，此时按自定义方案（zdyfa3 / zdyfa4）画图
+		 */
+		linked : false,
+		/**
+		 * 实际画图用的方案类型：1 自定义（含关联到保存方案），2 固定方案
+		 */
+		planMode : function() {
+			var fa = $("input[name='fa']:checked").val();
+			return fa == 2 && k.linked ? "1" : fa;
+		},
+		/**
+		 * 六屏：父页面处理完「关联」后调用；has 为该屏有保存方案（已选进分组 / 方案下拉），没有时按兜底的固定方案画
+		 */
+		useLinked : function(has) {
+			k.linked = !!has;
+			$("#tjfa").prop("checked", true);
+			$("#tjfa3").attr("disabled", false);
+			loadingData();
 		},
 		/**
 		 * 六屏：父页面按屏位记录选好分组 / 方案后，切到自定义方案并重画（不回调 loadGroup，避免循环）
@@ -160,6 +183,7 @@ var k = function() {
 		 * 复制窗口：恢复源窗口该屏选的固定方案；方案没变时不重画
 		 */
 		useFixed : function(id) {
+			k.linked = false;
 			var before = $("#tjfa").prop("checked") ? String($("#tjfa3").val()) : null;
 			$("#tjfa").prop("checked", true);
 			$("#tjfa3").attr("disabled", false);
@@ -169,6 +193,53 @@ var k = function() {
 			if (String($("#tjfa3").val()) !== before) {
 				loadingData();
 			}
+		},
+		/**
+		 * 背景主题（第 011 章）：只换背景、面板底色、网格线和辅助文字；红蓝柱、布林线、MACD、KDJ 的语义色不变，
+		 * 三套都是深色底，保证这些线和柱清楚
+		 */
+		themes : {
+			night : { bg : "#000000", panel : "#141414", text : "#ffffff", sub : "#a0a0a0", line : "#444444" },
+			ocean : { bg : "#06162c", panel : "#0c2342", text : "#e6f0ff", sub : "#8fb0d8", line : "#2c4f7c" },
+			amber : { bg : "#1f1b17", panel : "#2b251f", text : "#f6e3c0", sub : "#c9a46a", line : "#5a4a36" }
+		},
+		themeName : "night",
+		palette : function() {
+			return k.themes[k.themeName] || k.themes.night;
+		},
+		// 六屏里按父页面当前主题，单独打开时用深夜黑
+		startTheme : function() {
+			try {
+				if (kScreenNo() && parent.klineTheme) return parent.klineTheme();
+			} catch (e) {}
+			return "night";
+		},
+		// 给 echarts 配置上色（就地修改并返回），k_line 生成配置和换主题时共用
+		themeChart : function(option) {
+			var p = k.palette();
+			option.backgroundColor = p.bg;
+			option.textStyle = Object.assign({}, option.textStyle, { color : p.text });
+			if (option.title) option.title.textStyle = Object.assign({}, option.title.textStyle, { color : p.text });
+			[].concat(option.xAxis || [], option.yAxis || []).forEach(function(axis) {
+				var line = axis.axisLine || {};
+				axis.axisLabel = Object.assign({}, axis.axisLabel, { color : p.sub });
+				axis.axisLine = Object.assign({}, line, { lineStyle : Object.assign({}, line.lineStyle, { color : p.line }) });
+			});
+			return option;
+		},
+		// 父页面切换主题时调用：换页面底色，已画好的图表就地重涂，不重新取数
+		applyTheme : function(name) {
+			k.themeName = k.themes[name] ? name : "night";
+			$("body").css("background-color", k.palette().panel);
+			var chart = typeof myChart != "undefined" ? myChart : null;
+			var current = chart && chart.getOption ? chart.getOption() : null;
+			if (!current) return;
+			var blank = function() { return {}; };
+			chart.setOption(k.themeChart({
+				title : {},
+				xAxis : (current.xAxis || []).map(blank),
+				yAxis : (current.yAxis || []).map(blank)
+			}));
 		},
 		/**
 		 * @创建人：关宏岩
@@ -185,6 +256,9 @@ var k = function() {
 		},
 	}
 }();
+$(function() {
+	k.applyTheme(k.startTheme());
+});
 /**
  * @创建人：关宏岩
  * @备注：后退

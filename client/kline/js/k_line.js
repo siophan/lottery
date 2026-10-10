@@ -414,6 +414,6 @@ function k_line(data, qhSum, openNumber, topgaodu, tp) {
 	};
 
 
-	return option;
+	return k.themeChart(option); // 背景、文字、坐标轴按当前主题
 
 }
