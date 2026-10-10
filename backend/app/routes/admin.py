@@ -130,6 +130,8 @@ async def activate_user(code: str, request: Request, p: Principal = ANY_ROLE):
         return _not_found()
     if res == "already":
         return _err("账号已激活", 409)
+    if res == "blocked":
+        return _err("账号已封禁或暂停，需后台解除后再激活", 409)
     _audit(request, p, "user.activate", code.upper(), {})
     return {"ok": True}
 

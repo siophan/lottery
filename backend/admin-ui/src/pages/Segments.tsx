@@ -21,11 +21,11 @@ import {
   transferAgentPoints,
   transferSegment,
 } from '../api'
-import { fmtDateTime, POINTS_AMOUNT_PROPS } from '../util'
+import { fmtCode, fmtDateTime, POINTS_AMOUNT_PROPS } from '../util'
 
 const OP_LABEL: Record<string, string> = { assign: '分配', transfer: '划拨', recycle: '回收' }
 const NO_RULES = [{ required: true, message: '请输入编号' }]
-const NO_PROPS = { min: 1000000, max: 9999999, precision: 0 }
+const NO_PROPS = { min: 1, max: 9999999, precision: 0, addonBefore: 'Z' }
 
 export default function Segments({ me }: { me: Me }) {
   const { message } = App.useApp()
@@ -61,7 +61,8 @@ export default function Segments({ me }: { me: Me }) {
     {
       title: '编号区间',
       dataIndex: 'start_no',
-      render: (_, r) => (r.start_no == null ? '—' : `${r.start_no} – ${r.end_no}`),
+      render: (_, r) =>
+        r.start_no == null || r.end_no == null ? '—' : `${fmtCode(r.start_no)} – ${fmtCode(r.end_no)}`,
     },
     { title: '数量', dataIndex: 'count', width: 90 },
     { title: '划出方', dataIndex: 'from_name', render: (_, r) => r.from_name || '—' },
@@ -77,7 +78,7 @@ export default function Segments({ me }: { me: Me }) {
         label="结束编号"
         rules={NO_RULES}
         fieldProps={NO_PROPS}
-        extra="7 位数字，含两端，单次最多 10000 个"
+        extra="填 Z 后的数字，如 1 即 Z0000001；含两端，单次最多 10000 个"
       />
     </>
   )

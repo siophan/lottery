@@ -142,16 +142,17 @@ def test_staff_login_remains_case_sensitive():
 
 # ---------------- M5 吸收无归属待激活号 ----------------
 
-def test_assign_absorbing_unowned_pending_resets_status_and_expiry():
+def test_assign_absorbing_unowned_pending_resets_expiry_but_keeps_status():
+    # 有效期随分配清空；暂停 / 封禁属于后台使用控制，分配不顺带解除
     conn, app = build_app()
     a = mk_agent_raw(conn, "ag")
-    db.create_user(conn, "1000001", "x", 12345, pending=True)
-    conn.execute("UPDATE users SET status='disabled' WHERE code='1000001'")
+    db.create_user(conn, "Z1000001", "x", 12345, pending=True)
+    conn.execute("UPDATE users SET status='disabled' WHERE code='Z1000001'")
     conn.commit()
     assign(conn, a, 1_000_000, 1_000_002)
-    for code in ("1000000", "1000001", "1000002"):
+    for code, status in (("Z1000000", "active"), ("Z1000001", "disabled"), ("Z1000002", "active")):
         u = db.get_user_by_code(conn, code)
-        assert (u.agent_id, u.status, u.expires_at) == (a, "active", None), code
+        assert (u.agent_id, u.status, u.expires_at) == (a, status, None), code
 
 # ---------------- M6 manage.py admin-set ----------------
 

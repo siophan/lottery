@@ -9,23 +9,23 @@ def test_recycle_refunds_prepaid_points_to_the_recycled_agent():
     b = mk_agent_raw(conn, "B")
     db_segments.assign_segment(conn, a, 1_000_001, 1_000_003, actor_type="admin", actor="root", now=NOW)
     set_agent_points_raw(conn, a, 500)
-    db_points.recharge_user(conn, a, "1000001", 300, actor="A", now=NOW)
-    db_points.recharge_user(conn, a, "1000002", 50, actor="A", now=NOW)
+    db_points.recharge_user(conn, a, "Z1000001", 300, actor="A", now=NOW)
+    db_points.recharge_user(conn, a, "Z1000002", 50, actor="A", now=NOW)
     assert agent_points(conn, a) == 150
     set_agent_status_raw(conn, a, "cancelled")
     db_segments.recycle_agent(conn, a, actor_type="admin", actor="root", now=NOW + 1)
-    assert (points_of(conn, "1000001"), points_of(conn, "1000002"), agent_points(conn, a)) == (0, 0, 500)
+    assert (points_of(conn, "Z1000001"), points_of(conn, "Z1000002"), agent_points(conn, a)) == (0, 0, 500)
     rows = ledger(conn, created_at=NOW + 1)
     assert [(r["holder_type"], r["holder_id"], r["delta"], r["kind"], r["reason"]) for r in rows] == [
-        ("user", "1000001", -300, "transfer_out", "回收编号退回"),
+        ("user", "Z1000001", -300, "transfer_out", "回收编号退回"),
         ("agent", str(a), 300, "transfer_in", "回收编号退回"),
-        ("user", "1000002", -50, "transfer_out", "回收编号退回"),
+        ("user", "Z1000002", -50, "transfer_out", "回收编号退回"),
         ("agent", str(a), 50, "transfer_in", "回收编号退回"),
     ]
     assert audit(conn, "agent.recycle")[0]["detail"]["refunded"] == 350
     # 再分配给 B：B 拿到的是余额为 0 的号
     db_segments.assign_segment(conn, b, 1_000_001, 1_000_003, actor_type="admin", actor="root", now=NOW + 2)
-    assert points_of(conn, "1000001") == 0
+    assert points_of(conn, "Z1000001") == 0
 
 def test_delete_user_revokes_balance_in_the_ledger_and_audits_atomically():
     conn, _ = build_app()

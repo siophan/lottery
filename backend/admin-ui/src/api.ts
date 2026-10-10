@@ -36,7 +36,7 @@ export interface UserRow {
   onboarded: boolean // 是否完成首登改密 + 绑定手机号
   agent_id: number | null // 归属代理；null = 无归属
   agent_name: string | null
-  number_status: string // pending 待激活 | activated 已激活 | arrears 已欠费 | to_recycle 待回收 | unassigned 未分配
+  number_status: string // pending 待激活 | activated 已激活 | arrears 无余额 | to_recycle 待回收 | unassigned 未分配
   points: number // 积分余额
   nickname: string // 实际显示昵称（未设置时为默认昵称）
 }

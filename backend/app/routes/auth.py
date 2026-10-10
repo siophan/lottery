@@ -115,7 +115,7 @@ async def login(request: Request):
 
     now = int(time.time())
     if user.first_activated_at is None:     # 待激活账号预置了初始密码，输对密码才会走到这里
-        return deny({"code": 10023, "msg": "账号未激活，请联系有激活权限的人员激活"})
+        return deny({"code": 10023, "msg": "该账号未激活，请联系代理或管理员激活后使用！"})
     if user.status == "banned":      # 封禁优先于暂停/到期
         return deny({"code": 10024, "msg": "账号已封禁，无法登录"})
     if user.status != "active" or (user.expires_at is not None and user.expires_at < now):

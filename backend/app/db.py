@@ -419,6 +419,8 @@ def activate_user(conn, code: str, now: int, *, by_agent_id: int | None = None) 
     u = get_user_by_code(conn, code)
     if not u or (by_agent_id is not None and u.agent_id != by_agent_id):
         return "not_found"
+    if u.first_activated_at is None and u.status != "active":
+        return "blocked"      # 封禁 / 暂停只能由后台解除，激活不顺带改回正常
     h, salt = hash_password(INITIAL_PASSWORD)     # PBKDF2 放在写锁外
     chain = json.dumps(agent_chain(conn, u.agent_id)) if u.agent_id is not None else None
     conn.commit()
@@ -427,9 +429,9 @@ def activate_user(conn, code: str, now: int, *, by_agent_id: int | None = None) 
         # 条件更新保证并发下只有一次激活成功；归属在检查后被划走则不激活
         cur = conn.execute(
             "UPDATE users SET password_hash=?, salt=?, first_activated_at=?, activated_at=?,"
-            " status='active', onboarded_at=NULL, activated_by_agent_id=?, agent_chain_json=?,"
+            " onboarded_at=NULL, activated_by_agent_id=?, agent_chain_json=?,"
             " charge_anchor_at=?, next_charge_at=?"
-            " WHERE id=? AND first_activated_at IS NULL AND agent_id IS ?",
+            " WHERE id=? AND first_activated_at IS NULL AND status='active' AND agent_id IS ?",
             (h, salt, now, now, by_agent_id, chain, now, now + db_points.CHARGE_PERIOD, u.id, u.agent_id),
         )
         if cur.rowcount == 1:
@@ -440,8 +442,10 @@ def activate_user(conn, code: str, now: int, *, by_agent_id: int | None = None) 
         raise
     if cur.rowcount == 1:
         return "ok"
-    again = get_user_by_code(conn, code)      # 并发下可能已被他人激活、划走或删除
-    return "already" if again and again.first_activated_at is not None else "not_found"
+    again = get_user_by_code(conn, code)      # 并发下可能已被他人激活、封禁、划走或删除
+    if again and again.first_activated_at is not None:
+        return "already"
+    return "blocked" if again and again.status != "active" and again.agent_id == u.agent_id else "not_found"
 
 def reset_user_password(conn, code: str) -> str:
     u = get_user_by_code(conn, code)
@@ -632,7 +636,7 @@ def list_users_with_agent(conn, agent_id: int | None = None) -> list[tuple[User,
 
 def number_status(u: User, agent_status: str | None) -> str:
     """编号五态（由数据推导，不另存）：pending 待激活 | activated 已激活（余额 > 0）|
-    arrears 已欠费（已激活且余额为 0）| to_recycle 待回收 | unassigned 未分配。"""
+    arrears 无余额（已激活且余额为 0）| to_recycle 待回收 | unassigned 未分配。"""
     if u.first_activated_at is not None:
         return "activated" if u.points > 0 else "arrears"
     if u.agent_id is None:

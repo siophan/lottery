@@ -22,11 +22,14 @@ export const STATUS_LABEL: Record<string, string> = {
   banned: '封禁',
 }
 
+// 号段数字 → 账号编号（Z + 7 位数字，与后端 db_segments.code_of 一致）。
+export const fmtCode = (n: number) => `Z${String(n).padStart(7, '0')}`
+
 // 编号状态（后端 number_status，由数据推导）→ 中文。
 export const NUMBER_STATUS_LABEL: Record<string, string> = {
   pending: '待激活',
   activated: '已激活',
-  arrears: '已欠费',
+  arrears: '无余额',
   to_recycle: '待回收',
   unassigned: '未分配',
 }
