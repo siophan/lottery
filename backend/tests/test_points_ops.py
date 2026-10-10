@@ -108,6 +108,17 @@ def test_senior_transfers_to_direct_child():
     [e] = audit(conn, "points.transfer")
     assert (e["actor_type"], e["target"], e["detail"]) == ("agent", "B", {"from": "A", "to": "B", "amount": 20, "balance": 30})
 
+def test_transfer_only_to_direct_child_not_grandchild():
+    # 需求回复第 7 条：上下级转分只到直属下级，隔层（下级的下级）不行
+    conn, _ = build_app()
+    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", parent=a)
+    g = mk_agent_raw(conn, "G", tier="junior", parent=b)
+    set_agent_points_raw(conn, a, 10)
+    t = lambda f, to, n: db_points.transfer_to_agent(conn, f, to, n, actor="x", now=NOW)
+    assert biz(t, a, g, 1).msg == "只能转给自己的直属下级"
+    t(a, b, 1)
+    t(b, g, 1)
+
 def test_transfer_rules():
     conn, _ = build_app()
     a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="junior", parent=a)
