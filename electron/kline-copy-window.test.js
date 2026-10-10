@@ -1,6 +1,6 @@
 // 复制 K 线窗口（需求回复第 3 条 / 第 011 章「复制/拓展」）：
 //   整个 K 线独立页复制到一个新的独立窗口（可拖到其他显示器），保留布局、各屏方案和条件；
-//   新窗口可继续独立修改，不影响源窗口；开奖刷新同样送到复制出来的窗口
+//   新窗口可继续独立修改，不影响源窗口；开奖刷新由主进程直接送到复制出来的窗口，源窗口关掉也不影响
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -141,13 +141,13 @@ test('副本状态损坏时按普通 K 线页打开', () => {
   assert.deepStrictEqual([bad.self.layout, bad.self.bigScreen, bad.self.zoomed], ['main', 1, null]);
 });
 
-test('开奖刷新同时转给复制出来的窗口', () => {
+test('开奖刷新只重画本窗口六个屏，不再转发给副本（副本由主进程直接通知，见 kline-copies.js）', () => {
   const t = load();
   start(t);
   t.self.copyWindow();
   t.sent.length = 0;
   t.emit('lodDate', {});
-  assert.deepStrictEqual(t.sent, [['getsub', { id: '1105r5_kline_copy1700000000000', func: 'lodDate', data: '' }]]);
+  assert.deepStrictEqual(t.sent, []);
   assert.strictEqual(t.calls.filter(([c]) => c === 'loadingData').length, 6);
 });
 

@@ -49,6 +49,7 @@ function load({ query = QUERY, now = 1700000000000, stored = {} } = {}) {
   const handlers = {};
   const calls = [];
   const frames = {};
+  const timers = [];   // setTimeout 回调按顺序记下，测试里手动触发
   for (let n = 1; n <= 6; n++) frames[n] = fakeFrame(n, calls);
   const winObj = {
     electron: { ipcRenderer: { send: (ch, arg) => sent.push([ch, JSON.parse(JSON.stringify(arg))]), on: (ch, f) => { (handlers[ch] = handlers[ch] || []).push(f); } } },
@@ -58,7 +59,7 @@ function load({ query = QUERY, now = 1700000000000, stored = {} } = {}) {
   const documentObj = { getElementById: (id) => frames[Number(String(id).replace('iframeId', ''))] || null };
   const FakeDate = { now: () => now };
   const fn = new vm.Script('(function(module, __webpack_exports__, __webpack_require__){' + src + '\n})')
-    .runInNewContext({ window: winObj, document: documentObj, JSON, Object, Math, String, Number, Array, Date: FakeDate, Event: function (t) { this.type = t; }, setTimeout: () => 0, clearTimeout() {}, console, localStorage: { setItem: (k, v) => { store[k] = v; }, getItem: (k) => store[k] } });
+    .runInNewContext({ window: winObj, document: documentObj, JSON, Object, Math, String, Number, Array, Date: FakeDate, Event: function (t) { this.type = t; }, setTimeout: (f) => timers.push(f), clearTimeout() {}, console, localStorage: { setItem: (k, v) => { store[k] = v; }, getItem: (k) => store[k] } });
   const exp = {};
   const normalizer = { a: (o, render) => ({ exports: Object.assign({}, o, { render }) }) };
   const planFixedList = () => ({ then: (f) => { f({ code: 0, data: [{ id: 9, name: '固定1', content: '[]' }] }); return { catch() {} }; } });
@@ -87,7 +88,7 @@ function load({ query = QUERY, now = 1700000000000, stored = {} } = {}) {
   for (const [k, f] of Object.entries(comp.methods)) self[k] = f.bind(self);
   for (const [k, f] of Object.entries(comp.computed || {})) Object.defineProperty(self, k, { get: f.bind(self) });
   const emit = (ch, arg) => (handlers[ch] || []).forEach((f) => f({}, arg));
-  return { comp, self, sent, emit, calls, frames, winObj, resolved, store };
+  return { comp, self, sent, emit, calls, frames, winObj, resolved, store, timers };
 }
 
 function start(t, { screens, config } = {}) {

@@ -78,7 +78,8 @@ test('点各屏的「关联」：重新加载分组后选中该屏最近保存�
   t.calls.length = 0;
   t.sent.length = 0;
   t.self.linkPlan('2');
-  assert.deepStrictEqual(t.sent.map(([c, a]) => [c, a.func]), [['loadtempdata', 'initGroup_2']]);
+  t.emit('klineScreensRelink', { result: true, context: JSON.stringify({ 2: [{ group: '分组A', plan: '方案C' }] }) });
+  assert.deepStrictEqual(t.sent.map(([c, a]) => [c, a.func]), [['loadtempdata', 'klineScreensRelink'], ['loadtempdata', 'initGroup_2']]);
   t.emit('initGroup_2', { result: true, context: JSON.stringify(CONFIG) });
   assert.deepStrictEqual([t.frames[2].els.zdyfa3.innerHTML, t.frames[2].els.zdyfa4.innerHTML], ['分组A', '方案C']);
   assert.deepStrictEqual(t.calls.filter(([c]) => /^use/.test(c)), [['useLinked', 2, true]]);
@@ -90,11 +91,66 @@ test('点「关联」时该屏没有保存方案（或已被删）：保留当�
   t.emit('initGroup_5', { result: true, context: JSON.stringify(CONFIG) });
   t.calls.length = 0;
   t.self.linkPlan(5);
+  t.emit('klineScreensRelink', { result: false });
   t.emit('initGroup_5', { result: true, context: JSON.stringify(CONFIG) });
   assert.deepStrictEqual(t.calls.filter(([c]) => /^use/.test(c)), [['useLinked', 5, false]]);
   // 之后普通的分组刷新（如别的屏删方案）不再触发关联
   t.emit('initGroup_5', { result: true, context: JSON.stringify(CONFIG) });
   assert.strictEqual(t.calls.filter(([c]) => /^use/.test(c)).length, 1);
+});
+
+// 窗口开着时工作台又保存了新方案：点「关联」先重读保存记录再加载分组，不用重开窗口
+test('点「关联」先重新读取保存记录：窗口打开后新保存的方案也能关联上', () => {
+  const t = load();
+  start(t, { screens: { 2: [{ group: '分组A', plan: '方案C' }] } });
+  t.emit('initGroup_2', { result: true, context: JSON.stringify(CONFIG) });
+  t.sent.length = 0;
+  t.calls.length = 0;
+  t.self.linkPlan(2);
+  assert.deepStrictEqual(t.sent, [['loadtempdata', { user: 'Z0000001', topid: '1105r5_kline', id: '1105r5', func: 'klineScreensRelink', file: 'kline_screens' }]]);
+  t.emit('klineScreensRelink', { result: true, context: JSON.stringify({ 2: [{ group: '分组A', plan: '方案C' }, { group: '分组A', plan: '方案B' }] }) });
+  assert.deepStrictEqual(t.sent.slice(1).map(([, a]) => a.func), ['initGroup_2']);
+  t.emit('initGroup_2', { result: true, context: JSON.stringify(CONFIG) });
+  assert.deepStrictEqual([t.frames[2].els.zdyfa3.innerHTML, t.frames[2].els.zdyfa4.innerHTML], ['分组A', '方案B']);
+  assert.deepStrictEqual(t.calls.filter(([c]) => /^use/.test(c)), [['useLinked', 2, true]]);
+});
+
+test('重读保存记录失败时沿用打开时的记录', () => {
+  const t = load();
+  start(t, { screens: { 4: [{ group: '分组A', plan: '方案C' }] } });
+  t.self.linkPlan(4);
+  t.emit('klineScreensRelink', { result: false });
+  t.emit('initGroup_4', { result: true, context: JSON.stringify(CONFIG) });
+  assert.strictEqual(t.frames[4].els.zdyfa4.innerHTML, '方案C');
+  t.self.linkPlan(4);
+  t.emit('klineScreensRelink', { result: true, context: '{坏' });
+  t.emit('initGroup_4', { result: true, context: JSON.stringify(CONFIG) });
+  assert.strictEqual(t.frames[4].els.zdyfa4.innerHTML, '方案C');
+});
+
+test('主进程没回应时超时后照常加载分组；之后迟到的回应不再重复加载', () => {
+  const t = load();
+  start(t, { screens: { 3: [{ group: '分组A', plan: '方案C' }] } });
+  t.timers.length = 0;
+  t.sent.length = 0;
+  t.self.linkPlan(3);
+  assert.strictEqual(t.timers.length, 1);
+  t.timers[0]();
+  assert.deepStrictEqual(t.sent.map(([, a]) => a.func), ['klineScreensRelink', 'initGroup_3']);
+  t.emit('klineScreensRelink', { result: true, context: '{}' });
+  assert.strictEqual(t.sent.length, 2);
+});
+
+test('回应前连点两个屏的「关联」：两个屏各加载一次', () => {
+  const t = load();
+  start(t, { screens: {} });
+  t.sent.length = 0;
+  t.self.linkPlan(1);
+  t.self.linkPlan(6);
+  t.emit('klineScreensRelink', { result: true, context: '{}' });
+  t.emit('klineScreensRelink', { result: true, context: '{}' });
+  t.timers.forEach((f) => f());
+  assert.deepStrictEqual(t.sent.map(([, a]) => a.func).filter((f) => f.startsWith('initGroup')).sort(), ['initGroup_1', 'initGroup_6']);
 });
 
 test('复制窗口：关联中的屏记成关联，副本里按保存记录重新关联', () => {
