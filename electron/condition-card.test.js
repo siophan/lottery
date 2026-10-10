@@ -102,3 +102,43 @@ test('工作台算号：只有 K线卡（style 3）带容错标记，自选卡�
     assert.ok(!src.includes('obj.tolerant = item.parameter.tolerant;'), f);
   }
 });
+
+test('K线卡「启用」点文字也能切换，且只在外层绑定一次（点圆圈不会因冒泡切换两次）', () => {
+  const calls = [];
+  const parent = { shiYongBtnClick: (item, i) => calls.push(['use', i]), rongCuoBtnClick: (item, i) => calls.push(['tol', i]) };
+  const [, card] = renderCards([kline(1), kline(0)], parent);
+  labelSpan(card, '启用').data.on.click();
+  labelSpan(card, '容错').data.on.click();
+  assert.deepStrictEqual(calls, [['use', 1], ['tol', 1]]);
+  for (const icon of nodes(card).filter((n) => n.tag === 'i')) assert.ok(!(icon.data.on && icon.data.on.click), '圆圈上不能再单独绑点击');
+});
+
+// 需求回复第 4 条 UI：启用勾选框为圆形带对勾，大小与文字相近；未启用透明，启用高亮；删除按钮黄色背景
+const CSS = fs.readFileSync(path.join(__dirname, '..', 'client', 'css', 'app.dbf7a241.css'), 'utf8');
+function rule(selector) {
+  const m = new RegExp('(?:^|})' + selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\{([^}]*)\\}').exec(CSS);
+  assert.ok(m, '缺少样式 ' + selector);
+  return Object.fromEntries(m[1].split(';').filter(Boolean).map((d) => { const i = d.indexOf(':'); return [d.slice(0, i), d.slice(i + 1)]; }));
+}
+const px = (v) => parseFloat(v);
+
+test('勾选圈：圆形，大小与旁边文字相近，可点击', () => {
+  const circle = rule('.rcyuan');
+  const label = rule('.rcwz');
+  assert.strictEqual(circle['border-radius'], '50%');
+  assert.strictEqual(circle.width, circle.height);
+  const border = px(circle.border);
+  const outer = px(circle.width) + 2 * border;
+  assert.ok(Math.abs(outer - px(label['font-size'])) <= 3, `圆圈 ${outer}px 与文字 ${label['font-size']} 相差太多`);
+  assert.ok(px(circle['font-size']) < px(circle.width), '对勾要在圆圈里面');
+  assert.strictEqual(circle.cursor, 'pointer');
+  assert.strictEqual(label.cursor, 'pointer');
+});
+
+test('勾选圈：未启用时对勾透明，启用时高亮；删除按钮黄色背景', () => {
+  assert.strictEqual(rule('.rcyuan').color, 'transparent');
+  const on = rule('.rcdui');
+  assert.ok(on.color && on.color !== 'transparent');
+  assert.ok(on.background && on.background !== 'transparent');
+  assert.strictEqual(rule('.box-if .head .del').background, '#ffd400');
+});
