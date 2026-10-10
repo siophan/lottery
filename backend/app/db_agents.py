@@ -38,7 +38,7 @@ class Agent:
     status_reason: str | None
     created_at: int
     recycled_at: int | None   # 资格取消后执行回收的时间；回收后不可再恢复
-    points: int = 0           # 代理积分余额（不做每日扣减；永不为负）
+    points: int = 0           # 代理积分余额（与账号一样每日扣减，见 points_worker；永不为负）
 
 _AGENT_FIELDS = tuple(f.name for f in fields(Agent))
 
@@ -231,6 +231,9 @@ def set_agent_status(conn, agent_id: int, status, reason, *, actor_type: str, ac
                          " VALUES(?,?,?)", (a.name_key, a.id, now + NAME_RESERVE_SEC))
         conn.execute("UPDATE agents SET status=?, status_by=?, status_at=?, status_reason=? WHERE id=?",
                      (status, actor, now, reason, a.id))
+        if status != "active":
+            # 暂停 / 取消即停扣（保留 charge_anchor_at）：很快恢复也从恢复后的第一轮重新起算，不沿用旧周期
+            conn.execute("UPDATE agents SET next_charge_at=NULL WHERE id=?", (a.id,))
         db._audit_nocommit(conn, actor_type, actor, "agent.status", a.name,
                            {"from": a.status, "to": status, "reason": reason}, now)
         conn.commit()

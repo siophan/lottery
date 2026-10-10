@@ -10,7 +10,7 @@ import {
   ProFormTextArea,
   ProTable,
 } from '@ant-design/pro-components'
-import { App, Button, Popconfirm, Tooltip } from 'antd'
+import { App, Button, Popconfirm, Tag, Tooltip } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import {
   adjustAgentPoints,
@@ -27,6 +27,7 @@ import {
   updateAgent,
 } from '../api'
 import {
+  AGENT_NO_POINTS_TIP,
   AGENT_STATUS_LABEL,
   fmtDateTime,
   POINTS_AMOUNT_PROPS,
@@ -78,19 +79,29 @@ export default function Agents({ me }: { me: Me }) {
         paused: { text: AGENT_STATUS_LABEL.paused, status: 'Warning' },
         cancelled: { text: AGENT_STATUS_LABEL.cancelled, status: 'Error' },
       },
-      render: (dom, r) =>
-        r.status_reason ? (
-          <Tooltip
-            title={`${r.status_by ?? ''} ${r.status_at ? fmtDateTime(r.status_at) : ''}：${r.status_reason}`}
-          >
-            <span>
-              {dom}
-              {r.recycled_at ? '（已回收）' : ''}
-            </span>
-          </Tooltip>
-        ) : (
-          dom
-        ),
+      render: (dom, r) => (
+        <>
+          {r.status_reason ? (
+            <Tooltip
+              title={`${r.status_by ?? ''} ${r.status_at ? fmtDateTime(r.status_at) : ''}：${r.status_reason}`}
+            >
+              <span>
+                {dom}
+                {r.recycled_at ? '（已回收）' : ''}
+              </span>
+            </Tooltip>
+          ) : (
+            dom
+          )}
+          {r.status === 'active' && r.points === 0 && (
+            <Tooltip title={AGENT_NO_POINTS_TIP}>
+              <Tag color="warning" style={{ marginLeft: 6 }}>
+                积分暂停
+              </Tag>
+            </Tooltip>
+          )}
+        </>
+      ),
     },
     { title: '积分', dataIndex: 'points', hideInSearch: true, sorter: (a, b) => a.points - b.points },
     { title: '总配额', dataIndex: 'total', hideInSearch: true },
@@ -196,7 +207,7 @@ export default function Agents({ me }: { me: Me }) {
               { label: '加分', value: 'grant' },
               { label: '扣分', value: 'revoke' },
             ]}
-            extra="加分要求代理资格为激活；扣分必须填写原因，最多扣到 0"
+            extra="加分要求代理资格为激活；扣分必须填写原因，最多扣到 0。积分为 0 的代理自动暂停、不能登录后台"
           />
           <ProFormDigit
             name="amount"

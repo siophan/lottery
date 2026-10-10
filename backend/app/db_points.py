@@ -70,6 +70,27 @@ def note_user_transition_nocommit(conn, code: str, before: int, after: int, *, a
     elif before == 0 and after > 0:
         db._audit_nocommit(conn, actor_type, actor, "points.resumed", code.upper(), {"balance": after}, now)
 
+def note_agent_transition_nocommit(conn, agent_id: str, before: int, after: int, *, actor_type: str,
+                                   actor: str, now: int) -> None:
+    """代理余额 >0 → 0：积分暂停（不能登录后台，见 admin_auth），写审计 points.suspended，并同事务清空
+    next_charge_at（保留 charge_anchor_at），与账号相同：停扣立即生效，之后补充积分从恢复后的第一轮重新起算。
+    0 → >0：自动恢复，写审计 points.resumed。积分暂停由余额推导，不改资格状态。"""
+    if before > 0 and after == 0:
+        conn.execute("UPDATE agents SET next_charge_at=NULL WHERE id=?", (int(agent_id),))
+        a = get_agent(conn, int(agent_id))
+        db._audit_nocommit(conn, actor_type, actor, "points.suspended", a.name, {"holder_type": "agent"}, now)
+    elif before == 0 and after > 0:
+        a = get_agent(conn, int(agent_id))
+        db._audit_nocommit(conn, actor_type, actor, "points.resumed", a.name,
+                           {"holder_type": "agent", "balance": after}, now)
+
+def note_transition_nocommit(conn, holder_type: str, holder_id: str, before: int, after: int, *,
+                             actor_type: str, actor: str, now: int) -> None:
+    if holder_type == "user":
+        note_user_transition_nocommit(conn, holder_id, before, after, actor_type=actor_type, actor=actor, now=now)
+    else:
+        note_agent_transition_nocommit(conn, holder_id, before, after, actor_type=actor_type, actor=actor, now=now)
+
 def purge_old_ledger(conn, now: int) -> int:
     """流水与审计日志一样保留三年（db.AUDIT_RETENTION_SEC），由每日维护清理。"""
     cur = conn.execute("DELETE FROM points_ledger WHERE created_at < ?", (now - db.AUDIT_RETENTION_SEC,))
@@ -166,8 +187,7 @@ def staff_adjust(conn, holder_type: str, holder, op: str, amount, reason, *, act
         delta = amount if op == "grant" else -min(amount, before)     # 扣分最多扣到 0
         before, after = apply_delta_nocommit(conn, holder_type, hid, delta, op, actor_type=actor_type,
                                              actor=actor, now=now, reason=reason)
-        if holder_type == "user":
-            note_user_transition_nocommit(conn, hid, before, after, actor_type=actor_type, actor=actor, now=now)
+        note_transition_nocommit(conn, holder_type, hid, before, after, actor_type=actor_type, actor=actor, now=now)
         detail = {"holder_type": holder_type, "amount": abs(delta), "balance": after}
         if op == "revoke" and abs(delta) != amount:
             detail["requested"] = amount
@@ -185,15 +205,17 @@ def staff_adjust(conn, holder_type: str, holder, op: str, amount, reason, *, act
 def _transfer_pair(conn, from_type, from_id, to_type, to_id, amount, *, actor_type, actor, now,
                    batch_id=None) -> tuple[int, int]:
     """转出方 transfer_out + 收款方 transfer_in，双方互为 counterparty。返回 (转出方余额, 收款方余额)。"""
-    _, out_after = apply_delta_nocommit(conn, from_type, from_id, -amount, "transfer_out",
-                                        actor_type=actor_type, actor=actor, now=now, counterparty_type=to_type,
-                                        counterparty_id=to_id, batch_id=batch_id)
+    out_before, out_after = apply_delta_nocommit(conn, from_type, from_id, -amount, "transfer_out",
+                                                 actor_type=actor_type, actor=actor, now=now,
+                                                 counterparty_type=to_type, counterparty_id=to_id,
+                                                 batch_id=batch_id)
+    note_transition_nocommit(conn, from_type, from_id, out_before, out_after, actor_type=actor_type,
+                             actor=actor, now=now)
     in_before, in_after = apply_delta_nocommit(conn, to_type, to_id, amount, "transfer_in",
                                                actor_type=actor_type, actor=actor, now=now,
                                                counterparty_type=from_type, counterparty_id=from_id,
                                                batch_id=batch_id)
-    if to_type == "user":
-        note_user_transition_nocommit(conn, to_id, in_before, in_after, actor_type=actor_type, actor=actor, now=now)
+    note_transition_nocommit(conn, to_type, to_id, in_before, in_after, actor_type=actor_type, actor=actor, now=now)
     return out_after, in_after
 
 def transfer_to_agent(conn, from_agent_id: int, to_agent_id, amount, *, actor: str, now: int) -> dict:

@@ -34,6 +34,7 @@ import {
 } from '../api'
 import {
   fmtDate,
+  confirmSpendAll,
   fmtDateTime,
   NUMBER_STATUS_LABEL,
   POINTS_AMOUNT_PROPS,
@@ -224,6 +225,7 @@ export default function UsersTable({ me }: { me: Me }) {
               width={360}
               modalProps={{ destroyOnClose: true }}
               onFinish={async (v: { amount: number }) =>
+                (await confirmSpendAll(modal, myPoints, v.amount)) &&
                 runPoints(rechargeUser(record.code, v.amount), (r) => `已充值，你的剩余积分 ${r.balance}`)
               }
             >
@@ -431,6 +433,7 @@ export default function UsersTable({ me }: { me: Me }) {
             </Button>
           }
           onFinish={async (v: { amount: number; reason?: string }) => {
+            if (isAgent && !(await confirmSpendAll(modal, myPoints, v.amount * selected.length))) return false
             const ok = await runPoints(
               batchRecharge(selected.map(String), v.amount, v.reason),
               (r) => `已为 ${r.count} 个账号各充值 ${v.amount} 分` + (isAgent ? `，你的剩余积分 ${r.balance}` : ''),

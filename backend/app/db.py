@@ -261,8 +261,8 @@ def init_db(conn: sqlite3.Connection) -> None:
           cycle_key INTEGER,
           created_at INTEGER NOT NULL
         );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_charge_cycle
-          ON points_ledger(holder_id, cycle_key) WHERE kind='charge';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_charge_cycle_holder
+          ON points_ledger(holder_type, holder_id, cycle_key) WHERE kind='charge';
         CREATE INDEX IF NOT EXISTS idx_ledger_holder ON points_ledger(holder_type, holder_id, id);
         CREATE INDEX IF NOT EXISTS idx_ledger_counterparty ON points_ledger(counterparty_type, counterparty_id, id);
         CREATE INDEX IF NOT EXISTS idx_ledger_created ON points_ledger(created_at);
@@ -280,6 +280,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_points(conn)
     _migrate_profile(conn)
     _migrate_status_by(conn)
+    _migrate_agent_charge(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
@@ -365,6 +366,18 @@ def _migrate_status_by(conn) -> None:
     # 之前只有后台能改状态，存量暂停 / 封禁的 NULL 一律按管理员处理。
     if "status_by" not in {r["name"] for r in conn.execute("PRAGMA table_info(users)")}:
         conn.execute("ALTER TABLE users ADD COLUMN status_by TEXT")
+    conn.commit()
+
+def _migrate_agent_charge(conn) -> None:
+    # 需求回复第 12 条：代理自身账号同样按天扣分。只加列、不回填：next_charge_at 为 NULL，
+    # 余额 > 0 的代理由 Worker 下一轮起算，首次扣减在起算满 24 小时后。
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(agents)")}
+    for name in ("charge_anchor_at", "next_charge_at"):
+        if name not in cols:
+            conn.execute(f"ALTER TABLE agents ADD COLUMN {name} INTEGER")
+    # 代理也写扣减流水后，防重复记账的唯一索引带上 holder_type（账号编号与代理 id 同名时不互相挡住）；
+    # 新索引在建表语句里创建，这里去掉旧索引。新索引比旧的宽松，存量数据不会冲突。
+    conn.execute("DROP INDEX IF EXISTS idx_ledger_charge_cycle")
     conn.commit()
 
 def mask_phone(phone: str | None) -> str | None:

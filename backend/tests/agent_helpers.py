@@ -21,7 +21,14 @@ def build_app():
 def key_client(app) -> TestClient:
     return TestClient(app, headers=H)
 
-def login_client(app, username: str, password: str = "pw") -> TestClient:
+def login_client(app, username: str, password: str = "pw", *, top_up: bool = True) -> TestClient:
+    """后台登录。积分为 0 的代理不能登录（需求回复第 12 条），与积分无关的测试只是要一个能登录的代理：
+    top_up=True 时把 0 分代理直接设为 1 分（不写流水）再登录；已有余额的不动。"""
+    if top_up:
+        conn = app.state.db_conn
+        conn.execute("UPDATE agents SET points=1 WHERE points=0 AND admin_id IN"
+                     " (SELECT id FROM admins WHERE username=? AND role='agent')", (username,))
+        conn.commit()
     tc = TestClient(app)
     r = tc.post("/admin/login", json={"username": username, "password": password})
     assert r.status_code == 200, r.text
