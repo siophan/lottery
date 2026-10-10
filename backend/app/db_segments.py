@@ -62,7 +62,7 @@ def assign_segment(conn, agent_id: int, start, end, *, actor_type: str, actor: s
                      if r["agent_id"] is not None or r["first_activated_at"] is not None)
         if bad:
             raise BizError("以下编号已存在，不能分配：" + _fmt_codes(bad), 409)
-        # 吸收的无归属待激活号与新建号一致：永久有效；使用控制（封禁 / 暂停）保持不变，只能由后台解除
+        # 吸收的无归属待激活号与新建号一致：永久有效；使用控制（封禁 / 暂停）保持不变，分配不顺带解除
         conn.executemany("UPDATE users SET agent_id=?, expires_at=NULL WHERE id=?",
                          [(ag.id, r["id"]) for r in existing.values()])
         new = [n for n in range(start, end + 1) if n not in existing]

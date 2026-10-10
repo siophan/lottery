@@ -28,6 +28,7 @@ async function req(path: string, options: RequestInit = {}): Promise<Response> {
 export interface UserRow {
   code: string
   status: string // active 正常 | disabled 暂停 | banned 封禁
+  status_by: string | null // 暂停 / 封禁的操作方：admin | agent；null = 正常或存量（按 admin 处理）
   expires_at: number | null
   created_at: number
   activated: boolean // 是否已激活（false = 待激活）
@@ -132,6 +133,12 @@ export async function patchUser(
 
 export async function activateUser(code: string): Promise<ApiResult> {
   return result(await req('/users/' + encodeURIComponent(code) + '/activate', { method: 'POST' }))
+}
+
+// 代理暂停 / 恢复本人名下账号；管理员暂停或封禁的，代理无权恢复
+export async function setUserPaused(code: string, pause: boolean): Promise<ApiResult> {
+  const op = pause ? '/pause' : '/resume'
+  return result(await req('/users/' + encodeURIComponent(code) + op, { method: 'POST' }))
 }
 
 export async function resetUserPassword(code: string): Promise<ApiResult> {

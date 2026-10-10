@@ -34,6 +34,7 @@ class User:
     next_charge_at: int | None = None       # 下次扣费时间；None = 当前不计费
     trial_granted_at: int | None = None     # 体验赠送时间；None = 未赠送过
     nickname: str | None = None             # 自定义昵称；None = 使用默认昵称（子项目 D）
+    status_by: str | None = None            # 暂停 / 封禁的操作方：admin | agent；None = 正常或存量（按 admin 处理）
 
 @dataclass
 class Session:
@@ -278,6 +279,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_admins(conn)
     _migrate_points(conn)
     _migrate_profile(conn)
+    _migrate_status_by(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
@@ -358,6 +360,13 @@ def _migrate_profile(conn) -> None:
                  " data TEXT NOT NULL, updated_at INTEGER NOT NULL)")
     conn.commit()
 
+def _migrate_status_by(conn) -> None:
+    # 需求回复第 11 条：记录暂停 / 封禁是管理员还是代理操作的。只加列、不回填：
+    # 之前只有后台能改状态，存量暂停 / 封禁的 NULL 一律按管理员处理。
+    if "status_by" not in {r["name"] for r in conn.execute("PRAGMA table_info(users)")}:
+        conn.execute("ALTER TABLE users ADD COLUMN status_by TEXT")
+    conn.commit()
+
 def mask_phone(phone: str | None) -> str | None:
     if phone is None:
         return None
@@ -369,7 +378,7 @@ def _row_to_user(r: sqlite3.Row) -> User:
                 r["first_activated_at"], r["activated_at"], r["phone"], r["onboarded_at"],
                 r["agent_id"], r["activated_by_agent_id"], r["agent_chain_json"],
                 r["points"], r["charge_anchor_at"], r["next_charge_at"], r["trial_granted_at"],
-                r["nickname"])
+                r["nickname"], r["status_by"])
 
 def get_user_by_code(conn, code: str) -> User | None:
     r = conn.execute("SELECT * FROM users WHERE code=?", (code.upper(),)).fetchone()
@@ -420,7 +429,7 @@ def activate_user(conn, code: str, now: int, *, by_agent_id: int | None = None) 
     if not u or (by_agent_id is not None and u.agent_id != by_agent_id):
         return "not_found"
     if u.first_activated_at is None and u.status != "active":
-        return "blocked"      # 封禁 / 暂停只能由后台解除，激活不顺带改回正常
+        return "blocked"      # 封禁 / 暂停须先恢复（第 11 条：代理只能恢复自己暂停的），激活不顺带改回正常
     h, salt = hash_password(INITIAL_PASSWORD)     # PBKDF2 放在写锁外
     chain = json.dumps(agent_chain(conn, u.agent_id)) if u.agent_id is not None else None
     conn.commit()
@@ -578,6 +587,7 @@ def update_user(conn, code: str, *, expires_at=_UNSET, status=_UNSET, password=_
         sets.append("expires_at=?"); vals.append(expires_at)
     if status is not _UNSET:
         sets.append("status=?"); vals.append(status)
+        sets.append("status_by=?"); vals.append(None if status == "active" else "admin")
     if (status is not _UNSET and status != "active") or (expires_at is not _UNSET and _expired(expires_at, time.time())):
         sets.append("next_charge_at=NULL")        # 不可计费 → 同写入停扣（保留 charge_anchor_at）
     if password is not _UNSET:
@@ -607,6 +617,10 @@ def apply_user_changes(conn, u: User, *, actor_type: str, actor: str, now: int,
                 or (expires_at is not _UNSET and _expired(expires_at, now))
                 or (expires_at is not _UNSET and expires_at != u.expires_at and _expired(u.expires_at, now))):
             conn.execute("UPDATE users SET next_charge_at=NULL WHERE id=?", (u.id,))
+        if status is not _UNSET:
+            # 后台再次设成同一暂停 / 封禁状态也接管记录：之后代理不能再恢复
+            conn.execute("UPDATE users SET status_by=? WHERE id=?",
+                         (None if status == "active" else actor_type, u.id))
         if status is not _UNSET and status != u.status:
             conn.execute("UPDATE users SET status=? WHERE id=?", (status, u.id))
             _audit_nocommit(conn, actor_type, actor, "user.status", u.code,
@@ -619,6 +633,36 @@ def apply_user_changes(conn, u: User, *, actor_type: str, actor: str, now: int,
     except Exception:
         conn.rollback()
         raise
+
+def agent_set_pause(conn, agent_id: int, code: str, pause: bool, *, actor: str, now: int) -> str:
+    """代理暂停 / 恢复本人名下账号（需求回复第 11 条：管理员权限高于代理）。
+    返回 ok | not_found（不存在或不在本人名下）| busy（暂停时已非正常）| not_paused（恢复时本就正常）|
+    forbidden（管理员暂停或封禁的，代理无权恢复）。状态更新与审计同一事务；暂停同时停扣（同 apply_user_changes）。"""
+    u = get_user_by_code(conn, code)
+    if u is None or u.agent_id != agent_id:
+        return "not_found"
+    if pause:
+        sql, frm, to = ("UPDATE users SET status='disabled', status_by='agent', next_charge_at=NULL"
+                        " WHERE id=? AND agent_id=? AND status='active'"), "active", "disabled"
+    else:
+        sql, frm, to = ("UPDATE users SET status='active', status_by=NULL"
+                        " WHERE id=? AND agent_id=? AND status='disabled' AND status_by='agent'"),\
+                       "disabled", "active"
+    try:
+        if conn.execute(sql, (u.id, agent_id)).rowcount != 1:
+            conn.rollback()
+            again = get_user_by_code(conn, code)
+            if again is None or again.agent_id != agent_id:
+                return "not_found"
+            if pause:
+                return "busy"
+            return "not_paused" if again.status == "active" else "forbidden"
+        _audit_nocommit(conn, "agent", actor, "user.status", u.code, {"from": frm, "to": to}, now)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return "ok"
 
 def list_users(conn) -> list[User]:
     return [_row_to_user(r) for r in conn.execute("SELECT * FROM users ORDER BY id").fetchall()]

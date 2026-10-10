@@ -99,14 +99,14 @@ def test_staff_activation_of_agent_account_records_chain_without_agent_actor():
 
 @pytest.mark.parametrize("status", ["banned", "disabled"])
 def test_activation_refused_while_banned_or_paused(status):
-    # 封禁 / 暂停只能由后台解除，激活（代理或后台）不能顺带把它改回正常
+    # 封禁 / 暂停须先恢复，激活（代理或后台）不能顺带把它改回正常
     conn, app = build_app()
     me = mk_agent_raw(conn, "me")
     assign(conn, me, 1_000_000, 1_000_000)
     assert key_client(app).patch("/admin/users/Z1000000", json={"status": status}).status_code == 200
     for tc in (login_client(app, "me"), key_client(app)):
         r = tc.post("/admin/users/Z1000000/activate")
-        assert r.status_code == 409 and r.json() == {"ok": False, "error": "账号已封禁或暂停，需后台解除后再激活"}
+        assert r.status_code == 409 and r.json() == {"ok": False, "error": "账号已封禁或暂停，需先恢复后再激活"}
     u = db.get_user_by_code(conn, "Z1000000")
     assert u.status == status and u.first_activated_at is None and u.points == 0
     assert audit(conn, "user.activate") == []
