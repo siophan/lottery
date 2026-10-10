@@ -1,4 +1,40 @@
 
+// 布林通道状态柱：命中红、未命中蓝；两种柱各自固定高度（红:蓝 = 2:1），无上下影线，柱高不表示任何数值
+var STATUS_BAR_COLORS = {
+	hit : 'red',
+	miss : '#3388ff'
+};
+
+// 每期一根柱：[期序号, 柱在通道里的位置（该期走势的中点）, 是否命中]
+function statusBars(datas) {
+	var bars = [];
+	for (var i = 0; i < datas.length; i++) {
+		var from = datas[i][0], to = datas[i][1]; // 命中向上走、未命中向下走
+		bars.push([ i, (from + to) / 2, to >= from ? 1 : 0 ]);
+	}
+	return bars;
+}
+
+function statusBarItem(params, api) {
+	var hit = api.value(2) == 1;
+	var unit = Math.max(2, params.coordSys.height * 0.04); // 蓝柱高度，随图表区域等比缩放
+	var height = hit ? unit * 2 : unit;
+	var width = Math.max(1, api.size([ 1, 0 ])[0] * 0.6);
+	var center = api.coord([ api.value(0), api.value(1) ]);
+	return {
+		type : 'rect',
+		shape : {
+			x : center[0] - width / 2,
+			y : center[1] - height / 2,
+			width : width,
+			height : height
+		},
+		style : {
+			fill : hit ? STATUS_BAR_COLORS.hit : STATUS_BAR_COLORS.miss
+		}
+	};
+}
+
 function k_line(data, qhSum, openNumber, topgaodu, tp) {
 	let userName = localStorage.getItem("userName");
 	//console.log(JSON.stringify(data)+"   data");
@@ -78,7 +114,7 @@ function k_line(data, qhSum, openNumber, topgaodu, tp) {
 		axisLabel : {
 			show : gridBoolen
 		},
-		boundaryGap : false
+		boundaryGap : true // 两侧留白，首尾状态柱不被裁切
 	} ];
 	var yAxisList = [ {
 		scale : true,
@@ -97,19 +133,14 @@ function k_line(data, qhSum, openNumber, topgaodu, tp) {
 		},
 	} ]
 	var seriesList = [ {
-		name : 'KLine',
-		type : 'candlestick',
-		data : data.datas,
-		symbolSize : 0,
-		smooth : true,
-		itemStyle : {
-			normal : {
-				color : 'red',
-				color0 : '#47e1e9',
-				borderColor : 'red',
-				borderColor0 : '#47e1e9'
-			}
-		},
+		name : '状态柱',
+		type : 'custom',
+		data : statusBars(data.datas),
+		renderItem : statusBarItem,
+		encode : {
+			x : 0,
+			y : 1
+		}
 	}, {
 		name : '中轨',
 		type : 'line',
@@ -187,7 +218,7 @@ function k_line(data, qhSum, openNumber, topgaodu, tp) {
 			splitLine : {
 				show : false
 			},
-			boundaryGap : false
+			boundaryGap : true // 两侧留白，首尾状态柱不被裁切
 		};
 		xAxisList.push(kkm2);
 		var kkm3 = {
@@ -307,7 +338,7 @@ function k_line(data, qhSum, openNumber, topgaodu, tp) {
 			splitLine : {
 				show : false
 			},
-			boundaryGap : false
+			boundaryGap : true // 两侧留白，首尾状态柱不被裁切
 		};
 		xAxisList.push(kkm2);
 		var kkm3 = {
