@@ -185,3 +185,115 @@ test('屏位记录写入失败时提示', () => {
   t.emit('klineScreensSaved', { result: false, errcode: 5 });
   assert.deepStrictEqual(t.errors, ['方案已保存，但屏号记录失败']);
 });
+
+// 第 011 章 5「保存到K线与命名弹窗」、7「按钮状态」：名称必填、校验重复和长度；保存中防重复提交
+const addklines = (t) => t.sent.filter(([c]) => c === 'addkline');
+function tryConfirm(t, { mode = '新建组', group, plan, existing = { 老组: ['旧方案'] } } = {}) {
+  open(t, existing);
+  t.vm.isSelectNewZu = mode;
+  if (group !== undefined) {
+    if (mode === '新建组') t.vm.fenZuName = group; else t.vm.kaiJiangQiHaoItem = group;
+  }
+  if (plan !== undefined) t.vm.fangAnName = plan;
+  t.vm.confirmClick();
+  return addklines(t);
+}
+
+test('名称为空（或只有空格）时提示必填，不保存', () => {
+  for (const [opts, msg] of [
+    [{ group: '' }, '请输入分组名称'],
+    [{ group: '   ' }, '请输入分组名称'],
+    [{ plan: '' }, '请输入方案名称'],
+    [{ plan: ' \t' }, '请输入方案名称'],
+  ]) {
+    const t = instance();
+    assert.strictEqual(tryConfirm(t, opts).length, 0, JSON.stringify(opts));
+    assert.deepStrictEqual(t.errors, [msg]);
+  }
+});
+
+test('选「已有组」时不看新建组输入框，但必须选了分组', () => {
+  const t = instance();
+  open(t);
+  t.vm.isSelectNewZu = '已有组';
+  t.vm.fenZuName = '';
+  t.vm.fangAnName = '方案C';
+  t.vm.confirmClick();
+  assert.strictEqual(addklines(t).length, 1);
+  const t2 = instance();
+  assert.strictEqual(tryConfirm(t2, { mode: '已有组', group: '' }).length, 0);
+  assert.deepStrictEqual(t2.errors, ['请选择分组']);
+});
+
+test('新建组与已有分组重名时提示，不会并进已有分组', () => {
+  const t = instance();
+  assert.strictEqual(tryConfirm(t, { group: '老组' }).length, 0);
+  assert.deepStrictEqual(t.errors, ['分组名已存在，请修改分组名或选择已有组']);
+  const t2 = instance();
+  assert.strictEqual(tryConfirm(t2, { group: ' 老组 ' }).length, 0, '前后空格不算不同的名字');
+});
+
+test('同组方案重名时提示；不同组可以用相同方案名', () => {
+  const t = instance();
+  assert.strictEqual(tryConfirm(t, { mode: '已有组', group: '老组', plan: '旧方案' }).length, 0);
+  assert.deepStrictEqual(t.errors, ['方案名重名,请修改方案名']);
+  const t2 = instance();
+  assert.strictEqual(tryConfirm(t2, { group: '新组', plan: '旧方案' }).length, 1);
+});
+
+test('名称最多 20 个字', () => {
+  const t = instance();
+  assert.strictEqual(tryConfirm(t, { group: '组'.repeat(21) }).length, 0);
+  assert.deepStrictEqual(t.errors, ['分组名称不能超过20个字']);
+  const t2 = instance();
+  assert.strictEqual(tryConfirm(t2, { plan: '方'.repeat(21) }).length, 0);
+  assert.deepStrictEqual(t2.errors, ['方案名称不能超过20个字']);
+  const t3 = instance();
+  assert.strictEqual(tryConfirm(t3, { group: '组'.repeat(20), plan: '方'.repeat(20) }).length, 1);
+});
+
+test('名称会成为本机文件名：不能含 \\ / : * ? " < > | 等字符，也不能只由点组成', () => {
+  for (const [opts, label] of [
+    [{ group: '分组/A' }, '分组'], [{ group: '..' }, '分组'], [{ plan: 'a\\b' }, '方案'],
+    [{ plan: 'x:y' }, '方案'], [{ plan: '方案?' }, '方案'], [{ plan: '.' }, '方案'],
+  ]) {
+    const t = instance();
+    assert.strictEqual(tryConfirm(t, opts).length, 0, JSON.stringify(opts));
+    assert.deepStrictEqual(t.errors, [label + '名称不能包含 \\ / : * ? " < > | 等字符，也不能只由“.”组成']);
+  }
+});
+
+test('保存时去掉名称前后的空格', () => {
+  const t = instance();
+  const [[, arg]] = tryConfirm(t, { group: ' 分组A ', plan: ' 方案B  ' });
+  assert.deepStrictEqual([arg.group, arg.file], ['分组A', '方案B']);
+});
+
+test('保存中「确定」显示加载状态，重复点击只提交一次；失败后可以再提交', () => {
+  const t = instance();
+  open(t);
+  t.vm.confirmClick();
+  t.vm.confirmClick();
+  assert.strictEqual(addklines(t).length, 1);
+  const confirmBtn = nodes(t.comp.render.call(t.vm)).find((n) => n.tag === 'el-button' && texts(n).join('') === '确 定');
+  assert.strictEqual(confirmBtn.data.attrs.loading, true);
+  t.emit('addKlineFinished', { result: false, errcode: 2 });
+  t.vm.confirmClick();
+  assert.strictEqual(addklines(t).length, 2);
+});
+
+test('重新打开弹窗时清掉没等到回应的保存状态', () => {
+  const t = instance();
+  open(t);
+  t.vm.confirmClick();
+  open(t);
+  t.vm.confirmClick();
+  assert.strictEqual(addklines(t).length, 2);
+});
+
+test('没发起保存的实例收到保存失败回调时不弹提示', () => {
+  const t = instance();
+  open(t);
+  t.emit('addKlineFinished', { result: false, errcode: 1 });
+  assert.deepStrictEqual(t.errors, []);
+});
