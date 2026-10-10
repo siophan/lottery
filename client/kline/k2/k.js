@@ -3,9 +3,6 @@ function kScreenNo() {
 	var m = /[?&]screen=(\d)/.exec(window.location.search);
 	return m ? m[1] : "";
 }
-//监控时间不允许频繁点击
-var nowTime = new Date().getTime();
-var clickTime = 0;
 var k = function() {
 	return {
 		/**
@@ -259,84 +256,6 @@ var k = function() {
 $(function() {
 	k.applyTheme(k.startTheme());
 });
-/**
- * @创建人：关宏岩
- * @备注：后退
- */
-function goTo() {
-	let  infoData = JSON.parse(localStorage.getItem("klink_info"));
-	let userInfo = localStorage.getItem("userInfo") || {};
-	userInfo = JSON.parse(userInfo)
-	let userName = userInfo.id;
-	nowTime = new Date().getTime();
-	if(clickTime == 0){
-		clickTime = nowTime - 2100;
-	}
-	if (clickTime != 'undefined' && (nowTime - clickTime < 2000)) {
-		layer.msg("请勿频繁点击");
-		return false;
-	} else {
-		
-		clickTime = nowTime;
-		var sjfw = infoData.dataRange;
-		if (sjfw == 120) {
-			var fyzb = infoData.backIndex; //前进参数
-			var qianjin = localStorage.getItem(userName+"_Kxtqianjin");
-			if (qianjin == null || qianjin == "") {
-				qianjin = 0;
-				localStorage.setItem(userName+"_Kxtqianjin", "1")
-			}
-		
-			if (parseInt(qianjin) < (360 / parseInt(fyzb))) {
-				localStorage.setItem(userName+"_Kxtqianjin", parseInt(qianjin) + 1)
-				 
-				loadingData();
-			} else {
-				layer.msg('已是最大后退距离，不可以再后退');
-			}
-		} else {
-			layer.msg('只有数据范围在120的时候可以进行“前进”“后退”操作');
-		}
-	}
-
-}
-/**
- * @创建人：关宏岩
- * @备注：前进
- */
-function goBack() {
-	let  infoData = JSON.parse(localStorage.getItem("klink_info"));
-	let userInfo = localStorage.getItem("userInfo") || {};
-	userInfo = JSON.parse(userInfo)
-	let userName = userInfo.id;
-	nowTime = new Date().getTime();
-	if(clickTime == 0){
-		clickTime = nowTime - 2100;
-	}
-	if (clickTime != 'undefined' && (nowTime - clickTime < 2000)) {
-		layer.msg("tips.clickFrequently");
-		return false;
-	} else {
-		clickTime = nowTime;
-		var sjfw = infoData.dataRange;
-		
-		if (sjfw == 120) {
-			var qianjin = localStorage.getItem(userName+"_Kxtqianjin");
-			if (qianjin == null || qianjin == "") {
-				layer.msg('不可进行前进操作');
-			} else {
-				if (parseInt(qianjin) > 0) {
-					localStorage.setItem(userName+"_Kxtqianjin", parseInt(qianjin) - 1)
-					loadingData();
-				} else {
-					layer.msg('不可进行前进操作');
-				}
-			}
-		} else {
-			layer.msg('只有数据范围在120的时候可以进行“前进”“后退”操作');
-		}
-	}
-}
 //MACD
 function macdFunction() {
 	let userName = localStorage.getItem("userName");

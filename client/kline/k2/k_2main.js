@@ -208,6 +208,10 @@ function loadingData(f) {
 		}
 
 		myChart.clear();
+		// 记下本屏当前方案，供「后退 / 前进」切换（k_history.js）
+		kHistory.record();
+		// 方案号码画完前「提交」置灰（k_submit.js）
+		kSubmit.loading();
 
 		//薛贵平修改
 		window.onresize = function() {
@@ -243,7 +247,6 @@ function loadingData(f) {
 			data.coefficient = 2;
 			data.macd = 0;
 			data.cycle = 9;
-			data.backIndex = 1;
 		} else {
 			data = JSON.parse(info);
 		}
@@ -265,16 +268,6 @@ function loadingData(f) {
 		}
 		var rows = data.dataRange;
 		var rowNum = $("#jdqqs").val();
-		var qianjin = localStorage.getItem(userName + "_Kxtqianjin");
-		var fyzb = data.backIndex; // 前后步长
-		if (fyzb == "" || fyzb == null) {
-			fyzb = 20;
-		}
-
-		if (qianjin != null && qianjin != "") {
-			rows = parseInt(rows) + (parseInt(qianjin) * parseInt(fyzb));
-
-		}
 		// planList[playId].forEach(itme=>{
 		// 	if(ShiFouKong(localStorage.getItem(itme))){
 		// 		parent.setPlan(itme);
@@ -390,7 +383,6 @@ function onBack(data) {
 		infoData.coefficient = 2;
 		infoData.macd = 0;
 		infoData.cycle = 9;
-		infoData.backIndex = 1;
 	}
 	faZs = data.len;
 	let userName = localStorage.getItem("userName");
@@ -418,16 +410,6 @@ function onBack(data) {
 		faName = $("#zdyfa4").text();
 	} else {
 		faName = $("#tjfa3").find("option:selected").text();
-	}
-
-	var rowStart = 1;
-	var qianjin = localStorage.getItem(userName + "_Kxtqianjin");
-	var fyzb = localStorage.getItem(userName + "_Kxtfyzb"); // 前进参数
-	if (fyzb == "" || fyzb == null) {
-		fyzb = 20;
-	}
-	if (qianjin != null && qianjin != "") {
-		rowStart = (parseInt(qianjin) * fyzb);
 	}
 
 	var rows = infoData.dataRange;
@@ -833,6 +815,7 @@ function tj() {
 		layer.msg("原智能数据不能提交");
 		return false;
 	}
+	if (!kSubmit.begin()) return false;
 	/*	console.log($("#wf").val());
 		console.log(window.parent);
 		if ($("#wf").val() == "q2zh") {

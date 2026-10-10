@@ -23,14 +23,15 @@ function evalSources(raw) {
 }
 
 // 载入组件；ipcRenderer 换成记录 send / on 的假对象
-function loadComp() {
+function loadComp(storage = {}) {
   const src = evalSources(fs.readFileSync(CHUNK, 'utf8'))
     .find((s) => s.includes('src/components/kLineComp.vue?vue&type=template'));
   const sent = [];
   const handlers = {};
   const ipcRenderer = { send: (ch, arg) => sent.push([ch, JSON.parse(JSON.stringify(arg))]), on: (ch, f) => { (handlers[ch] = handlers[ch] || []).push(f); } };
   const fn = new vm.Script('(function(module, __webpack_exports__, __webpack_require__){' + src + '\n})')
-    .runInNewContext({ window: { electron: { ipcRenderer } }, JSON, Object, Date, String, Number, Array });
+    .runInNewContext({ window: { electron: { ipcRenderer } }, JSON, Object, Date, String, Number, Array,
+      localStorage: { getItem: (k) => (k in storage ? storage[k] : null) } });
   const exp = {};
   const normalizer = { a: (o, render) => ({ exports: Object.assign({}, o, { render }) }) };
   const req = Object.assign((id) => (id === '2877' ? normalizer : {}), {
@@ -41,11 +42,12 @@ function loadComp() {
 }
 
 // 组装一个最小的 Vue 实例：data + methods + created
-function instance() {
-  const { comp, sent, handlers } = loadComp();
+function instance({ parent, storage } = {}) {
+  const { comp, sent, handlers } = loadComp(storage);
   const errors = [];
   const vmThis = Object.assign(comp.data(), {
     $store: { getters: { userName: 'Z0000001' } },
+    $parent: parent,
     $message: { error: (m) => errors.push(m) },
     _v: (t) => ({ text: String(t) }),
     _s: (x) => String(x),
@@ -296,4 +298,78 @@ test('没发起保存的实例收到保存失败回调时不弹提示', () => {
   open(t);
   t.emit('addKlineFinished', { result: false, errcode: 1 });
   assert.deepStrictEqual(t.errors, []);
+});
+
+// 第 011 章 5「保存对象」：保存完整K线方案——号码结果、筛选条件（含启用状态）、数据源 / 玩法、分组、方案、
+// 容错个数及必要的显示配置；内容取自打开弹窗的工作台
+const WORKBENCH = () => ({
+  typeId: '1105r5', catId: '11x5', codeId: '201', codeName: '官方数据', requestUrl: 'https://x/api/ds/a/draw-result',
+  rongcuo: [{ value: 1, isSel: false }, { value: 2, isSel: true }, { value: 3, isSel: false }],
+  saveConditionUtils: [
+    { conditionName: 'k', exterior: { style: 3, isUse: 1 }, parameter: { tolerant: 1, reaction: 0 }, name: { title: 'K线方案', content: '方案1' } },
+    { conditionName: 'p', exterior: { style: 1, isUse: 0 }, parameter: { tolerant: 0, reaction: 0 }, name: { title: '012路个数', content: '1路：1' } },
+  ],
+});
+
+function savedData(t) {
+  open(t);
+  t.vm.screenNo = 4;
+  t.vm.fenZuName = '分组A';
+  t.vm.fangAnName = '方案B';
+  t.vm.confirmClick();
+  return t.sent.find(([c]) => c === 'addkline')[1].data;
+}
+
+test('保存完整方案：号码、分组 / 方案 / 屏号、玩法与数据源、容错个数、筛选条件及启用状态、K线参数', () => {
+  const wb = WORKBENCH();
+  const t = instance({ parent: wb, storage: { klink_info: JSON.stringify({ dataRange: 120, step: 20 }) } });
+  const data = savedData(t);
+  assert.strictEqual(data.version, 2);
+  assert.strictEqual(data.numbers, '{"k":1}');                 // 弹窗收到的号码结果原样保存
+  assert.deepStrictEqual([data.group, data.plan, data.screen], ['分组A', '方案B', 4]);
+  assert.deepStrictEqual([data.playId, data.cat, data.code, data.dataSource, data.requestUrl],
+    ['1105r5', '11x5', '201', '官方数据', 'https://x/api/ds/a/draw-result']);
+  assert.strictEqual(data.tolerant, 2);
+  assert.deepStrictEqual(data.conditions, JSON.parse(JSON.stringify(wb.saveConditionUtils)));
+  assert.deepStrictEqual(data.conditions.map((c) => c.exterior.isUse), [1, 0]);
+  assert.deepStrictEqual(data.display, { dataRange: 120, step: 20 });
+  assert.strictEqual(typeof data.savedAt, 'number');
+});
+
+test('保存的条件是副本：之后工作台改条件不影响已保存的方案', () => {
+  const wb = WORKBENCH();
+  const t = instance({ parent: wb });
+  const data = savedData(t);
+  wb.saveConditionUtils[0].exterior.isUse = 0;
+  assert.strictEqual(data.conditions[0].exterior.isUse, 1);
+});
+
+test('弹窗包在其他组件里时也能找到工作台；工作台缺字段时按空值保存', () => {
+  const t = instance({ parent: { $parent: WORKBENCH() } });
+  assert.strictEqual(savedData(t).playId, '1105r5');
+  const t2 = instance({ parent: { typeId: '3dr3', saveConditionUtils: [] } });
+  const d2 = savedData(t2);
+  assert.deepStrictEqual([d2.playId, d2.cat, d2.code, d2.dataSource, d2.requestUrl, d2.tolerant, d2.conditions, d2.display],
+    ['3dr3', '', '', '', '', 0, [], null]);
+  const t3 = instance({ storage: { klink_info: '{坏' } });
+  const d3 = savedData(t3);
+  assert.deepStrictEqual([d3.conditions, d3.display, d3.numbers], [[], null, '{"k":1}']);
+});
+
+// 第 011 章 8「弹窗宽高随内容自适应，超出视口时内容区滚动，标题及操作区固定可见」
+test('弹窗超出窗口高度时只滚动内容区，标题和确定 / 关闭固定可见；窄窗口里屏号按钮换行不撑出弹窗', () => {
+  const t = instance();
+  open(t);
+  const tree = t.comp.render.call(t.vm);
+  const dialog = nodes(tree).find((n) => n.tag === 'el-dialog');
+  assert.strictEqual(dialog.data.attrs['custom-class'], 'kline-save-dialog');
+  const row = nodes(tree).find((n) => n.data.staticClass === 'kline-screen-row');
+  assert.strictEqual(row.data.staticStyle['flex-wrap'], 'wrap');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'client', 'css', 'chunk-213546c3.f1eea18c.css'), 'utf8');
+  const rule = (sel) => (css.match(new RegExp(sel.replace(/[.]/g, '\\.') + '\\{([^}]*)\\}')) || [])[1] || '';
+  assert.match(rule('.kline-save-dialog'), /display:flex/);
+  assert.match(rule('.kline-save-dialog'), /flex-direction:column/);
+  assert.match(rule('.kline-save-dialog'), /max-height:calc\(/);
+  assert.match(rule('.kline-save-dialog .el-dialog__body'), /overflow-y:auto/);
+  assert.match(rule('.kline-save-dialog .el-dialog__body'), /min-height:0/);
 });

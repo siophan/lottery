@@ -142,6 +142,16 @@ test('loadPlan_N 只在第 N 号屏画图', () => {
   assert.deepStrictEqual(t.calls.filter(([c]) => c === 'draw'), [['draw', 4, { plan: 1 }]]);
 });
 
+test('完整方案文件（第 011 章 5）按其中的号码画图；老格式（只存号码）照常画', () => {
+  const t = load();
+  start(t);
+  t.self.getPlan('分组A', '方案B', ['d'], '2');
+  t.emit('loadPlan_2', { result: true, context: JSON.stringify({ version: 2, numbers: '01,02-03,04', conditions: [] }) });
+  t.self.getPlan('分组A', '旧方案', ['d'], '5');
+  t.emit('loadPlan_5', { result: true, context: JSON.stringify('05,06-07,08') });
+  assert.deepStrictEqual(t.calls.filter(([c]) => c === 'draw'), [['draw', 2, '01,02-03,04'], ['draw', 5, '05,06-07,08']]);
+});
+
 test('各屏自动加载该屏最近保存的方案（列表最后一项），只在首次加载分组时生效', () => {
   const t = load();
   const config = { 老组: ['旧方案'], 分组A: ['方案B', '方案C'] };

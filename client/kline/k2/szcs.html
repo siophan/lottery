@@ -105,7 +105,6 @@
 					data.coefficient = 2;
 					data.macd = 0;
 					data.cycle = 9;
-					data.backIndex = 1;
 				}else{
 					data=JSON.parse(info);
 				}
@@ -114,7 +113,6 @@
 				$("#xs option[value='" + data.coefficient + "']").prop("selected", "selected"); //系数
 				$("#check" + data.macd).prop('checked', true); //macd
 				$("#jszq option[value='" + data.cycle + "']").prop("selected", "selected"); //kdj
-				$("#fyzb").val(data.backIndex);
 			}
 			/*保存设置参数  */
 			function onchangeDiv() {
@@ -124,7 +122,6 @@
 				data.coefficient = $("#xs").val();
 				data.macd = $('input[name="macd"]:checked').val();
 				data.cycle =$("#jszq").val();
-				data.backIndex = $("#fyzb").val();
 				localStorage.setItem("klink_info",JSON.stringify(data));
 				window.parent.loadingData()
 			}
@@ -194,17 +191,6 @@
 						<option value="8">8</option>
 						<option value="9" selected>9</option>
 					</select>
-				</div>
-			</fieldset>
-			<fieldset>
-				<legend><span id="qhbc">前进后退步长：</span>
-					<font id="fw300" color="red">(步长范围0~300)</font>
-				</legend>
-				<div style="text-align: center;width: 100%;"><span id="zhibiao">指标：</span>
-					<input type="text" id="fyzb" value="1" style="width: 80px;height: 30px;"
-						onkeyup="this.value=this.value.replace(/\D/g,'')"
-						onafterpaste="this.value=this.value.replace(/\D/g,'')">
-
 				</div>
 			</fieldset>
 

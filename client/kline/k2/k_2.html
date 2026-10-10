@@ -41,8 +41,8 @@
 				style="cursor: hand" />  <input type="button" id="tijiao" value="提交"
 				class="buttonK t" onclick="tj()" style="cursor: hand" /> <input
 				type="button" id="houtui" value="<<后退" class="buttonK t"
-				onclick="goTo()" style="cursor: hand" /> <input type="button"
-				id="qianjin" value="前进>>" class="buttonK t" onclick="goBack()"
+				onclick="kHistory.back()" style="cursor: hand" /> <input type="button"
+				id="qianjin" value="前进>>" class="buttonK t" onclick="kHistory.forward()"
 				style="cursor: hand" />
 				<input type="button" id="tongping"
 				value="同屏" class="buttonK t" onclick="TongPing()"
@@ -67,6 +67,10 @@
 			<ul id="zdyfa2">
 
 			</ul>
+		</div>
+		<div class="fa-search" id="faSearchBox">
+			<input type="text" id="faSearch" placeholder="搜索方案" autocomplete="off" />
+			<ul id="faSearchList"></ul>
 		</div>
 
 		<div style="float: left;margin: 10px 10px 0 10px;">
@@ -105,6 +109,9 @@
 	<script src="../../ds-sources.js"></script>
 	<script src="../js/k_Util.js"></script>
 	<script src="../js/k_sync.js"></script>
+	<script src="../js/k_history.js"></script>
+	<script src="../js/k_search.js"></script>
+	<script src="../js/k_submit.js"></script>
 	<script src="k_2main.js"></script>
 
 </body>
