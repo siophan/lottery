@@ -307,30 +307,13 @@ function loadingData(f) {
 				var successRes = function(res) { //智能数据
 					k_util.getyesAndno(res.data, cat, pageId, Id, onBack)
 				};
-				let mantissa = getQueryVariable("mantissa");
-				
-				if (null != mantissa && typeof mantissa != undefined && mantissa != "undefined" && mantissa) {
-					k_util.request('/lotteryNumber/mantissaTopRows', {
-						code: main_id,
-						rows: rows,
-						mantissa: mantissa
-					}, "", successRes, true)
-
-
-				} else if ("null" != requestUrl && null != requestUrl && typeof requestUrl != undefined && requestUrl !=
-					"undefined" &&
-					requestUrl) {
-
-					k_util.requestA(requestUrl + '?code=' + main_id + "&rows=" + rows, successRes)
-				} else {
-
-					k_util.request('/lotteryNumber/topRows', {
-						code: main_id,
-						rows: rows
-					}, "", successRes, true)
-
-
-				}
+				// 取数失败时显示失败状态和重试入口（k_sync.js），重试即重新加载本屏
+				kSync.fetchDraws({
+					code: main_id,
+					rows: rows,
+					mantissa: getQueryVariable("mantissa"),
+					requestUrl: requestUrl
+				}, successRes, function() { loadingData(); });
 
 
 
@@ -366,30 +349,13 @@ function loadingData(f) {
 			var successRes = function(res) { //智能数据
 				parent.getPlan(zdyfa3, zdyfa4, res.data, kScreenNo());
 			};
-			let mantissa = getQueryVariable("mantissa");
-
-			if (null != mantissa && typeof mantissa != undefined && mantissa != "undefined" && mantissa) {
-				k_util.request('/lotteryNumber/mantissaTopRows', {
-					code: main_id,
-					rows: rows,
-					mantissa: mantissa
-				}, "", successRes, true)
-
-
-			} else if ("null" != requestUrl && null != requestUrl && typeof requestUrl != undefined && requestUrl !=
-				"undefined" &&
-				requestUrl) {
-
-				k_util.requestA(requestUrl + '?code=' + main_id + "&rows=" + rows, successRes)
-			} else {
-
-				k_util.request('/lotteryNumber/topRows', {
-					code: main_id,
-					rows: rows
-				}, "", successRes, true)
-
-
-			}
+			// 取数失败时显示失败状态和重试入口（k_sync.js），重试即重新加载本屏
+			kSync.fetchDraws({
+				code: main_id,
+				rows: rows,
+				mantissa: getQueryVariable("mantissa"),
+				requestUrl: requestUrl
+			}, successRes, function() { loadingData(); });
 
 
 			// //发送请求

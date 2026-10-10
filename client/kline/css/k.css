@@ -111,3 +111,31 @@ body{
 	padding: 5px;
 	
 }
+
+/* 数据同步失败提示（k_sync.js）：盖住整个图表区域，不显示旧数据 */
+#k1 {
+	position: relative;
+}
+.k-sync-fail {
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	z-index: 10;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0.65);
+	color: #fff;
+	font-size: 16px;
+}
+.k-sync-fail .k-sync-retry {
+	margin: 12px 0 0;
+	cursor: pointer;
+}
+.k-sync-fail .k-sync-retry:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
