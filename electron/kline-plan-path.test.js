@@ -36,12 +36,12 @@ function loadComponent(src, window) {
 }
 
 test('kLine getPlan: 分组与方案用 / 拼接（macOS 可读到 addkline 写下的文件）', () => {
-  const src = evalSources(fs.readFileSync(CHUNK, 'utf8')).find((s) => s.includes('getPlan(group, plan, data) {'));
+  const src = evalSources(fs.readFileSync(CHUNK, 'utf8')).find((s) => s.includes('getPlan(group, plan, data, screen) {'));
   assert.ok(src, 'kLine.vue 模块源码未找到');
   const sent = [];
   const comp = loadComponent(src, { electron: { ipcRenderer: { send: (ch, arg) => sent.push([ch, arg]), on() {} } } });
   const self = { $store: { getters: { userName: 'u1' } }, topid: 7, pid: '1105r5' };
-  comp.methods.getPlan.call(self, '分组20261010', '方案20261010', null);
+  comp.methods.getPlan.call(Object.assign(self, { plotData: {}, screenOf: comp.methods.screenOf }), '分组20261010', '方案20261010', null, '1');
   assert.strictEqual(sent.length, 1);
   assert.strictEqual(sent[0][0], 'loadtempdata');
   assert.strictEqual(sent[0][1].file, '分组20261010/方案20261010');

@@ -1,3 +1,8 @@
+// 六屏：本页作为第 N 号屏嵌在 K 线独立页里（地址带 screen=N），回调父页面时带上屏号；单独打开时为空
+function kScreenNo() {
+	var m = /[?&]screen=(\d)/.exec(window.location.search);
+	return m ? m[1] : "";
+}
 //监控时间不允许频繁点击
 var nowTime = new Date().getTime();
 var clickTime = 0;
@@ -16,7 +21,7 @@ var k = function() {
 			if (spanid == "zdyfa4") {
 				loadingData();
 			} else {
-				parent.printPlan($(v).text());
+				parent.printPlan($(v).text(), kScreenNo());
 				loadingData();
 			}
 		},
@@ -27,7 +32,7 @@ var k = function() {
 		 */
 		deleteFaBtn : function(name) {
 			let groupName = $("#zdyfa3").text();
-			parent.delPlan(groupName,name);
+			parent.delPlan(groupName, name, kScreenNo());
 			
 		},
 		/**
@@ -35,7 +40,7 @@ var k = function() {
 		 * @备注：删除组方法
 		 */
 		deleteZuBtn : function(name) {
-			parent.delGroup(name);
+			parent.delGroup(name, kScreenNo());
 			
 		},
 		/**
@@ -61,7 +66,7 @@ var k = function() {
 		 * @备注：获取自定义方案组
 		 */
 		getUserK : function(f) {
-			parent.loadGroup();
+			parent.loadGroup(kScreenNo());
 			
 			
 		},
@@ -131,7 +136,7 @@ var k = function() {
 			if (v == 1) {
 				k.getUserK(true);
 				 $("#tjfa3").attr("disabled", true);
-				 $("#tongping").hide();
+				 if (!kScreenNo()) $("#tongping").hide();
 				 
 				loadingData();
 			} else if (v == 2) {
@@ -141,6 +146,28 @@ var k = function() {
 				if (x == 1) {
 					loadingData();
 				}
+			}
+		},
+		/**
+		 * 六屏：父页面按屏位记录选好分组 / 方案后，切到自定义方案并重画（不回调 loadGroup，避免循环）
+		 */
+		useCustom : function() {
+			$("#zdyfa").prop("checked", true);
+			$("#tjfa3").attr("disabled", true);
+			loadingData();
+		},
+		/**
+		 * 复制窗口：恢复源窗口该屏选的固定方案；方案没变时不重画
+		 */
+		useFixed : function(id) {
+			var before = $("#tjfa").prop("checked") ? String($("#tjfa3").val()) : null;
+			$("#tjfa").prop("checked", true);
+			$("#tjfa3").attr("disabled", false);
+			if ($("#tjfa3 option").filter(function() { return this.value == id; }).length) {
+				$("#tjfa3").val(id);
+			}
+			if (String($("#tjfa3").val()) !== before) {
+				loadingData();
 			}
 		},
 		/**

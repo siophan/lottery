@@ -364,7 +364,7 @@ function loadingData(f) {
 			// parent.getPlan(zdyfa3, zdyfa4, data);
 
 			var successRes = function(res) { //智能数据
-				parent.getPlan(zdyfa3, zdyfa4, res.data);
+				parent.getPlan(zdyfa3, zdyfa4, res.data, kScreenNo());
 			};
 			let mantissa = getQueryVariable("mantissa");
 
@@ -716,6 +716,10 @@ function addMainData(data23) {
  * @备注：同屏
  */
 function TongPing() {
+	if (kScreenNo() && parent.toggleTongPing) {
+		parent.toggleTongPing();
+		return;
+	}
 	screenStatus = 'moreScreen';
 	var myChartarr = [];
 	var fa = $("input[name='fa']:checked").val();
