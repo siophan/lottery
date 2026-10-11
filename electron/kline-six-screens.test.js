@@ -211,7 +211,7 @@ test('单屏页面：回调父页面时带上本屏屏号', () => {
     'parent.delGroup(name, kScreenNo())', 'parent.loadGroup(kScreenNo())']) {
     assert.ok(kjs.includes(call), call);
   }
-  assert.ok(main.includes('parent.getPlan(zdyfa3, zdyfa4, res.data, kScreenNo())'));
+  assert.ok(main.includes('parent.getPlan(zdyfa3, zdyfa4, res.data, kScreenNo(), seq)'));
   assert.ok(!/parent\.getPlan\(zdyfa3, zdyfa4, res\.data\)/.test(main));
 });
 

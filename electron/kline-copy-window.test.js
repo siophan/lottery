@@ -7,14 +7,16 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const { ROOT, load, start, nodes, texts, QUERY } = require('./kline-page-harness');
+const { ROOT, load, start, nodes, texts, QUERY, fakeEl } = require('./kline-page-harness');
 
 // 给第 n 号屏的假文档设好「自定义 / 固定」选择
 function pick(t, n, { custom, group = '', plan = '', fixed = '' }) {
   const els = t.frames[n].els;
   els.zdyfa = { checked: !!custom };
-  els.zdyfa3 = { innerHTML: group };
-  els.zdyfa4 = { innerHTML: plan };
+  els.zdyfa3 = fakeEl();
+  els.zdyfa3.textContent = group;
+  els.zdyfa4 = fakeEl();
+  els.zdyfa4.textContent = plan;
   els.tjfa3 = { value: fixed };
 }
 

@@ -210,8 +210,8 @@ function loadingData(f) {
 		myChart.clear();
 		// 记下本屏当前方案，供「后退 / 前进」切换（k_history.js）
 		kHistory.record();
-		// 方案号码画完前「提交」置灰（k_submit.js）
-		kSubmit.loading();
+		// 方案号码画完前「提交」置灰（k_submit.js）；seq 为本次画图的序号，晚到的旧请求结果丢弃
+		var seq = kSubmit.loading();
 
 		//薛贵平修改
 		window.onresize = function() {
@@ -306,7 +306,7 @@ function loadingData(f) {
 					rows: rows,
 					mantissa: getQueryVariable("mantissa"),
 					requestUrl: requestUrl
-				}, successRes, function() { loadingData(); });
+				}, successRes, function() { loadingData(); }, function() { return kSubmit.isCurrent(seq); });
 
 
 
@@ -340,7 +340,7 @@ function loadingData(f) {
 			// parent.getPlan(zdyfa3, zdyfa4, data);
 
 			var successRes = function(res) { //智能数据
-				parent.getPlan(zdyfa3, zdyfa4, res.data, kScreenNo());
+				parent.getPlan(zdyfa3, zdyfa4, res.data, kScreenNo(), seq);
 			};
 			// 取数失败时显示失败状态和重试入口（k_sync.js），重试即重新加载本屏
 			kSync.fetchDraws({
@@ -348,7 +348,7 @@ function loadingData(f) {
 				rows: rows,
 				mantissa: getQueryVariable("mantissa"),
 				requestUrl: requestUrl
-			}, successRes, function() { loadingData(); });
+			}, successRes, function() { loadingData(); }, function() { return kSubmit.isCurrent(seq); });
 
 
 			// //发送请求

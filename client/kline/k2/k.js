@@ -140,8 +140,10 @@ var k = function() {
 				$("#tjfa3").attr("disabled", false);
 				 $("#tongping").show();
 				$("input[name='fa']:eq(1)").prop("checked", true);
-				// 六屏：「关联」回到本屏最近保存的方案，父页面选好后调 useLinked 重画
+				// 六屏：「关联」回到本屏最近保存的方案，父页面选好后调 useLinked 重画；
+				// 等待期间提交置灰，在路上的旧请求作废（k_submit.js）
 				if (kScreenNo() && parent.linkPlan) {
+					kSubmit.loading();
 					parent.linkPlan(kScreenNo());
 				} else if (x == 1) {
 					loadingData();

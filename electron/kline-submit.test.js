@@ -112,3 +112,29 @@ test('loadingData 开始画图时置灰，getyesAndno 拿到方案号码后恢�
   const g = util.slice(util.indexOf('getyesAndno :'));
   assert.ok(g.indexOf('kSubmit.ready()') > g.indexOf('zdyfa_plan = opengudingarr;'));
 });
+
+// ---------------- 晚到的请求（review 修复） ----------------
+test('每次开始画图换一个序号，只有最新一次算当前', () => {
+  const p = page();
+  const a = p.kSubmit.loading();
+  assert.strictEqual(p.kSubmit.isCurrent(a), true);
+  const b = p.kSubmit.loading();
+  assert.notStrictEqual(a, b);
+  assert.strictEqual(p.kSubmit.isCurrent(a), false);
+  assert.strictEqual(p.kSubmit.isCurrent(b), true);
+  assert.strictEqual(p.kSubmit.isCurrent(undefined), false);
+});
+
+test('getyesAndno 画完图（onBack）之后才点亮提交，处理号码出错时保持置灰', () => {
+  const util = read('js/k_Util.js');
+  const g = util.slice(util.indexOf('getyesAndno :'), util.indexOf('yesAanno :'));
+  assert.ok(g.indexOf('kSubmit.ready()') > g.indexOf('onBack(data)'), 'ready 要在 onBack 之后');
+  assert.strictEqual(g.split('kSubmit.ready()').length - 1, 1);
+});
+
+test('六屏点「关联」：等父页面重新选好方案前先置灰提交，并作废在路上的旧请求', () => {
+  const kjs = read('k2/k.js');
+  const body = kjs.slice(kjs.indexOf('checkfa :'), kjs.indexOf('linked : false'));
+  const i = body.indexOf('kSubmit.loading();');
+  assert.ok(i > 0 && i < body.indexOf('parent.linkPlan(kScreenNo());'));
+});

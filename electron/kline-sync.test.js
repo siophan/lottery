@@ -165,3 +165,39 @@ test('失败提示盖住整个图表区域', () => {
   assert.match(css, /#k1\s*\{[^}]*position:\s*relative/);
   assert.match(css, /\.k-sync-fail\s*\{[^}]*position:\s*absolute/);
 });
+
+// 每次画图都换一个序号（kSubmit.loading），晚到的旧请求结果按 isCurrent 丢弃：
+// 不画旧方案、不点亮提交，也不改失败提示（快速切换方案、屏刚打开就「关联」时会有两个请求同时在路上）
+test('晚到的旧请求：成功不画图、不收起失败提示；失败不弹失败提示', () => {
+  const t = setup();
+  let seq = 1;
+  const fetchAt = (mine) => t.ctx.kSync.fetchDraws({ code: '201', rows: 120 }, (res) => t.drawn.push(res), () => {}, () => seq === mine);
+  fetchAt(1);
+  seq = 2;
+  fetchAt(2);
+  t.calls[1].fail('error');
+  assert.ok(t.visible(), '当前请求失败，显示失败提示');
+  t.calls[0].ok({ data: [{ expect: '1' }] });
+  assert.strictEqual(t.drawn.length, 0, '旧请求成功也不画');
+  assert.ok(t.visible(), '旧请求成功不收起当前请求的失败提示');
+
+  const t2 = setup();
+  let seq2 = 1;
+  const fetch2 = (mine) => t2.ctx.kSync.fetchDraws({ code: '201', rows: 120 }, (res) => t2.drawn.push(res), () => {}, () => seq2 === mine);
+  fetch2(1);
+  seq2 = 2;
+  fetch2(2);
+  t2.calls[1].ok({ data: [{ expect: '2' }] });
+  t2.calls[0].fail('timeout');
+  assert.strictEqual(t2.drawn.length, 1);
+  assert.ok(!t2.visible(), '旧请求失败不盖住已画好的图');
+});
+
+test('loadingData 两处取数都带上本次画图的序号判断', () => {
+  const main = read('k2/k_2main.js');
+  const start = main.indexOf('function loadingData(');
+  const body = main.slice(start, main.indexOf('\nfunction onBack(', start));
+  assert.match(body, /var seq = kSubmit\.loading\(\);/);
+  assert.strictEqual(body.split('function() { loadingData(); }, function() { return kSubmit.isCurrent(seq); });').length - 1, 2);
+  assert.match(body, /parent\.getPlan\(zdyfa3, zdyfa4, res\.data, kScreenNo\(\), seq\);/, '自定义方案读方案文件时带上序号');
+});

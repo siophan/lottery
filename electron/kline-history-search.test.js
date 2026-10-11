@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const { ROOT, load, start } = require('./kline-page-harness');
+const { ROOT, load, start, htmlText } = require('./kline-page-harness');
 const KDIR = path.join(ROOT, 'kline');
 const read = (p) => fs.readFileSync(path.join(KDIR, p), 'utf8');
 
@@ -19,9 +19,14 @@ function fakeEl(id, extra = {}) {
     appendChild(c) { node.children.push(c); return c; },
     contains(x) { return x === node || node.children.includes(x); },
   }, extra);
+  // innerHTML 里的裸 & 读回来是 &amp;，textContent 读写原文（同浏览器）
   Object.defineProperty(node, 'innerHTML', {
     get() { return node._html || ''; },
-    set(v) { node._html = v; if (v === '') node.children = []; },
+    set(v) { node._html = String(v).replace(/&(?!(amp|lt|gt|quot|#39);)/g, '&amp;'); if (v === '') node.children = []; },
+  });
+  Object.defineProperty(node, 'textContent', {
+    get() { return htmlText(node._html || ''); },
+    set(v) { node._html = String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); },
   });
   return node;
 }
@@ -163,6 +168,15 @@ test('固定方案下拉里已没有的方案也跳过', () => {
   t.h.back();
   assert.strictEqual(t.draws.at(-1), '组A/方案1');
   assert.deepStrictEqual(t.buttons(), [true, true]);
+});
+
+test('分组 / 方案名含 & 时按原名记录，后退能回到该方案', () => {
+  const t = page({ collection: { 'A&B': ["x'y"], 组B: ['方案3'] } });
+  t.chooseCustom('A&B', "x'y");
+  t.chooseCustom('组B', '方案3');
+  t.h.back();
+  assert.deepStrictEqual(t.parentWin.picks.at(-1), ['A&B', "x'y", '3']);
+  assert.deepStrictEqual(t.buttons(), [true, false]);
 });
 
 test('没选中方案（空分组）时不记录', () => {

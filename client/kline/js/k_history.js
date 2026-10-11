@@ -15,8 +15,9 @@ var kHistory = function() {
 	// 当前在画的方案：自定义（含「关联」到保存方案）为 {group, plan}，固定方案为 {fixed}；没选中方案时为 null
 	function current() {
 		if (k.planMode() == 1) {
-			var group = el("zdyfa3").innerHTML;
-			var plan = el("zdyfa4").innerHTML;
+			// 按文字读：名称里的 & 等字符不会变成 &amp;
+			var group = el("zdyfa3").textContent;
+			var plan = el("zdyfa4").textContent;
 			return group && plan ? { group: group, plan: plan } : null;
 		}
 		var fixed = el("tjfa3").value;
