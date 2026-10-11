@@ -36,7 +36,7 @@ function loadComponent(src, window) {
 }
 
 test('kLine getPlan: 分组与方案用 / 拼接（macOS 可读到 addkline 写下的文件）', () => {
-  const src = evalSources(fs.readFileSync(CHUNK, 'utf8')).find((s) => s.includes('getPlan(group, plan, data, screen) {'));
+  const src = evalSources(fs.readFileSync(CHUNK, 'utf8')).find((s) => s.includes('getPlan(group, plan, data, screen, seq) {'));
   assert.ok(src, 'kLine.vue 模块源码未找到');
   const sent = [];
   const comp = loadComponent(src, { electron: { ipcRenderer: { send: (ch, arg) => sent.push([ch, arg]), on() {} } } });

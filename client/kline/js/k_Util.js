@@ -195,7 +195,6 @@ var k_util = function() {
 				opengudingarr =  JSON.parse(localStorage.getItem(fa_id));
 			}
 			zdyfa_plan = opengudingarr;
-			if (typeof kSubmit != "undefined") kSubmit.ready();
 			
 			for(var i=0;i<data.length;i++){
 				var opennumber = data[i].opennumber;
@@ -254,7 +253,10 @@ var k_util = function() {
 				data.len=opengudingarr.length
 			}
 			
-			return onBack(data);
+			var drawn = onBack(data);
+			// 号码处理完、图画好之后才可提交（k_submit.js）
+			if (typeof kSubmit != "undefined") kSubmit.ready();
+			return drawn;
 		},
 		
 		/**

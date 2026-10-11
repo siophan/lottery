@@ -19,18 +19,36 @@ function evalSources(raw) {
   return captured;
 }
 
-// 假 iframe 文档：记录各元素 innerHTML / checked / value，以及 k.useCustom / useFixed / useLinked / applyTheme / loadingData 调用
+// 元素的 innerHTML 与 textContent 按浏览器的规则互相转换：写 textContent 时 & < > 会转义，读 textContent 时还原；
+// innerHTML 里的裸 & 读回来是 &amp;
+const htmlText = (h) => String(h).replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+function fakeEl() {
+  let html = '';
+  return {
+    get innerHTML() { return html; },
+    set innerHTML(v) { html = String(v).replace(/&(?!(amp|lt|gt|quot|#39);)/g, '&amp;'); },
+    get textContent() { return htmlText(html); },
+    set textContent(v) { html = String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); },
+  };
+}
+
+// 假 iframe 文档：记录各元素 innerHTML / checked / value，以及 k.useCustom / useFixed / useLinked / applyTheme / loadingData 调用；
+// kSubmit.seq 是该屏当前的画图序号（k_submit.js）
 function fakeFrame(n, calls) {
   const els = {};
-  const doc = { getElementById: (id) => (els[id] = els[id] || { innerHTML: '' }) };
+  const doc = { getElementById: (id) => (els[id] = els[id] || fakeEl()) };
   const win = {
     document: doc,
     k: {
+      linked: false,
+      planMode: () => ((els.zdyfa && els.zdyfa.checked) || win.k.linked ? '1' : '2'),
       useCustom: () => calls.push(['useCustom', n]),
       useFixed: (id) => calls.push(['useFixed', n, id]),
       useLinked: (has) => calls.push(['useLinked', n, has]),
       applyTheme: (name) => calls.push(['applyTheme', n, name]),
     },
+    kSubmit: { seq: 0, isCurrent: (s) => s === win.kSubmit.seq },
     loadingData: () => calls.push(['loadingData', n]),
     k_util: { getyesAndno: (data, cat, pid, res) => calls.push(['draw', n, res]) },
     onBack() {},
@@ -102,4 +120,4 @@ function start(t, { screens, config } = {}) {
 const nodes = (n) => (!n || n.text !== undefined ? [] : [n, ...(n.children || []).flatMap(nodes)]);
 const texts = (n) => (!n ? [] : n.text !== undefined ? [n.text] : (n.children || []).flatMap(texts));
 
-module.exports = { ROOT, CHUNK, evalSources, fakeFrame, load, start, nodes, texts, QUERY };
+module.exports = { ROOT, CHUNK, evalSources, fakeFrame, fakeEl, htmlText, load, start, nodes, texts, QUERY };

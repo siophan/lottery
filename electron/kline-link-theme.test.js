@@ -240,7 +240,7 @@ const K2 = path.join(ROOT, 'kline', 'k2');
 
 // 极简 jQuery 替身：两个单选（自定义 zdyfa / 关联 tjfa）、固定方案下拉 tjfa3、body
 function fakePage() {
-  const st = { zdyfa: false, tjfa: true, fixed: '9', disabled: false, body: {}, drawn: 0, tongping: 'shown' };
+  const st = { zdyfa: false, tjfa: true, fixed: '9', disabled: false, body: {}, drawn: 0, submitLoading: 0, tongping: 'shown' };
   const $ = (sel) => {
     if (typeof sel === 'function') return {};
     if (sel === '#zdyfa' || sel === '#tjfa') {
@@ -269,6 +269,7 @@ function runPage({ screen = '2', parent, chart } = {}) {
     window: { location: { search: screen ? '?code=1&screen=' + screen : '?code=1' } },
     $: page.$, document: {}, localStorage: {},
     loadingData: () => { page.st.drawn++; },
+    kSubmit: { loading: () => { page.st.submitLoading++; } },
     myChart: chart,
   };
   ctx.parent = parent || ctx.window;
@@ -311,6 +312,7 @@ test('单屏页面：六屏里点「关联」交给父页面按本屏保存记�
   p.k.checkfa(2, 1);
   assert.deepStrictEqual(linked, ['4']);
   assert.strictEqual(p.st.drawn, 0);
+  assert.strictEqual(p.st.submitLoading, 1, '等父页面选好方案前提交置灰');
   assert.strictEqual(p.st.tjfa, true);
 });
 

@@ -2,6 +2,7 @@
  * K线页取开奖数据（第 011 章 3「数据同步」）：
  * 同步失败（网络错误、超时、返回里没有开奖列表）时在图表区域显示失败状态和「重试」入口，不画旧数据；
  * 重试成功后提示消失。retry 由调用方传入（K线页里就是重新加载本屏）。
+ * isCurrent 返回 false 时（期间又切了方案 / 重画）丢弃这次结果：不画图，也不改失败提示。
  */
 var kSync = function() {
 	var BOX_ID = "kSyncFail";
@@ -52,8 +53,12 @@ var kSync = function() {
 		/**
 		 * src：{code, rows, mantissa, requestUrl}；successRes 只在拿到开奖列表时调用
 		 */
-		fetchDraws : function(src, successRes, retry) {
+		fetchDraws : function(src, successRes, retry, isCurrent) {
+			var stale = function() {
+				return !!isCurrent && !isCurrent();
+			};
 			var done = function(res) {
+				if (stale()) return;
 				if (!res || !Array.isArray(res.data)) {
 					fail(retry);
 					return;
@@ -62,6 +67,7 @@ var kSync = function() {
 				successRes(res);
 			};
 			var failed = function() {
+				if (stale()) return;
 				fail(retry);
 			};
 			if (given(src.mantissa)) {

@@ -261,8 +261,38 @@ test('名称会成为本机文件名：不能含 \\ / : * ? " < > | 等字符，
   ]) {
     const t = instance();
     assert.strictEqual(tryConfirm(t, opts).length, 0, JSON.stringify(opts));
-    assert.deepStrictEqual(t.errors, [label + '名称不能包含 \\ / : * ? " < > | 等字符，也不能只由“.”组成']);
+    assert.deepStrictEqual(t.errors, [label + '名称不能包含 \\ / : * ? " < > | & \' 等字符，也不能只由“.”组成']);
   }
+});
+
+test('名称不能含 & 和单引号（K线页下拉列表按名称拼接，含这两个字符的方案删不掉、切换后找不到）', () => {
+  for (const [opts, label] of [[{ group: 'A&B' }, '分组'], [{ plan: "a'b" }, '方案']]) {
+    const t = instance();
+    assert.strictEqual(tryConfirm(t, opts).length, 0, JSON.stringify(opts));
+    assert.deepStrictEqual(t.errors, [label + '名称不能包含 \\ / : * ? " < > | & \' 等字符，也不能只由“.”组成']);
+  }
+});
+
+test('constructor、toString、__proto__ 等名称不能用（主进程按名称查分组时会取到对象自带属性而出错）', () => {
+  for (const [opts, label] of [
+    [{ group: 'constructor' }, '分组'], [{ group: '__proto__' }, '分组'], [{ group: 'hasOwnProperty' }, '分组'],
+    [{ plan: 'toString' }, '方案'], [{ plan: 'valueOf' }, '方案'],
+  ]) {
+    const t = instance();
+    assert.strictEqual(tryConfirm(t, opts).length, 0, JSON.stringify(opts));
+    assert.deepStrictEqual(t.errors, [label + '名称不可用，请换一个名称']);
+  }
+  const t = instance();
+  assert.strictEqual(tryConfirm(t, { group: 'Constructor', plan: 'ToString' }).length, 1, '大小写不同的不是对象自带属性');
+});
+
+test('只有大小写不同的名称算重名（Mac 默认磁盘不分大小写，会写进同一个目录 / 文件）', () => {
+  const t = instance();
+  assert.strictEqual(tryConfirm(t, { group: 'ABC', existing: { abc: ['p1'] } }).length, 0);
+  assert.deepStrictEqual(t.errors, ['分组名已存在，请修改分组名或选择已有组']);
+  const t2 = instance();
+  assert.strictEqual(tryConfirm(t2, { mode: '已有组', group: '老组', plan: 'Plan1', existing: { 老组: ['plan1'] } }).length, 0);
+  assert.deepStrictEqual(t2.errors, ['方案名重名,请修改方案名']);
 });
 
 test('保存时去掉名称前后的空格', () => {
