@@ -736,6 +736,18 @@ test('login: 返回 10030 → 打开首登弹窗（apiURL / onboardToken），�
   assert.strictEqual(h.store.token, undefined);
 });
 
+test('login: 10030 的 data.smsRequired 透传给首登弹窗；缺失时为 undefined（弹窗按需要处理）', async () => {
+  const off = loginHarness({ code: 10030, data: { onboardToken: 'T', smsRequired: false } });
+  await off.run();
+  assert.strictEqual(off.opens[0].smsRequired, false);
+  const on = loginHarness({ code: 10030, data: { onboardToken: 'T', smsRequired: true } });
+  await on.run();
+  assert.strictEqual(on.opens[0].smsRequired, true);
+  const legacy = loginHarness({ code: 10030, data: { onboardToken: 'T' } });
+  await legacy.run();
+  assert.strictEqual(legacy.opens[0].smsRequired, undefined);
+});
+
 test('login: 首登完成（onDone）→ 清空密码、删除记住的密码、提示成功', async () => {
   const h = loginHarness({ code: 10030, data: { onboardToken: 'T' } });
   await h.run();

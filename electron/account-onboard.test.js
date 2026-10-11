@@ -87,8 +87,9 @@ function setup(responses, extra) {
   const timers = makeTimers();
   const fetchImpl = makeFetch(responses || {});
   const cb = { done: [], expired: [], exit: 0 };
+  // 默认按开启短信验证测（下方「短信验证关闭」用例单独传 smsRequired: false / 不传）
   const opts = Object.assign({
-    apiURL: API, onboardToken: 'tok', doc, fetchImpl,
+    apiURL: API, onboardToken: 'tok', doc, fetchImpl, smsRequired: true,
     setIntervalImpl: timers.setIntervalImpl, clearIntervalImpl: timers.clearIntervalImpl,
     onDone: (m) => cb.done.push(m), onExpired: (m) => cb.expired.push(m), onExit: () => { cb.exit++; },
   }, extra || {});
@@ -142,14 +143,14 @@ test('passwordProblem 各分支文案与顺序同后端', () => {
 
 test('validate 顺序：旧密码 → 新密码规则 → 手机号 → 验证码', () => {
   const ok = { oldPassword: '123456', newPassword: 'abc12345', confirmPassword: 'abc12345', phone: '13812345678', smsCode: '123456' };
-  assert.strictEqual(ob.validate(ok), null);
+  assert.strictEqual(ob.validate(ok, true), null);
   assert.strictEqual(ob.validate(Object.assign({}, ok, { oldPassword: '' })), '请输入旧密码');
   assert.strictEqual(ob.validate({ oldPassword: '', newPassword: '', confirmPassword: '', phone: '', smsCode: '' }), '请输入旧密码');
   assert.strictEqual(ob.validate(Object.assign({}, ok, { newPassword: 'abc', phone: 'x', smsCode: '' })), '新密码长度不能少于8位');
   assert.strictEqual(ob.validate(Object.assign({}, ok, { phone: '123', smsCode: '' })), '手机号格式错误');
-  assert.strictEqual(ob.validate(Object.assign({}, ok, { smsCode: '12345' })), '请输入6位短信验证码');
-  assert.strictEqual(ob.validate(Object.assign({}, ok, { smsCode: '12345a' })), '请输入6位短信验证码');
-  assert.strictEqual(ob.validate(Object.assign({}, ok, { smsCode: '1234567' })), '请输入6位短信验证码');
+  assert.strictEqual(ob.validate(Object.assign({}, ok, { smsCode: '12345' }), true), '请输入6位短信验证码');
+  assert.strictEqual(ob.validate(Object.assign({}, ok, { smsCode: '12345a' }), true), '请输入6位短信验证码');
+  assert.strictEqual(ob.validate(Object.assign({}, ok, { smsCode: '1234567' }), true), '请输入6位短信验证码');
 });
 
 // ---- 弹窗 DOM ----
@@ -368,7 +369,7 @@ test('提交网络失败：提示网络异常、弹窗仍在', async () => {
 
 test('提交返回非 JSON 视为网络异常', async () => {
   const doc = makeDoc();
-  const h = ob.open({ apiURL: API, onboardToken: 't', doc, fetchImpl: async () => ({ json: async () => { throw new Error('bad json'); } }) });
+  const h = ob.open({ apiURL: API, onboardToken: 't', doc, smsRequired: true, fetchImpl: async () => ({ json: async () => { throw new Error('bad json'); } }) });
   const q = (r) => doc.body.querySelector('[data-role="' + r + '"]');
   fill(q);
   q('submit').dispatch('click');
@@ -404,7 +405,7 @@ test('弹窗关闭后迟到的响应被忽略', async () => {
   const doc = makeDoc();
   const cb = [];
   const h = ob.open({
-    apiURL: API, onboardToken: 't', doc, onDone: (m) => cb.push(m),
+    apiURL: API, onboardToken: 't', doc, smsRequired: true, onDone: (m) => cb.push(m),
     fetchImpl: () => new Promise((r) => { release = () => r({ json: async () => ({ code: 0, msg: 'late' }) }); }),
   });
   const q = (r) => doc.body.querySelector('[data-role="' + r + '"]');
@@ -556,4 +557,50 @@ test('onDone / onExpired / onExit 抛错被捕获并 console.error', async () =>
   } finally {
     console.error = orig;
   }
+});
+
+// ---- 短信验证关闭（短信接口申请下来前的默认状态） ----
+test('validate：只有 smsRequired 显式为 false 才跳过验证码', () => {
+  const ok = { oldPassword: '123456', newPassword: 'abc12345', confirmPassword: 'abc12345', phone: '13812345678' };
+  assert.strictEqual(ob.validate(ok, false), null);
+  assert.strictEqual(ob.validate(ok), '请输入6位短信验证码');
+  assert.strictEqual(ob.validate(ok, true), '请输入6位短信验证码');
+  assert.strictEqual(ob.validate(Object.assign({}, ok, { phone: '123' }), false), '手机号格式错误');
+});
+
+test('smsRequired 缺失（旧后端）按需要短信验证渲染', () => {
+  const { q } = setup({}, { smsRequired: undefined });
+  assert.ok(q('code'));
+  assert.ok(q('send'));
+});
+
+test('短信验证关闭：不渲染验证码框和发码按钮', () => {
+  const { q } = setup({}, { smsRequired: false });
+  assert.ok(q('phone'));
+  assert.strictEqual(q('code'), null);
+  assert.strictEqual(q('send'), null);
+  assert.strictEqual(q('label-code'), null);
+});
+
+test('短信验证关闭：提交不带 smsCode，成功后 onDone', async () => {
+  const { q, cb, fetchImpl } = setup({ '/auth/onboard': { code: 0, msg: 'ok' } }, { smsRequired: false });
+  ['old', 'new', 'confirm', 'phone'].forEach((k) => {
+    q(k).value = { old: '123456', new: 'abc12345', confirm: 'abc12345', phone: '13812345678' }[k];
+  });
+  q('submit').dispatch('click');
+  await flush();
+  assert.strictEqual(fetchImpl.calls.length, 1);
+  assert.deepStrictEqual(fetchImpl.calls[0].body, {
+    onboardToken: 'tok', oldPassword: '123456', newPassword: 'abc12345', confirmPassword: 'abc12345', phone: '13812345678',
+  });
+  assert.deepStrictEqual(cb.done, ['ok']);
+});
+
+test('短信验证关闭：Tab 焦点圈不包含隐藏的验证码框和发码按钮', () => {
+  const { q, doc } = setup({}, { smsRequired: false, onExit: undefined });
+  q('submit').focus();
+  doc.fire('keydown', keyEv('Tab', q('submit')));
+  assert.strictEqual(doc.activeElement, q('old'));
+  doc.fire('keydown', keyEv('Tab', q('old'), { shiftKey: true }));
+  assert.strictEqual(doc.activeElement, q('submit'));
 });

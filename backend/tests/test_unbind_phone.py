@@ -1,5 +1,6 @@
 # 后台解绑手机号：账号被他人抢先首登（绑了别人的手机号）后，后台人员重置密码 + 解绑即可让真实用户重新首登。
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from app import db
 from app.config import Settings
@@ -7,6 +8,12 @@ from app.dayys_session import DataYsSession
 from app.main import create_app
 from tests.agent_helpers import H, audit, build_app, login_client, mk_admin, mk_agent_raw
 from tests.test_onboard import FakeSms, issue_code, upstream_ok
+from app.routes import auth as auth_routes
+
+@pytest.fixture(autouse=True)
+def sms_required(monkeypatch):
+    # 本文件验证短信开启时的解绑恢复流程（关闭时未验证的号重新首登可直接更换，无需解绑）
+    monkeypatch.setattr(auth_routes, "ONBOARD_SMS_REQUIRED", True)
 
 def build():
     conn = db.connect(":memory:"); db.init_db(conn)

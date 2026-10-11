@@ -7,10 +7,16 @@ from app import db
 from app.dayys_session import DataYsSession
 from tests.points_helpers import set_points_raw
 from app.sms import SmsError
+from app.routes import auth as auth_routes
 from app.routes.auth import password_problem
 from app.security import verify_password
 
 PHONE = "13812341234"
+
+@pytest.fixture(autouse=True)
+def sms_required(monkeypatch):
+    """本文件按开启短信验证测；关闭状态的用例自己再 setattr 成 False。"""
+    monkeypatch.setattr(auth_routes, "ONBOARD_SMS_REQUIRED", True)
 
 def upstream_ok(req):
     return httpx.Response(200, json={"code": 0, "data": {"token": "DYTOK", "userInfo": {"vip": 1}}})
@@ -263,8 +269,9 @@ def test_onboard_success_full_flow():
 
     row = conn.execute("SELECT * FROM audit_logs WHERE action='user.onboard'").fetchone()
     assert row["actor_type"] == "user" and row["actor"] == "USER01" and row["target"] == "USER01"
-    assert json.loads(row["detail_json"]) == {"phone": "138****1234"}
+    assert json.loads(row["detail_json"]) == {"phone": "138****1234", "phoneVerified": True}
     assert PHONE not in row["detail_json"]
+    assert after.phone_verified_at == after.onboarded_at
 
     # 旧密码失效、新密码可登录且直接拿到会话
     assert tc.post("/api/auth/login", json={"username": "USER01", "password": "123456"}).json()["code"] == 1
@@ -452,9 +459,9 @@ BOUND = "13900005678"
 BOUND_MSG = {"code": 1, "msg": "请使用已绑定的手机号（尾号5678）验证"}
 
 def bound_user(conn):
-    """已绑定手机号、被管理员重置密码后需重新首登的账号。"""
+    """已绑定（并验证过）手机号、被管理员重置密码后需重新首登的账号。"""
     u = fresh_user(conn)
-    conn.execute("UPDATE users SET phone=? WHERE id=?", (BOUND, u.id)); conn.commit()
+    conn.execute("UPDATE users SET phone=?, phone_verified_at=1 WHERE id=?", (BOUND, u.id)); conn.commit()
     return db.get_user_by_id(conn, u.id)
 
 def test_sms_bound_phone_must_match():
@@ -534,3 +541,116 @@ def test_concurrent_onboarding_only_first_wins(monkeypatch):
     assert after.phone == PHONE
     assert verify_password("Winner123", after.salt, after.password_hash)
     assert conn.execute("SELECT COUNT(*) FROM audit_logs WHERE action='user.onboard'").fetchone()[0] == 1
+
+
+# ---------------- 短信验证关闭（短信接口申请下来前的默认状态） ----------------
+
+def test_sms_disabled_is_default():
+    # 本文件的 autouse fixture 改了模块变量，直接看源码里的默认值
+    src = open(auth_routes.__file__, encoding="utf-8").read()
+    assert re.search(r"^ONBOARD_SMS_REQUIRED = False$", src, re.M)
+
+def test_sms_disabled_onboard_without_code(monkeypatch):
+    monkeypatch.setattr(auth_routes, "ONBOARD_SMS_REQUIRED", False)
+    conn, tc, sms = build()
+    u = fresh_user(conn)
+    body = form(ticket_for(conn, u)); body.pop("smsCode")
+    r = tc.post("/api/auth/onboard", json=body).json()
+    assert r["code"] == 0
+    fresh = db.get_user_by_code(conn, "USER01")
+    assert fresh.phone == PHONE and fresh.onboarded_at is not None
+    assert verify_password("Abcd1234", fresh.salt, fresh.password_hash)
+
+def test_sms_disabled_any_code_accepted_for_old_clients(monkeypatch):
+    monkeypatch.setattr(auth_routes, "ONBOARD_SMS_REQUIRED", False)
+    conn, tc, sms = build()
+    u = fresh_user(conn)
+    assert submit(tc, ticket_for(conn, u), smsCode="999999")["code"] == 0
+
+def test_sms_disabled_still_checks_password_and_phone(monkeypatch):
+    monkeypatch.setattr(auth_routes, "ONBOARD_SMS_REQUIRED", False)
+    conn, tc, sms = build()
+    u = fresh_user(conn)
+    t = ticket_for(conn, u)
+    assert submit(tc, t, oldPassword="wrong")["msg"] == "旧密码错误"
+    assert submit(tc, t, phone="123")["msg"] == "手机号格式错误"
+    assert db.get_user_by_code(conn, "USER01").onboarded_at is None
+
+def test_sms_disabled_send_endpoint_sends_nothing(monkeypatch):
+    monkeypatch.setattr(auth_routes, "ONBOARD_SMS_REQUIRED", False)
+    conn, tc, sms = build()
+    u = fresh_user(conn)
+    r = send_sms(tc, ticket_for(conn, u))
+    assert r["code"] == 0 and "任意6位数字" in r["msg"]
+    assert sms.sent == []
+    assert db.last_sms_sent_at(conn, PHONE) is None
+
+def test_login_10030_carries_sms_required(monkeypatch):
+    conn, tc, sms = build()
+    fresh_user(conn)
+    for flag in (True, False):
+        monkeypatch.setattr(auth_routes, "ONBOARD_SMS_REQUIRED", flag)
+        r = tc.post("/api/auth/login", json={"username": "USER01", "password": "123456"}).json()
+        assert r["code"] == 10030 and r["data"]["smsRequired"] is flag
+
+def test_sms_disabled_phone_recorded_unverified(monkeypatch):
+    monkeypatch.setattr(auth_routes, "ONBOARD_SMS_REQUIRED", False)
+    conn, tc, sms = build()
+    u = fresh_user(conn)
+    assert submit(tc, ticket_for(conn, u))["code"] == 0
+    after = db.get_user_by_code(conn, "USER01")
+    assert after.phone == PHONE and after.phone_verified_at is None
+    row = conn.execute("SELECT detail_json FROM audit_logs WHERE action='user.onboard'").fetchone()
+    assert json.loads(row["detail_json"]) == {"phone": "138****1234", "phoneVerified": False}
+
+def unverified_bound_user(conn):
+    """短信关闭期间首登绑了（可能填错的）手机号，之后被重置密码需重新首登的账号。"""
+    u = fresh_user(conn)
+    conn.execute("UPDATE users SET phone=?, phone_verified_at=NULL WHERE id=?", (BOUND, u.id)); conn.commit()
+    return db.get_user_by_id(conn, u.id)
+
+def test_unverified_bound_phone_can_be_replaced_via_sms():
+    conn, tc, sms = build()
+    u = unverified_bound_user(conn)
+    t = ticket_for(conn, u)
+    assert send_sms(tc, t, PHONE)["code"] == 0
+    _, code = sms.sent[0]
+    assert submit(tc, t, phone=PHONE, smsCode=code)["code"] == 0
+    after = db.get_user_by_id(conn, u.id)
+    assert after.phone == PHONE and after.phone_verified_at == after.onboarded_at
+
+def test_unverified_bound_phone_can_be_replaced_with_sms_disabled(monkeypatch):
+    monkeypatch.setattr(auth_routes, "ONBOARD_SMS_REQUIRED", False)
+    conn, tc, sms = build()
+    u = unverified_bound_user(conn)
+    assert submit(tc, ticket_for(conn, u), phone=PHONE)["code"] == 0
+    after = db.get_user_by_id(conn, u.id)
+    assert after.phone == PHONE and after.phone_verified_at is None
+
+def test_sms_disabled_reonboard_keeps_verified_phone_verified(monkeypatch):
+    monkeypatch.setattr(auth_routes, "ONBOARD_SMS_REQUIRED", False)
+    conn, tc, sms = build()
+    u = bound_user(conn)
+    assert submit(tc, ticket_for(conn, u), phone=PHONE) == BOUND_MSG     # 验证过的号仍不能换
+    assert submit(tc, ticket_for(conn, u), phone=BOUND)["code"] == 0
+    after = db.get_user_by_id(conn, u.id)
+    assert after.phone == BOUND and after.phone_verified_at == 1
+
+def test_unbind_clears_phone_verified():
+    conn, tc, sms = build()
+    u = bound_user(conn)
+    assert db.unbind_user_phone(conn, "USER01", actor_type="admin", actor="t") == "ok"
+    after = db.get_user_by_id(conn, u.id)
+    assert after.phone is None and after.phone_verified_at is None
+
+def test_migration_backfills_phone_verified_for_existing_phones():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    a = db.create_user(conn, "A1", "123456", None)
+    b = db.create_user(conn, "B1", "123456", None)
+    conn.execute("UPDATE users SET phone=?, onboarded_at=500 WHERE id=?", (PHONE, a.id))
+    conn.execute("ALTER TABLE users DROP COLUMN phone_verified_at"); conn.commit()
+    db.init_db(conn)
+    assert db.get_user_by_id(conn, a.id).phone_verified_at == 500
+    assert db.get_user_by_id(conn, b.id).phone_verified_at is None
+    db.init_db(conn)                                                    # 幂等
+    assert db.get_user_by_id(conn, a.id).phone_verified_at == 500

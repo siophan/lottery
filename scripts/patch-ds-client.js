@@ -519,8 +519,18 @@ const POINTS_REPLACEMENTS = [
     count: 1,
   },
 ];
+// 首登是否需要短信验证由后端决定：把 10030 响应的 data.smsRequired 透传给首登弹窗（缺失时弹窗按需要处理）
+const ONBOARD_SMS_MARK = '/* ds-patch onboard-sms v1 */';
+const ONBOARD_SMS_REPLACEMENTS = [
+  {
+    find: '                onboardToken: res.data.onboardToken,\n',
+    repl: `                onboardToken: res.data.onboardToken,\n                smsRequired: res.data.smsRequired, ${ONBOARD_SMS_MARK}\n`,
+    count: 1,
+  },
+];
 const LOGIN_LAYERS = [
   { mark: ONBOARD_MARK, replacements: LOGIN_REPLACEMENTS },
+  { mark: ONBOARD_SMS_MARK, replacements: ONBOARD_SMS_REPLACEMENTS },
   { mark: POINTS_MARK, replacements: POINTS_REPLACEMENTS },
   { mark: PROFILE_MARK, replacements: PROFILE_LOGIN_REPLACEMENTS },
 ];
@@ -632,7 +642,7 @@ function patchChunk(raw, name) {
 }
 
 module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
-  patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
+  patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK, ONBOARD_SMS_MARK,
   KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
   patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG };
 
