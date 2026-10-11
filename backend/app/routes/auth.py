@@ -14,6 +14,9 @@ from ..gate import POINTS_EMPTY
 router = APIRouter()
 
 ONBOARD_TICKET_TTL = 900        # 首登票据 15 分钟
+# 首登短信验证开关：短信接口申请下来前先关闭，首登只改密码 + 填手机号（不验证）。
+# 通过 10030 响应的 smsRequired 下发给客户端，改回 True 只需重新部署后端
+ONBOARD_SMS_REQUIRED = False
 SMS_PURPOSE = "onboard"
 SMS_CODE_TTL = 300              # 验证码 5 分钟有效
 SMS_COOLDOWN = 60               # 同号冷却 60 秒
@@ -43,8 +46,9 @@ def _fail(msg: str) -> JSONResponse:
 
 
 def _bound_phone_problem(user, phone: str) -> JSONResponse | None:
-    """重置密码后重新首登：已绑定手机号的账号只能用原号码验证（spec 待确认 #6）。"""
-    if user.phone and phone != user.phone:
+    """重置密码后重新首登：已验证过手机号的账号只能用原号码验证（spec 待确认 #6）。
+    短信关闭期间绑定的号未经验证（可能填错），允许更换。"""
+    if user.phone and user.phone_verified_at is not None and phone != user.phone:
         return _fail(f"请使用已绑定的手机号（尾号{user.phone[-4:]}）验证")
     return None
 
@@ -124,7 +128,7 @@ async def login(request: Request):
         # 未完成首登：不建会话、不触达上游，只发只能用于改密/发短信的临时票据
         ticket = db.create_onboard_ticket(conn, user.id, ONBOARD_TICKET_TTL)
         return deny({"code": 10030, "msg": "首次登录请修改密码并绑定手机号",
-                     "data": {"onboardToken": ticket}})
+                     "data": {"onboardToken": ticket, "smsRequired": ONBOARD_SMS_REQUIRED}})
     if user.points <= 0:            # 已激活且余额为 0（积分暂停）：不发会话
         return deny(POINTS_EMPTY)
 
@@ -158,6 +162,10 @@ async def onboard_sms(request: Request):
     blocked = _bound_phone_problem(user, phone)
     if blocked is not None:
         return blocked
+    if not ONBOARD_SMS_REQUIRED:
+        # 已装的旧版客户端仍会显示验证码框并要求填 6 位数字：提示随便填，提交时不校验
+        return JSONResponse({"code": 0, "msg": "暂无需短信验证，验证码填写任意6位数字即可",
+                             "data": {"resendAfter": SMS_COOLDOWN}})
     last = db.last_sms_sent_at(conn, phone)
     if last is not None and now - last < SMS_COOLDOWN:
         return _fail("验证码发送过于频繁，请稍后再试")
@@ -203,15 +211,18 @@ async def onboard(request: Request):
     blocked = _bound_phone_problem(user, phone)
     if blocked is not None:
         return blocked
-    # 前面都通过才校验（消耗）验证码，避免无谓的错误计数
-    result = db.check_sms_code(conn, phone, SMS_PURPOSE, _str(payload, "smsCode"), now,
-                               user_id=user.id)
-    if result != "ok":
-        return _fail(_SMS_CHECK_MSG[result])
+    if ONBOARD_SMS_REQUIRED:
+        # 前面都通过才校验（消耗）验证码，避免无谓的错误计数
+        result = db.check_sms_code(conn, phone, SMS_PURPOSE, _str(payload, "smsCode"), now,
+                                   user_id=user.id)
+        if result != "ok":
+            return _fail(_SMS_CHECK_MSG[result])
 
     hashed = await run_in_threadpool(hash_password, new)
     # 带条件写入：验密 / 哈希期间另一个请求已完成首登（或后台重置了密码）时不覆盖，按票据失效处理
     if not db.complete_onboarding(conn, user.id, new, phone, now, hashed=hashed, expect_hash=user.password_hash,
-                                  audit_detail={"phone": db.mask_phone(phone)}):
+                                  phone_verified=ONBOARD_SMS_REQUIRED,
+                                  audit_detail={"phone": db.mask_phone(phone),
+                                                "phoneVerified": ONBOARD_SMS_REQUIRED}):
         return JSONResponse(_TICKET_INVALID)
     return JSONResponse({"code": 0, "msg": "密码修改与手机号绑定成功，请使用新密码重新登录"})

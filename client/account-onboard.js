@@ -29,13 +29,14 @@
     return null;
   }
 
-  function validate(form) {
+  // smsRequired 只有显式为 false 才跳过验证码（与 open 的 options.smsRequired 同义）
+  function validate(form, smsRequired) {
     form = form || {};
     if (!form.oldPassword) return '请输入旧密码';
     var pwProblem = passwordProblem(form.oldPassword, form.newPassword, form.confirmPassword);
     if (pwProblem) return pwProblem;
     if (!isMobile(form.phone)) return '手机号格式错误';
-    if (!/^\d{6}$/.test(String(form.smsCode == null ? '' : form.smsCode))) return '请输入6位短信验证码';
+    if (smsRequired !== false && !/^\d{6}$/.test(String(form.smsCode == null ? '' : form.smsCode))) return '请输入6位短信验证码';
     return null;
   }
 
@@ -58,6 +59,8 @@
     var setIntervalImpl = options.setIntervalImpl || (typeof setInterval !== 'undefined' ? setInterval : null);
     var clearIntervalImpl = options.clearIntervalImpl || (typeof clearInterval !== 'undefined' ? clearInterval : null);
     if (current) current.close();
+    // 是否需要短信验证由后端在 10030 响应的 data.smsRequired 下发；字段缺失（旧后端）按需要处理
+    var smsRequired = options.smsRequired !== false;
 
     var closed = false;
     var submitting = false;
@@ -138,7 +141,7 @@
     var rightCol = el('div', 'col-phone', { flex: '1', minWidth: '0', marginLeft: '16px' });
     [label('old', '旧密码（初始密码）'), oldI, label('new', '新密码'), newI, hint,
       label('confirm', '确认新密码'), confirmI].forEach(function (n) { leftCol.appendChild(n); });
-    [label('phone', '实名手机号'), phoneI, label('code', '短信验证码'), codeRow]
+    (smsRequired ? [label('phone', '实名手机号'), phoneI, label('code', '短信验证码'), codeRow] : [label('phone', '实名手机号'), phoneI])
       .forEach(function (n) { rightCol.appendChild(n); });
     columns.appendChild(leftCol);
     columns.appendChild(rightCol);
@@ -188,7 +191,7 @@
     // Tab 焦点圈在弹窗内：可聚焦元素按 DOM 顺序，禁用的按钮（倒计时中的发码、提交中的提交）不可聚焦
     function focusables() {
       return [oldI, newI, confirmI, phoneI, codeI, sendBtn, submitBtn, exitBtn].filter(function (n) {
-        return n && !n.disabled;
+        return n && !n.disabled && (smsRequired || (n !== codeI && n !== sendBtn));
       });
     }
 
@@ -321,9 +324,10 @@
       if (closed || submitting) return;
       var form = {
         oldPassword: oldI.value, newPassword: newI.value, confirmPassword: confirmI.value,
-        phone: phoneI.value, smsCode: codeI.value,
+        phone: phoneI.value,
       };
-      var problem = validate(form);
+      if (smsRequired) form.smsCode = codeI.value;
+      var problem = validate(form, smsRequired);
       if (problem) { showError(problem); return; }
       showError('');
       submitting = true;

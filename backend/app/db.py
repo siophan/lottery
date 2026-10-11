@@ -35,6 +35,7 @@ class User:
     trial_granted_at: int | None = None     # 体验赠送时间；None = 未赠送过
     nickname: str | None = None             # 自定义昵称；None = 使用默认昵称（子项目 D）
     status_by: str | None = None            # 暂停 / 封禁的操作方：admin | agent；None = 正常或存量（按 admin 处理）
+    phone_verified_at: int | None = None    # 手机号经短信验证的时间；None = 未验证（短信关闭期间首登绑定的号）
 
 @dataclass
 class Session:
@@ -281,6 +282,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_profile(conn)
     _migrate_status_by(conn)
     _migrate_agent_charge(conn)
+    _migrate_phone_verified(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
@@ -380,6 +382,21 @@ def _migrate_agent_charge(conn) -> None:
     conn.execute("DROP INDEX IF EXISTS idx_ledger_charge_cycle")
     conn.commit()
 
+def _migrate_phone_verified(conn) -> None:
+    # 短信验证关闭期间首登绑定的手机号未经验证，需与验证过的区分开（未验证的号重新首登时允许更换）。
+    # 新加列时回填：此前绑定的号都是短信验证通过后写入的，按首登时间视为已验证
+    if "phone_verified_at" not in {r["name"] for r in conn.execute("PRAGMA table_info(users)")}:
+        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN phone_verified_at INTEGER")
+            conn.execute("UPDATE users SET phone_verified_at=onboarded_at WHERE phone IS NOT NULL")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    conn.commit()
+
 def mask_phone(phone: str | None) -> str | None:
     if phone is None:
         return None
@@ -391,7 +408,7 @@ def _row_to_user(r: sqlite3.Row) -> User:
                 r["first_activated_at"], r["activated_at"], r["phone"], r["onboarded_at"],
                 r["agent_id"], r["activated_by_agent_id"], r["agent_chain_json"],
                 r["points"], r["charge_anchor_at"], r["next_charge_at"], r["trial_granted_at"],
-                r["nickname"], r["status_by"])
+                r["nickname"], r["status_by"], r["phone_verified_at"])
 
 def get_user_by_code(conn, code: str) -> User | None:
     r = conn.execute("SELECT * FROM users WHERE code=?", (code.upper(),)).fetchone()
@@ -497,7 +514,8 @@ def unbind_user_phone(conn, code: str, *, actor_type: str, actor: str) -> str:
         return "unbound"
     try:
         conn.execute("BEGIN IMMEDIATE")
-        cur = conn.execute("UPDATE users SET phone=NULL WHERE id=? AND phone=?", (u.id, u.phone))
+        cur = conn.execute("UPDATE users SET phone=NULL, phone_verified_at=NULL WHERE id=? AND phone=?",
+                           (u.id, u.phone))
         if cur.rowcount != 1:            # 并发下已被改动
             conn.rollback()
             return "unbound"
@@ -512,14 +530,18 @@ def unbind_user_phone(conn, code: str, *, actor_type: str, actor: str) -> str:
 
 def complete_onboarding(conn, user_id: int, new_password: str, phone: str, now: int,
                         *, audit_detail: dict | None = None, hashed: tuple[str, str] | None = None,
-                        expect_hash: str | None = None) -> bool:
+                        expect_hash: str | None = None, phone_verified: bool = True) -> bool:
     """完成首登。hashed：调用方已在线程池里算好的 (hash, salt)。
+    phone_verified：手机号是否经过短信验证；未验证时若与原绑定号码相同则保留原验证时间，否则记为未验证。
     expect_hash：调用方校验旧密码时看到的哈希；只有账号仍未首登且密码没变时才写入，
     否则（并发的另一个请求已完成首登、后台已重置密码）返回 False，什么都不改。"""
     h, salt = hashed if hashed is not None else hash_password(new_password)
     try:
-        sql = "UPDATE users SET password_hash=?, salt=?, phone=?, onboarded_at=? WHERE id=?"
-        args = [h, salt, phone, now, user_id]
+        # SET 里的 phone / phone_verified_at 取的都是更新前的值
+        sql = ("UPDATE users SET password_hash=?, salt=?, phone=?, onboarded_at=?,"
+               " phone_verified_at=CASE WHEN ? THEN ? WHEN phone IS ? THEN phone_verified_at ELSE NULL END"
+               " WHERE id=?")
+        args = [h, salt, phone, now, 1 if phone_verified else 0, now, phone, user_id]
         if expect_hash is not None:
             sql += " AND onboarded_at IS NULL AND password_hash=?"
             args.append(expect_hash)
