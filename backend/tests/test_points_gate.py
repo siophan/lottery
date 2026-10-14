@@ -105,7 +105,7 @@ def test_users_list_shows_points_and_arrears():
 
 def test_agents_list_and_me_show_agent_balance():
     conn, app = build_app()
-    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="junior", parent=a)
+    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="city", parent=a)
     set_agent_points_raw(conn, a, 30); set_agent_points_raw(conn, b, 5)
     staff_rows = {x["name"]: x for x in key_client(app).get("/admin/agents").json()["agents"]}
     assert (staff_rows["A"]["points"], staff_rows["B"]["points"]) == (30, 5)

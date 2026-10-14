@@ -61,7 +61,7 @@ export interface AgentRow {
   id: number
   name: string
   region: string // province | city | vip
-  tier: string // senior 高级 | junior 低级
+  tier: string // general 总代 | province 省代 | city 市代
   parent_agent_id: number | null
   status: string // active 激活 | paused 暂停 | cancelled 取消
   status_by: string | null
@@ -307,9 +307,9 @@ export async function createAgent(input: AgentInput): Promise<CreateAgentResult>
   return createResult(await post('/agents', input))
 }
 
-// 高级代理开通下级：级别固定为低级、上级为本人、地区标签沿用本人，均由服务端决定
-export async function createChildAgent(name: string, password?: string): Promise<CreateAgentResult> {
-  return createResult(await post('/agents', password ? { name, password } : { name }))
+// 代理开通下级：级别须低于本人（不传为低一级），上级为本人、地区标签沿用本人，由服务端决定
+export async function createChildAgent(name: string, tier: string, password?: string): Promise<CreateAgentResult> {
+  return createResult(await post('/agents', password ? { name, tier, password } : { name, tier }))
 }
 
 export interface CreationLogRow {
@@ -465,7 +465,7 @@ export async function rechargeUser(code: string, amount: number): Promise<Points
   return pointsResult(await post(`/users/${encodeURIComponent(code)}/points/recharge`, { amount }))
 }
 
-// 高级代理：转积分给直属下级
+// 总代 / 省代：转积分给直属下级
 export async function transferAgentPoints(toAgentId: number, amount: number): Promise<PointsResult> {
   return pointsResult(await post(`/agents/${toAgentId}/points/transfer`, { amount }))
 }

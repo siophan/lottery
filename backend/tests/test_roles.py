@@ -134,10 +134,10 @@ def test_me_reports_role_grants_and_agent():
     mk_admin(conn, "boss", role="super")
     me = login_client(app, "boss").get("/admin/me").json()
     assert me == {"username": "boss", "role": "super", "grants": [], "agent": None}
-    aid = mk_agent_raw(conn, "ag1", tier="junior", region="vip")
+    aid = mk_agent_raw(conn, "ag1", tier="city", region="vip")
     me = login_client(app, "ag1").get("/admin/me").json()
     assert me["role"] == "agent" and me["agent"]["id"] == aid
-    assert me["agent"]["tier"] == "junior" and me["agent"]["region"] == "vip"
+    assert me["agent"]["tier"] == "city" and me["agent"]["region"] == "vip"
     assert "admin_id" not in me["agent"] and "name_key" not in me["agent"]
 
 @pytest.mark.parametrize("status,msg", [("paused", "代理资格已暂停，无法登录"),

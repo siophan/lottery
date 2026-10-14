@@ -41,16 +41,19 @@ def generate_password(length: int = 12) -> str:
             return pw
 
 def _agent_create_fields(conn, p: Principal, payload: dict):
-    """代理开通下级（发财猫需求第 2 条）：只有高级代理能开，且只能开本人名下的低级代理，地区标签沿用本人。
-    传了其他级别 / 上级 / 地区按越权拒绝，而不是静默改写。返回 (region, tier, parent_agent_id)。"""
+    """代理开通下级（发财猫需求第 2 条）：总代可开省代 / 市代，省代可开市代，市代不能开；
+    上级固定为本人，地区标签沿用本人。不传级别时为低一级；传了平级、更高级别 / 其他上级 / 其他地区
+    按越权拒绝，而不是静默改写。返回 (region, tier, parent_agent_id)。"""
     me = db_agents.get_agent(conn, p.agent_id)
-    if me is None or me.tier != "senior":
-        raise BizError("低级代理不能开通下级代理", 403)
-    if (payload.get("tier", "junior") != "junior"
+    if me is None or me.tier == db_agents.LEAF_TIER:
+        raise BizError("市代不能开通下级代理", 403)
+    lower = [t for t in db_agents.TIERS if db_agents.higher(me.tier, t)]
+    tier = payload.get("tier", lower[0])
+    if (tier not in lower
             or payload.get("parent_agent_id", me.id) != me.id
             or payload.get("region", me.region) != me.region):
         raise BizError(AGENT_CREATE_BEYOND, 403)
-    return me.region, "junior", me.id
+    return me.region, tier, me.id
 
 @router.get("/agents/creation-logs")
 async def creation_logs(request: Request, p: Principal = AGENT_ONLY):

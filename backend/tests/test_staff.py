@@ -19,7 +19,7 @@ def test_super_and_key_can_rename_and_old_name_reserved():
     assert e["actor"] == "boss" and e["detail"] == {"from": "alpha", "to": "beta"}
     tc = key_client(app)
     r = tc.post("/admin/agents", json={"name": "Alpha", "password": "Passw0rd!", "region": "city",
-                                        "tier": "junior"})
+                                        "tier": "city"})
     assert r.status_code == 409 and r.json()["error"] == "该名称已被使用"
     assert tc.post(f"/admin/agents/{aid}/rename", json={"name": "ALPHA"}).status_code == 200   # 本人改回旧名
     assert conn.execute("SELECT name_key FROM agent_name_reservations").fetchall()[0]["name_key"] == "beta"

@@ -7,7 +7,7 @@ from tests.agent_helpers import (audit, build_app, key_client, login_client, mk_
 
 NOW = 1_800_000_000
 
-def new_agent(conn, name, *, tier="senior", parent=None, region="city", now=NOW):
+def new_agent(conn, name, *, tier="general", parent=None, region="city", now=NOW):
     return db_agents.create_agent(conn, name=name, password="Passw0rd!", region=region, tier=tier,
                                   parent_agent_id=parent, actor_type="admin", actor="root", now=now)
 
@@ -29,7 +29,7 @@ def test_create_agent_creates_login_identity_and_audits():
     adm = db.get_admin_by_id(conn, a.admin_id)
     assert adm.username == "华东一号" and adm.role == "agent"
     e = audit(conn, "agent.create")[0]
-    assert e["target"] == "华东一号" and e["detail"] == {"region": "province", "tier": "senior",
+    assert e["target"] == "华东一号" and e["detail"] == {"region": "province", "tier": "general",
                                                        "parent_agent_id": None}
     assert login_client(app, "华东一号", "Passw0rd!").get("/admin/me").json()["role"] == "agent"
 
@@ -51,11 +51,11 @@ def test_name_unique_case_insensitive_and_vs_staff_usernames():
 def test_create_validates_region_tier_password():
     conn, _ = build_app()
     assert biz(db_agents.create_agent, conn, name="a", password="Passw0rd!", region="mars",
-               tier="senior", parent_agent_id=None, actor_type="admin", actor="r", now=NOW).msg == "地区标签无效"
+               tier="general", parent_agent_id=None, actor_type="admin", actor="r", now=NOW).msg == "地区标签无效"
     assert biz(db_agents.create_agent, conn, name="a", password="Passw0rd!", region="city",
                tier="boss", parent_agent_id=None, actor_type="admin", actor="r", now=NOW).msg == "级别无效"
     assert biz(db_agents.create_agent, conn, name="a", password="short", region="city",
-               tier="senior", parent_agent_id=None, actor_type="admin", actor="r", now=NOW).msg == "密码长度需为 8–64 位"
+               tier="general", parent_agent_id=None, actor_type="admin", actor="r", now=NOW).msg == "密码长度需为 8–64 位"
     assert conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM admins").fetchone()[0] == 0
 
@@ -64,34 +64,48 @@ def test_create_validates_region_tier_password():
 def test_parent_rules():
     conn, _ = build_app()
     top = new_agent(conn, "top")
-    junior = new_agent(conn, "jr", tier="junior", parent=top.id)
+    prov = new_agent(conn, "pv", tier="province", parent=top.id)
+    city = new_agent(conn, "ct", tier="city", parent=prov.id)
+    assert new_agent(conn, "ct2", tier="city", parent=top.id).parent_agent_id == top.id   # 可跨级挂靠
     assert biz(new_agent, conn, "x1", parent=999).msg == "上级代理不存在"
-    assert biz(new_agent, conn, "x2", parent=junior.id).msg == "上级必须是高级代理"
+    for parent, tier in [(city.id, "city"), (prov.id, "province"), (top.id, "general"), (prov.id, "general")]:
+        assert biz(new_agent, conn, "x2", tier=tier, parent=parent).msg == "上级的级别必须高于本代理"
     status(conn, top.id, "paused")
-    assert biz(new_agent, conn, "x3", parent=top.id).msg == "上级代理资格不是激活状态"
+    assert biz(new_agent, conn, "x3", tier="city", parent=top.id).msg == "上级代理资格不是激活状态"
 
 def test_parent_cannot_be_self_or_descendant():
     conn, _ = build_app()
     a = new_agent(conn, "a")
-    b = new_agent(conn, "b", parent=a.id)
-    c = new_agent(conn, "c", parent=b.id)
+    b = new_agent(conn, "b", tier="province", parent=a.id)
+    c = new_agent(conn, "c", tier="city", parent=b.id)
     upd = lambda aid, pid: db_agents.update_agent(conn, aid, actor_type="admin", actor="r",
                                                  now=NOW, parent_agent_id=pid)
     assert biz(upd, a.id, a.id).msg == "上级不能是自己"
-    assert biz(upd, a.id, c.id).msg == "不能把自己的下级设为上级"
-    assert biz(upd, a.id, b.id).msg == "不能把自己的下级设为上级"
-    assert upd(c.id, a.id).parent_agent_id == a.id          # 合法改挂
+    assert biz(upd, a.id, c.id).msg == "上级的级别必须高于本代理"   # 下级级别必然更低，按级别先拦下
+    assert upd(c.id, a.id).parent_agent_id == a.id          # 合法改挂（跨级）
     assert upd(c.id, None).parent_agent_id is None          # 解除上级
 
-def test_senior_to_junior_blocked_while_has_children():
+def test_parent_cycle_blocked_on_dirty_data():
+    conn, _ = build_app()
+    a = mk_agent_raw(conn, "a", tier="city")                # 绕过校验造出「市代下面挂总代」的脏数据
+    b = mk_agent_raw(conn, "b", tier="general", parent=a)
+    e = biz(db_agents.update_agent, conn, a, actor_type="admin", actor="r", now=NOW, parent_agent_id=b)
+    assert e.msg == "不能把自己的下级设为上级"
+
+def test_tier_change_respects_children_and_parent():
     conn, _ = build_app()
     a = new_agent(conn, "a")
-    b = new_agent(conn, "b", parent=a.id)
-    e = biz(db_agents.update_agent, conn, a.id, actor_type="admin", actor="r", now=NOW, tier="junior")
-    assert e.msg == "该代理仍有下级，不能改为低级代理" and e.status == 409
-    db_agents.update_agent(conn, b.id, actor_type="admin", actor="r", now=NOW, parent_agent_id=None)
-    assert db_agents.update_agent(conn, a.id, actor_type="admin", actor="r", now=NOW,
-                                  tier="junior").tier == "junior"
+    b = new_agent(conn, "b", tier="province", parent=a.id)
+    upd = lambda aid, **k: db_agents.update_agent(conn, aid, actor_type="admin", actor="r", now=NOW, **k)
+    e = biz(upd, a.id, tier="province")
+    assert e.msg == "该代理有同级或更高级别的下级，不能改为省代" and e.status == 409
+    assert biz(upd, b.id, tier="general").msg == "上级的级别必须高于本代理"
+    assert upd(b.id, tier="city").tier == "city"           # 降级：上级仍高于本代理
+    assert upd(a.id, tier="province").tier == "province"   # 下级已是市代，可降为省代
+    assert biz(upd, a.id, tier="city").msg == "该代理有同级或更高级别的下级，不能改为市代"
+    assert upd(b.id, tier="province", parent_agent_id=None).tier == "province"   # 同时解除上级再升级
+    assert audit(conn, "agent.update")[0]["detail"] == {"tier": {"from": "city", "to": "province"},
+                                                        "parent_agent_id": {"from": a.id, "to": None}}
 
 def test_update_audits_only_changes():
     conn, _ = build_app()
@@ -157,14 +171,14 @@ def test_routes_create_patch_status_password_and_list():
     conn, app = build_app()
     tc = key_client(app)
     r = tc.post("/admin/agents", json={"name": "top", "password": "Passw0rd!", "region": "city",
-                                        "tier": "senior"})
+                                        "tier": "general"})
     assert r.status_code == 200 and r.json()["agent"]["name"] == "top"
     top = r.json()["agent"]["id"]
     r = tc.post("/admin/agents", json={"name": "kid", "password": "Passw0rd!", "region": "vip",
-                                        "tier": "junior", "parent_agent_id": top})
+                                        "tier": "city", "parent_agent_id": top})
     kid = r.json()["agent"]["id"]
     r = tc.post("/admin/agents", json={"name": "TOP", "password": "Passw0rd!", "region": "city",
-                                        "tier": "senior"})
+                                        "tier": "general"})
     assert r.status_code == 409 and r.json() == {"ok": False, "error": "该名称已被使用"}
     assert tc.patch(f"/admin/agents/{kid}", json={"region": "province"}).json()["agent"]["region"] == "province"
     r = tc.patch(f"/admin/agents/{kid}", json={"name": "x"})
@@ -195,12 +209,12 @@ def test_list_stats_count_owned_accounts():
 def test_agent_sees_only_direct_children_and_cannot_mutate():
     conn, app = build_app()
     me = mk_agent_raw(conn, "me")
-    mk_agent_raw(conn, "kid", tier="junior", parent=me)
+    mk_agent_raw(conn, "kid", tier="city", parent=me)
     mk_agent_raw(conn, "other")
     tc = login_client(app, "me")
     assert [a["name"] for a in tc.get("/admin/agents").json()["agents"]] == ["kid"]
     r = tc.post("/admin/agents", json={"name": "z", "password": "Passw0rd!", "region": "city",
-                                        "tier": "senior"})
+                                        "tier": "general"})
     assert r.status_code == 403 and r.json()["error"] == "只能开通低于自身级别的代理"
     assert tc.patch(f"/admin/agents/{me}", json={"region": "vip"}).status_code == 403
     assert tc.post(f"/admin/agents/{me}/status", json={"status": "paused", "reason": "x"}).status_code == 403
@@ -210,7 +224,7 @@ def test_paused_agent_login_blocked_end_to_end():
     conn, app = build_app()
     tc = key_client(app)
     aid = tc.post("/admin/agents", json={"name": "ag", "password": "Passw0rd!", "region": "city",
-                                          "tier": "junior"}).json()["agent"]["id"]
+                                          "tier": "city"}).json()["agent"]["id"]
     agent_tc = login_client(app, "ag", "Passw0rd!")
     tc.post(f"/admin/agents/{aid}/status", json={"status": "paused", "reason": "x"})
     assert agent_tc.get("/admin/agents").status_code == 403          # 已有会话被逐请求拒绝
@@ -219,41 +233,55 @@ def test_paused_agent_login_blocked_end_to_end():
 
 # ---------------- 代理开通下级代理（发财猫需求第 2 条） ----------------
 
-def test_senior_agent_creates_junior_child_with_own_region_and_audit():
+def test_general_agent_creates_child_with_own_region_and_audit():
     conn, app = build_app()
     me = mk_agent_raw(conn, "me", region="province")
     tc = login_client(app, "me")
     r = tc.post("/admin/agents", json={"name": "kid", "password": "Passw0rd!"})
     assert r.status_code == 200, r.text
     a = r.json()["agent"]
-    assert (a["tier"], a["parent_agent_id"], a["region"], a["status"]) == ("junior", me, "province", "active")
+    # 不传级别：低一级（总代 → 省代）
+    assert (a["tier"], a["parent_agent_id"], a["region"], a["status"]) == ("province", me, "province", "active")
     # 新代理用自己的账号密码登录后台（0 积分时 login_client 先补 1 分）
     assert login_client(app, "kid", "Passw0rd!").get("/admin/me").json()["agent"]["id"] == a["id"]
-    assert [x["name"] for x in tc.get("/admin/agents").json()["agents"]] == ["kid"]
+    r = tc.post("/admin/agents", json={"name": "kid2", "password": "Passw0rd!", "tier": "city"})
+    assert r.status_code == 200 and r.json()["agent"]["tier"] == "city"      # 总代也可直接开市代
+    assert [x["name"] for x in tc.get("/admin/agents").json()["agents"]] == ["kid", "kid2"]
     logs = audit(conn, "agent.create")
-    assert len(logs) == 1 and logs[0]["actor_type"] == "agent" and logs[0]["actor"] == "me"
+    assert len(logs) == 2 and logs[0]["actor_type"] == "agent" and logs[0]["actor"] == "me"
+
+def test_province_agent_creates_city_only():
+    conn, app = build_app()
+    boss = mk_agent_raw(conn, "boss")
+    me = mk_agent_raw(conn, "me", tier="province", parent=boss)
+    tc = login_client(app, "me")
+    for tier in ("province", "general", "boss"):
+        r = tc.post("/admin/agents", json={"name": "kid", "password": "Passw0rd!", "tier": tier})
+        assert r.status_code == 403 and r.json()["error"] == "只能开通低于自身级别的代理", tier
+    r = tc.post("/admin/agents", json={"name": "kid", "password": "Passw0rd!"})
+    assert r.status_code == 200 and (r.json()["agent"]["tier"], r.json()["agent"]["parent_agent_id"]) == ("city", me)
 
 def test_agent_create_rejects_tier_parent_region_beyond_own():
-    """级别只能是低级、上级只能是自己；地区标签沿用本人（传了别的值按越权拒绝）。"""
+    """级别只能低于本人、上级只能是自己；地区标签沿用本人（传了别的值按越权拒绝）。"""
     conn, app = build_app()
     me = mk_agent_raw(conn, "me", region="city")
     other = mk_agent_raw(conn, "other")
     tc = login_client(app, "me")
     base = {"name": "kid", "password": "Passw0rd!"}
-    for extra in ({"tier": "senior"}, {"parent_agent_id": other}, {"parent_agent_id": None},
+    for extra in ({"tier": "general"}, {"parent_agent_id": other}, {"parent_agent_id": None},
                   {"region": "vip"}):
         r = tc.post("/admin/agents", json={**base, **extra})
         assert r.status_code == 403 and r.json()["error"] == "只能开通低于自身级别的代理", extra
-    ok = tc.post("/admin/agents", json={**base, "tier": "junior", "parent_agent_id": me, "region": "city"})
+    ok = tc.post("/admin/agents", json={**base, "tier": "city", "parent_agent_id": me, "region": "city"})
     assert ok.status_code == 200, ok.text
     assert audit(conn, "agent.create")[0]["actor"] == "me"
 
-def test_junior_agent_cannot_create_agents():
+def test_city_agent_cannot_create_agents():
     conn, app = build_app()
     boss = mk_agent_raw(conn, "boss")
-    mk_agent_raw(conn, "jr", tier="junior", parent=boss)
+    mk_agent_raw(conn, "jr", tier="city", parent=boss)
     r = login_client(app, "jr").post("/admin/agents", json={"name": "kid", "password": "Passw0rd!"})
-    assert r.status_code == 403 and r.json()["error"] == "低级代理不能开通下级代理"
+    assert r.status_code == 403 and r.json()["error"] == "市代不能开通下级代理"
     assert audit(conn, "agent.create") == []
 
 def test_agent_create_still_validates_name_and_password():
@@ -270,7 +298,7 @@ def test_agent_create_still_validates_name_and_password():
 @pytest.mark.parametrize("pw", [None, "", "   "])
 def test_create_without_password_generates_one_and_returns_it_once(pw):
     conn, app = build_app()
-    body = {"name": "gen", "region": "city", "tier": "junior"}
+    body = {"name": "gen", "region": "city", "tier": "city"}
     if pw is not None:
         body["password"] = pw
     r = key_client(app).post("/admin/agents", json=body)
@@ -285,7 +313,7 @@ def test_create_without_password_generates_one_and_returns_it_once(pw):
 def test_create_with_password_does_not_return_generated():
     conn, app = build_app()
     r = key_client(app).post("/admin/agents", json={"name": "a", "password": "Passw0rd!",
-                                                     "region": "city", "tier": "junior"})
+                                                     "region": "city", "tier": "city"})
     assert r.status_code == 200 and "generated_password" not in r.json()
 
 def test_agent_created_child_can_get_generated_password():
@@ -308,9 +336,9 @@ def test_agent_creation_logs_cover_own_children_only_and_hide_staff_names():
     mk_agent_raw(conn, "other")
     key = key_client(app)
     key.post("/admin/agents", json={"name": "byStaff", "password": "Passw0rd!", "region": "city",
-                                    "tier": "junior", "parent_agent_id": me})
+                                    "tier": "city", "parent_agent_id": me})
     key.post("/admin/agents", json={"name": "notMine", "password": "Passw0rd!", "region": "city",
-                                    "tier": "junior", "parent_agent_id": None})
+                                    "tier": "city", "parent_agent_id": None})
     tc = login_client(app, "me")
     tc.post("/admin/agents", json={"name": "byMe", "password": "Passw0rd!"})
     other = login_client(app, "other")
@@ -334,3 +362,21 @@ def test_agent_creation_logs_paging_and_role():
     assert tc.get("/admin/agents/creation-logs?limit=x").status_code == 400
     assert key_client(app).get("/admin/agents/creation-logs").status_code == 403   # 后台人员看操作日志
     assert TestClient(app).get("/admin/agents/creation-logs").status_code == 403
+
+# ---------------- 级别迁移：高级 / 低级 → 总代 / 省代 / 市代 ----------------
+
+def test_migrate_old_tiers():
+    conn, _ = build_app()
+    top = mk_agent_raw(conn, "top", tier="senior")
+    mid = mk_agent_raw(conn, "mid", tier="senior", parent=top)      # 高级挂高级（旧规则允许）
+    jr = mk_agent_raw(conn, "jr", tier="junior", parent=mid)
+    solo = mk_agent_raw(conn, "solo", tier="junior")
+    db.init_db(conn)
+    tiers = {a: db_agents.get_agent(conn, a).tier for a in (top, mid, jr, solo)}
+    assert tiers == {top: "general", mid: "province", jr: "city", solo: "city"}
+    logs = audit(conn, "agent.update")
+    assert len(logs) == 4 and {l["actor_type"] for l in logs} == {"system"}
+    assert {l["target"]: l["detail"]["tier"]["to"] for l in logs} == {"top": "general", "mid": "province",
+                                                                     "jr": "city", "solo": "city"}
+    db.init_db(conn)                                                # 再次启动不重复迁移
+    assert len(audit(conn, "agent.update")) == 4

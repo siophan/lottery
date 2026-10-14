@@ -120,7 +120,7 @@ def test_spending_down_to_zero_stops_billing_in_the_same_transaction():
 def test_every_way_of_reaching_zero_stops_billing(how):
     conn, _ = build_app()
     a = agent_with(conn, "A", 2)
-    child = mk_agent_raw(conn, "B", tier="junior", parent=a)
+    child = mk_agent_raw(conn, "B", tier="city", parent=a)
     activated_user(conn, "U1")
     conn.execute("UPDATE users SET agent_id=? WHERE code='U1'", (a,)); conn.commit()
     run(conn, NOW)

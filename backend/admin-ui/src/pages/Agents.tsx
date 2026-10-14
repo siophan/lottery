@@ -3,6 +3,7 @@ import {
   ActionType,
   ModalForm,
   ProColumns,
+  ProFormDependency,
   ProFormDigit,
   ProFormRadio,
   ProFormSelect,
@@ -37,6 +38,8 @@ import {
   POINTS_AMOUNT_PROPS,
   REGION_LABEL,
   TIER_LABEL,
+  TIER_ORDER,
+  tierAbove,
   toValueEnum,
 } from '../util'
 
@@ -54,8 +57,9 @@ export default function Agents({ me }: { me: Me }) {
   const [all, setAll] = useState<AgentRow[]>([])
   const reload = () => actionRef.current?.reload()
   const canRename = me.role === 'super' || me.grants.includes('agent.rename')
-  // 代理身份：列表只有本人直属下级，只能开通低级代理；编辑 / 资格 / 积分 / 密码等仍是后台人员操作
+  // 代理身份：列表只有本人直属下级，只能开通低于本人级别的代理；编辑 / 资格 / 积分 / 密码等仍是后台人员操作
   const isAgent = me.role === 'agent'
+  const childTiers = TIER_ORDER.filter((t) => !!me.agent && tierAbove(me.agent.tier, t))
 
   const run = async (p: Promise<ApiResult>, okMsg: string) => {
     const r = await p
@@ -99,11 +103,24 @@ export default function Agents({ me }: { me: Me }) {
     return true
   }
 
-  // 可做上级的代理：资格激活的高级代理（排除自己）
-  const parentOptions = (selfId?: number) =>
+  // 可做上级的代理：资格激活、级别高于所选级别的代理（排除自己）
+  const parentOptions = (tier: string | undefined, selfId?: number) =>
     all
-      .filter((a) => a.tier === 'senior' && a.status === 'active' && a.id !== selfId)
-      .map((a) => ({ label: a.name, value: a.id }))
+      .filter((a) => a.status === 'active' && a.id !== selfId && (!tier || tierAbove(a.tier, tier)))
+      .map((a) => ({ label: `${a.name}（${TIER_LABEL[a.tier] ?? a.tier}）`, value: a.id }))
+  const parentSelect = (extra: string, selfId?: number) => (
+    <ProFormDependency name={['tier']}>
+      {({ tier }) => (
+        <ProFormSelect
+          name="parent_agent_id"
+          label="上级代理"
+          options={parentOptions(tier, selfId)}
+          fieldProps={{ allowClear: true }}
+          extra={extra}
+        />
+      )}
+    </ProFormDependency>
+  )
 
   const columns: ProColumns<AgentRow>[] = [
     { title: '名称', dataIndex: 'name', fieldProps: { placeholder: '按名称搜索' } },
@@ -180,15 +197,9 @@ export default function Agents({ me }: { me: Me }) {
             label="级别"
             valueEnum={TIER_LABEL}
             rules={[{ required: true }]}
-            extra="只有高级代理可以有下级、向下划拨编号"
+            extra="总代 > 省代 > 市代；上级须高于下级，市代不能有下级代理"
           />
-          <ProFormSelect
-            name="parent_agent_id"
-            label="上级代理"
-            options={parentOptions(r.id)}
-            fieldProps={{ allowClear: true }}
-            extra="留空表示无上级"
-          />
+          {parentSelect('留空表示无上级；须高于所选级别', r.id)}
         </ModalForm>,
         // 已回收的代理不能再恢复，也没有其他可变更的资格，不提供入口
         !r.recycled_at && (
@@ -345,8 +356,9 @@ export default function Agents({ me }: { me: Me }) {
                   开通下级代理
                 </Button>
               }
-              onFinish={async (v: { name: string; password?: string }) =>
-                runCreate(createChildAgent(v.name, v.password), v.name, '已开通下级代理')
+              initialValues={{ tier: childTiers[0] }}
+              onFinish={async (v: { name: string; tier: string; password?: string }) =>
+                runCreate(createChildAgent(v.name, v.tier, v.password), v.name, '已开通下级代理')
               }
             >
               <ProFormText
@@ -361,8 +373,15 @@ export default function Agents({ me }: { me: Me }) {
                 rules={CREATE_PASSWORD_RULES}
                 extra={CREATE_PASSWORD_EXTRA}
               />
+              <ProFormSelect
+                name="tier"
+                label="级别"
+                options={childTiers.map((t) => ({ label: TIER_LABEL[t], value: t }))}
+                rules={[{ required: true }]}
+                extra="只能开通低于自身级别的代理"
+              />
               <div style={{ color: 'rgba(0,0,0,0.45)' }}>
-                新代理为低级代理，挂在你名下，地区标签与你相同。积分为 0 时不能登录，请在「编号划拨」页给他转积分。
+                新代理挂在你名下，地区标签与你相同。积分为 0 时不能登录，请在「编号划拨」页给他转积分。
               </div>
             </ModalForm>
           ) : (
@@ -398,13 +417,7 @@ export default function Agents({ me }: { me: Me }) {
               />
               <ProFormSelect name="region" label="地区标签" valueEnum={REGION_LABEL} rules={[{ required: true }]} />
               <ProFormSelect name="tier" label="级别" valueEnum={TIER_LABEL} rules={[{ required: true }]} />
-              <ProFormSelect
-                name="parent_agent_id"
-                label="上级代理"
-                options={parentOptions()}
-                fieldProps={{ allowClear: true }}
-                extra="可选；必须是资格激活的高级代理"
-              />
+              {parentSelect('可选；须是资格激活、级别高于所选级别的代理')}
             </ModalForm>
           ),
         ]}

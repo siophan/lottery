@@ -11,7 +11,7 @@ from tests.points_helpers import set_agent_points_raw
 def test_concurrent_admin_requests_keep_each_identity():
     conn, app = build_app()
     mk_admin(conn, "boss", role="super")
-    set_agent_points_raw(conn, mk_agent_raw(conn, "agentx", tier="junior"), 1)    # 0 分代理不能登录
+    set_agent_points_raw(conn, mk_agent_raw(conn, "agentx", tier="city"), 1)    # 0 分代理不能登录
     for i in range(30):
         db.create_user(conn, f"U{i}", "x", None)
 

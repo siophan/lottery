@@ -164,12 +164,12 @@ def test_assign_route_staff_only():
 
 def setup_tree(conn):
     top = mk_agent_raw(conn, "top")
-    kid = mk_agent_raw(conn, "kid", tier="senior", parent=top)
-    grand = mk_agent_raw(conn, "grand", tier="junior", parent=kid)
+    kid = mk_agent_raw(conn, "kid", tier="province", parent=top)
+    grand = mk_agent_raw(conn, "grand", tier="city", parent=kid)
     assign(conn, top, 1_000_000, 1_000_009)
     return top, kid, grand
 
-def test_senior_transfers_own_pending_range_to_direct_child():
+def test_agent_transfers_own_pending_range_to_direct_child():
     conn, app = build_app()
     top, kid, _ = setup_tree(conn)
     r = login_client(app, "top").post("/admin/segments/transfer",
@@ -199,7 +199,7 @@ def test_transfer_scope_rules():
     assert r.status_code == 409 and r.json()["error"] == "下级代理资格不是激活状态，不能划拨"
     assert owned(conn, kid) == []
 
-def test_transfer_irreversible_and_junior_cannot_transfer():
+def test_transfer_irreversible_and_city_cannot_transfer():
     conn, app = build_app()
     top, kid, grand = setup_tree(conn)
     login_client(app, "top").post("/admin/segments/transfer",
@@ -212,7 +212,7 @@ def test_transfer_irreversible_and_junior_cannot_transfer():
                                                    "end": 1_000_000})
     r = login_client(app, "grand").post("/admin/segments/transfer",
                                         json={"to_agent_id": kid, "start": 1_000_000, "end": 1_000_000})
-    assert r.status_code == 403 and r.json()["error"] == "只有高级代理可以划拨编号"
+    assert r.status_code == 403 and r.json()["error"] == "市代没有下级代理，不能划拨编号"
 
 def test_staff_cannot_transfer():
     conn, app = build_app()

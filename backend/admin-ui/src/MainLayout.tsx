@@ -27,7 +27,7 @@ import Staff from './pages/Staff'
 import Texts from './pages/Texts'
 import TrialSettings from './pages/TrialSettings'
 import UsersTable from './pages/UsersTable'
-import { ROLE_LABEL } from './util'
+import { LEAF_TIER, ROLE_LABEL } from './util'
 
 interface MenuRoute {
   path: string
@@ -38,10 +38,10 @@ interface MenuRoute {
 // 菜单按角色裁剪（只是辅助：权限以服务端校验为准）。
 function routesFor(me: Me): MenuRoute[] {
   if (me.role === 'agent') {
-    const senior = me.agent?.tier === 'senior'
+    const senior = !!me.agent && me.agent.tier !== LEAF_TIER
     return [
       { path: '/users', name: '我的账号', icon: <TeamOutlined /> },
-      // 高级代理可以开通、查看本人名下的低级代理
+      // 总代 / 省代可以开通、查看本人名下更低级别的代理；市代没有下级代理
       ...(senior ? [{ path: '/agents', name: '下级代理', icon: <ApartmentOutlined /> }] : []),
       {
         path: '/segments',

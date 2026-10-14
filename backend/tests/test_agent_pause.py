@@ -93,7 +93,7 @@ def test_parent_agent_cannot_resume_child_pause():
     # 代理只能操作本人名下账号：上级也不能恢复下级代理名下的账号
     conn, app = build_app()
     top = mk_agent_raw(conn, "top")
-    kid = mk_agent_raw(conn, "kid", tier="junior", parent=top)
+    kid = mk_agent_raw(conn, "kid", tier="city", parent=top)
     db_segments.assign_segment(conn, kid, 1, 1, actor_type="admin", actor="root", now=NOW)
     login_client(app, "kid").post("/admin/users/Z0000001/pause")
     r = login_client(app, "top").post("/admin/users/Z0000001/resume")
