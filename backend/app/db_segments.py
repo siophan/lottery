@@ -1,6 +1,6 @@
 # 账号编号段（子项目 B）：分配即建档、划拨、回收、流水。归属只看 users.agent_id；segment_ops 只是流水。
 from . import db, db_points
-from .db_agents import BizError, begin_write, get_agent
+from .db_agents import LEAF_TIER, BizError, begin_write, get_agent
 from .security import hash_password
 
 PREFIX = "Z"                              # 新号统一「Z + 7 位数字」：Z0000001–Z9999999
@@ -83,15 +83,15 @@ def assign_segment(conn, agent_id: int, start, end, *, actor_type: str, actor: s
 
 def transfer_segment(conn, from_agent_id: int, to_agent_id, start, end, *, actor: str,
                      now: int) -> dict:
-    """高级代理把本人名下、从未激活的连续编号划拨给直属下级；不可撤回（没有反向接口）。"""
+    """总代 / 省代把本人名下、从未激活的连续编号划拨给直属下级；不可撤回（没有反向接口）。"""
     start, end = parse_range(start, end)
     if not _is_int(to_agent_id):
         raise BizError("只能划拨给自己的直属下级")
     begin_write(conn)
     try:
         me = get_agent(conn, from_agent_id)
-        if me is None or me.tier != "senior":
-            raise BizError("只有高级代理可以划拨编号", 403)
+        if me is None or me.tier == LEAF_TIER:
+            raise BizError("市代没有下级代理，不能划拨编号", 403)
         to = get_agent(conn, to_agent_id)
         if to is None or to.parent_agent_id != me.id:
             raise BizError("只能划拨给自己的直属下级")

@@ -60,7 +60,7 @@ def test_agent_activates_own_account_and_records_chain():
     a = mk_agent_raw(conn, "a")
     b = mk_agent_raw(conn, "b", parent=a)
     c = mk_agent_raw(conn, "c", parent=b)
-    d = mk_agent_raw(conn, "d", tier="junior", parent=c)
+    d = mk_agent_raw(conn, "d", tier="city", parent=c)
     assign(conn, d, 1_000_000, 1_000_000)
     tc = login_client(app, "d")
     r = tc.post("/admin/users/Z1000000/activate")
@@ -88,7 +88,7 @@ def test_agent_cannot_activate_others_or_legacy():
 def test_staff_activation_of_agent_account_records_chain_without_agent_actor():
     conn, app = build_app()
     top = mk_agent_raw(conn, "top")
-    kid = mk_agent_raw(conn, "kid", tier="junior", parent=top)
+    kid = mk_agent_raw(conn, "kid", tier="city", parent=top)
     assign(conn, kid, 1_000_000, 1_000_000)
     assert key_client(app).post("/admin/users/Z1000000/activate").status_code == 200
     u = db.get_user_by_code(conn, "Z1000000")

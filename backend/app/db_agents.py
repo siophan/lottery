@@ -5,7 +5,10 @@ from . import db
 from .security import hash_password
 
 REGIONS = ("province", "city", "vip")
-TIERS = ("senior", "junior")
+TIERS = ("general", "province", "city")                  # 总代 > 省代 > 市代（发财猫需求第 2 条）
+TIER_RANK = {"general": 3, "province": 2, "city": 1}
+TIER_LABEL = {"general": "总代", "province": "省代", "city": "市代"}
+LEAF_TIER = "city"                                       # 最低一级：不能有下级代理
 AGENT_STATUSES = ("active", "paused", "cancelled")
 # 允许的资格变更；已取消只能恢复为激活（且须未回收）
 STATUS_TRANSITIONS = {("active", "paused"), ("paused", "active"), ("active", "cancelled"),
@@ -30,7 +33,7 @@ class Agent:
     name: str
     name_key: str | None      # 规范化名称（去首尾空格 + casefold）；名称被他人认领后为 None
     region: str               # province | city | vip
-    tier: str                 # senior 高级 | junior 低级
+    tier: str                 # general 总代 | province 省代 | city 市代
     parent_agent_id: int | None
     status: str               # active 激活 | paused 暂停 | cancelled 取消
     status_by: str | None
@@ -111,15 +114,19 @@ def begin_write(conn) -> None:
 
 # ---------------- 级别 / 上级 ----------------
 
-def _check_parent(conn, self_id: int | None, parent_id: int) -> None:
-    """上级必须是资格激活的高级代理，不能是自己或自己的下级（禁止成环）。"""
+def higher(a: str, b: str) -> bool:
+    """级别 a 是否高于 b（未知级别视为最低，只会出现在脏数据里）。"""
+    return TIER_RANK.get(a, 0) > TIER_RANK.get(b, 0)
+
+def _check_parent(conn, self_id: int | None, parent_id: int, tier: str) -> None:
+    """上级必须是资格激活、级别高于 tier 的代理，不能是自己或自己的下级（禁止成环）。"""
     p = get_agent(conn, parent_id)
     if p is None:
         raise BizError("上级代理不存在")
     if p.id == self_id:
         raise BizError("上级不能是自己")
-    if p.tier != "senior":
-        raise BizError("上级必须是高级代理")
+    if not higher(p.tier, tier):
+        raise BizError("上级的级别必须高于本代理")
     if p.status != "active":
         raise BizError("上级代理资格不是激活状态")
     cur, hops = p.parent_agent_id, 0
@@ -129,8 +136,8 @@ def _check_parent(conn, self_id: int | None, parent_id: int) -> None:
         nxt = conn.execute("SELECT parent_agent_id FROM agents WHERE id=?", (cur,)).fetchone()
         cur, hops = (nxt["parent_agent_id"] if nxt else None), hops + 1
 
-def _count_children(conn, agent_id: int) -> int:
-    return conn.execute("SELECT COUNT(*) FROM agents WHERE parent_agent_id=?", (agent_id,)).fetchone()[0]
+def _child_tiers(conn, agent_id: int) -> set[str]:
+    return {r[0] for r in conn.execute("SELECT DISTINCT tier FROM agents WHERE parent_agent_id=?", (agent_id,))}
 
 # ---------------- 增改 ----------------
 
@@ -148,7 +155,7 @@ def create_agent(conn, *, name, password, region, tier, parent_agent_id, actor_t
         key = name_key(name)
         ensure_name_available(conn, key, now, None)
         if parent_agent_id is not None:
-            _check_parent(conn, None, parent_agent_id)
+            _check_parent(conn, None, parent_agent_id, tier)
         cur = conn.execute("INSERT INTO admins(username,password_hash,salt,created_at,role)"
                            " VALUES(?,?,?,?,'agent')", (name, h, salt, now))
         cur = conn.execute(
@@ -182,14 +189,16 @@ def update_agent(conn, agent_id: int, *, actor_type: str, actor: str, now: int,
         diff = {}
         if region is not _UNSET and region != a.region:
             diff["region"] = {"from": a.region, "to": region}
-        if tier is not _UNSET and tier != a.tier:
-            if tier == "junior" and _count_children(conn, a.id) > 0:
-                raise BizError("该代理仍有下级，不能改为低级代理", 409)
-            diff["tier"] = {"from": a.tier, "to": tier}
-        if parent_agent_id is not _UNSET and parent_agent_id != a.parent_agent_id:
-            if parent_agent_id is not None:
-                _check_parent(conn, a.id, parent_agent_id)
-            diff["parent_agent_id"] = {"from": a.parent_agent_id, "to": parent_agent_id}
+        new_tier = a.tier if tier is _UNSET else tier
+        new_parent = a.parent_agent_id if parent_agent_id is _UNSET else parent_agent_id
+        if new_tier != a.tier:
+            if any(not higher(new_tier, t) for t in _child_tiers(conn, a.id)):
+                raise BizError(f"该代理有同级或更高级别的下级，不能改为{TIER_LABEL[new_tier]}", 409)
+            diff["tier"] = {"from": a.tier, "to": new_tier}
+        if new_parent != a.parent_agent_id:
+            diff["parent_agent_id"] = {"from": a.parent_agent_id, "to": new_parent}
+        if new_parent is not None and (new_tier != a.tier or new_parent != a.parent_agent_id):
+            _check_parent(conn, a.id, new_parent, new_tier)     # 改级别或换上级后，上级仍须高于本代理
         for field, d in diff.items():          # field 只来自上面三个固定列名
             conn.execute(f"UPDATE agents SET {field}=? WHERE id=?", (d["to"], a.id))
         if diff:

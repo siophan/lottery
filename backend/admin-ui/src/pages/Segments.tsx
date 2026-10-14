@@ -21,7 +21,7 @@ import {
   transferAgentPoints,
   transferSegment,
 } from '../api'
-import { confirmSpendAll, fmtCode, fmtDateTime, POINTS_AMOUNT_PROPS } from '../util'
+import { confirmSpendAll, fmtCode, fmtDateTime, LEAF_TIER, POINTS_AMOUNT_PROPS } from '../util'
 
 const OP_LABEL: Record<string, string> = { assign: '分配', transfer: '划拨', recycle: '回收' }
 const NO_RULES = [{ required: true, message: '请输入编号' }]
@@ -33,7 +33,7 @@ export default function Segments({ me }: { me: Me }) {
   // 后台人员：全部代理（分配对象）；代理：本人直属下级（划拨对象）
   const [agents, setAgents] = useState<AgentRow[]>([])
   const isStaff = me.role !== 'agent'
-  const canTransfer = me.role === 'agent' && me.agent?.tier === 'senior'
+  const canTransfer = me.role === 'agent' && !!me.agent && me.agent.tier !== LEAF_TIER
   const [myPoints, setMyPoints] = useState<number | null>(me.agent?.points ?? null)
 
   useEffect(() => {

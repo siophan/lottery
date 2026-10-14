@@ -284,6 +284,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_agent_charge(conn)
     _migrate_phone_verified(conn)
     _migrate_site_texts(conn)
+    _migrate_agent_tiers(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
@@ -299,6 +300,22 @@ def _migrate_site_texts(conn) -> None:
     conn.commit()
     from . import db_texts   # db_texts 依赖本模块，放在函数里导入避免循环
     db_texts.seed_defaults(conn, int(time.time()))
+
+def _migrate_agent_tiers(conn) -> None:
+    # 发财猫需求第 2 条（客户回复）：代理级别由「高级 / 低级」改为「总代 / 省代 / 市代」。
+    # 低级 → 市代；高级 → 总代，但上级也是高级的 → 省代（保证上级高于下级）。每个改动写一条审计。
+    rows = conn.execute("SELECT a.id, a.name, a.tier, p.tier AS parent_tier FROM agents a"
+                        " LEFT JOIN agents p ON p.id=a.parent_agent_id"
+                        " WHERE a.tier IN ('senior','junior')").fetchall()
+    if not rows:
+        return
+    now = int(time.time())
+    for r in rows:
+        to = "city" if r["tier"] == "junior" else "province" if r["parent_tier"] == "senior" else "general"
+        conn.execute("UPDATE agents SET tier=? WHERE id=?", (to, r["id"]))
+        _audit_nocommit(conn, "system", "migrate", "agent.update", r["name"],
+                        {"tier": {"from": r["tier"], "to": to}}, now)
+    conn.commit()
 
 def _migrate_users(conn) -> None:
     # 幂等迁移：缺列才 ADD COLUMN；本次新加了列才回填存量账号（视为已激活且已完成首登）。

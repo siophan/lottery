@@ -95,9 +95,9 @@ def test_staff_grant_requires_active_agent():
 
 # ---------------- 代理转分 ----------------
 
-def test_senior_transfers_to_direct_child():
+def test_agent_transfers_to_direct_child():
     conn, _ = build_app()
-    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="junior", parent=a)
+    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="city", parent=a)
     set_agent_points_raw(conn, a, 50)
     assert db_points.transfer_to_agent(conn, a, b, 20, actor="A", now=NOW) == {"amount": 20, "balance": 30}
     assert (agent_points(conn, a), agent_points(conn, b)) == (30, 20)
@@ -111,8 +111,8 @@ def test_senior_transfers_to_direct_child():
 def test_transfer_only_to_direct_child_not_grandchild():
     # 需求回复第 7 条：上下级转分只到直属下级，隔层（下级的下级）不行
     conn, _ = build_app()
-    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", parent=a)
-    g = mk_agent_raw(conn, "G", tier="junior", parent=b)
+    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="province", parent=a)
+    g = mk_agent_raw(conn, "G", tier="city", parent=b)
     set_agent_points_raw(conn, a, 10)
     t = lambda f, to, n: db_points.transfer_to_agent(conn, f, to, n, actor="x", now=NOW)
     assert biz(t, a, g, 1).msg == "只能转给自己的直属下级"
@@ -121,12 +121,12 @@ def test_transfer_only_to_direct_child_not_grandchild():
 
 def test_transfer_rules():
     conn, _ = build_app()
-    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="junior", parent=a)
-    other = mk_agent_raw(conn, "O"); c = mk_agent_raw(conn, "C", tier="junior", parent=other)
+    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="city", parent=a)
+    other = mk_agent_raw(conn, "O"); c = mk_agent_raw(conn, "C", tier="city", parent=other)
     set_agent_points_raw(conn, a, 10); set_agent_points_raw(conn, b, 10)
     t = lambda f, to, n: db_points.transfer_to_agent(conn, f, to, n, actor="x", now=NOW)
-    e = biz(t, b, a, 1)                                  # 低级不能转、也不能转回上级
-    assert (e.status, e.msg) == (403, "只有高级代理可以转积分")
+    e = biz(t, b, a, 1)                                  # 市代不能转、也不能转回上级
+    assert (e.status, e.msg) == (403, "市代没有下级代理，不能转积分")
     assert biz(t, a, c, 1).msg == "只能转给自己的直属下级"
     assert biz(t, a, a, 1).msg == "只能转给自己的直属下级"
     assert biz(t, a, 2 ** 63, 1).msg == "只能转给自己的直属下级"
@@ -141,7 +141,7 @@ def test_transfer_rules():
 
 def test_agent_recharges_own_account_including_pending():
     conn, _ = build_app()
-    a = mk_agent_raw(conn, "A", tier="junior")
+    a = mk_agent_raw(conn, "A", tier="city")
     own(conn, a, "1000000")
     set_agent_points_raw(conn, a, 10)
     assert db_points.recharge_user(conn, a, "1000000", 7, actor="A", now=NOW) == {"amount": 7, "balance": 3}
@@ -238,7 +238,7 @@ def test_batch_1000_accounts_in_one_go():
 
 def test_list_ledger_filters_and_agent_scope():
     conn, _ = build_app()
-    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="junior", parent=a)
+    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="city", parent=a)
     own(conn, a, "1000000")
     activated_user(conn, "U9")
     staff(conn, "agent", a, "grant", 100)
@@ -261,7 +261,7 @@ def test_list_ledger_filters_and_agent_scope():
 
 def test_agent_ledger_view_never_shows_other_agents_rows_or_balances():
     conn, _ = build_app()
-    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="junior", parent=a)
+    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="city", parent=a)
     set_agent_points_raw(conn, a, 50000)
     db_points.transfer_to_agent(conn, a, b, 10, actor="A", now=NOW + 10)
     rows, total = db_points.list_ledger(conn, 50, 0, agent_id=b)
@@ -295,7 +295,7 @@ def test_routes_staff_grant_revoke_and_forbidden_for_agent():
 
 def test_routes_agent_recharge_transfer_and_staff_forbidden():
     conn, app = build_app()
-    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="junior", parent=a)
+    a = mk_agent_raw(conn, "A"); b = mk_agent_raw(conn, "B", tier="city", parent=a)
     own(conn, a, "1000000")
     set_agent_points_raw(conn, a, 10)
     ag = login_client(app, "A")
@@ -304,7 +304,7 @@ def test_routes_agent_recharge_transfer_and_staff_forbidden():
     assert ag.post(f"/admin/agents/{b}/points/transfer", json={"amount": 3}).json() == {
         "ok": True, "amount": 3, "balance": 5}
     r = login_client(app, "B").post(f"/admin/agents/{a}/points/transfer", json={"amount": 1})
-    assert (r.status_code, r.json()) == (403, {"ok": False, "error": "只有高级代理可以转积分"})
+    assert (r.status_code, r.json()) == (403, {"ok": False, "error": "市代没有下级代理，不能转积分"})
     mk_admin(conn, "boss", role="admin")
     st = login_client(app, "boss")
     assert st.post("/admin/users/1000000/points/recharge", json={"amount": 1}).status_code == 403

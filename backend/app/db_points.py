@@ -3,7 +3,7 @@
 import json
 import secrets
 from . import db
-from .db_agents import BizError, begin_write, get_agent
+from .db_agents import LEAF_TIER, BizError, begin_write, get_agent
 
 HOLDER_TYPES = ("user", "agent")
 KINDS = ("trial", "grant", "revoke", "transfer_out", "transfer_in", "charge")
@@ -219,13 +219,13 @@ def _transfer_pair(conn, from_type, from_id, to_type, to_id, amount, *, actor_ty
     return out_after, in_after
 
 def transfer_to_agent(conn, from_agent_id: int, to_agent_id, amount, *, actor: str, now: int) -> dict:
-    """高级代理把自身积分转给直属下级代理（收款代理须资格激活）；余额不足整笔失败。不能反向转回。"""
+    """总代 / 省代把自身积分转给直属下级代理（收款代理须资格激活）；余额不足整笔失败。不能反向转回。"""
     amount = check_amount(amount)
     begin_write(conn)
     try:
         me = _agent(conn, from_agent_id)
-        if me.tier != "senior":
-            raise BizError("只有高级代理可以转积分", 403)
+        if me.tier == LEAF_TIER:
+            raise BizError("市代没有下级代理，不能转积分", 403)
         to = (get_agent(conn, to_agent_id)
               if isinstance(to_agent_id, int) and not isinstance(to_agent_id, bool) else None)
         if to is None or to.parent_agent_id != me.id:

@@ -40,7 +40,7 @@ def mk_admin(conn, username: str, password: str = "pw", role: str = "admin") -> 
     conn.commit()
     return a.id
 
-def mk_agent_raw(conn, name: str, password: str = "pw", *, tier: str = "senior",
+def mk_agent_raw(conn, name: str, password: str = "pw", *, tier: str = "general",
                  parent: int | None = None, status: str = "active", region: str = "city") -> int:
     """绕过业务校验直接落库一个代理（仅测试造数据用），返回 agent_id。"""
     admin_id = mk_admin(conn, name, password, role="agent")

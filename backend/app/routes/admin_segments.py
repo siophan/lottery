@@ -1,4 +1,4 @@
-# 管理后台：编号段分配（后台人员）、划拨（高级代理）、回收（后台人员）、流水。
+# 管理后台：编号段分配（后台人员）、划拨（总代 / 省代）、回收（后台人员）、流水。
 import time
 from fastapi import APIRouter, Request, Body, Depends
 from fastapi.responses import JSONResponse

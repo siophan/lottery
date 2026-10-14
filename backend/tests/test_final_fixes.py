@@ -22,7 +22,7 @@ def test_audit_search_finds_agent_name_and_lowercase_account_code():
     conn, app = build_app()
     tc = key_client(app)
     r = tc.post("/admin/agents", json={"name": "Alice", "password": "Passw0rd!", "region": "city",
-                                       "tier": "senior"})
+                                       "tier": "general"})
     assert r.status_code == 200, r.text
     tc.post("/admin/users", json={"code": "u1"})
     rows = tc.get("/admin/audit-logs", params={"target": "Alice"}).json()["logs"]
@@ -102,7 +102,7 @@ def test_oversized_ids_return_not_found_or_400_not_500():
     assert tc.post("/admin/segments/assign", json={"agent_id": BIG, "start": 1000000,
                                                    "end": 1000001}).status_code == 404
     assert tc.post("/admin/agents", json={"name": "k", "password": "Passw0rd!", "region": "city",
-                                          "tier": "junior", "parent_agent_id": BIG}).status_code == 400
+                                          "tier": "city", "parent_agent_id": BIG}).status_code == 400
     assert tc.patch(f"/admin/agents/{top}", json={"parent_agent_id": BIG}).status_code == 400
     assert tc.post(f"/admin/admins/{BIG}/password", json={"password": "Passw0rd!"}).status_code == 404
     assert tc.delete(f"/admin/admins/{BIG}").status_code == 404
@@ -185,7 +185,7 @@ def test_admin_set_new_admin_enforces_shared_namespace(capsys):
 def test_agent_view_omits_internal_staff_info():
     conn, app = build_app()
     top = mk_agent_raw(conn, "top")
-    kid = mk_agent_raw(conn, "kid", tier="junior", parent=top)
+    kid = mk_agent_raw(conn, "kid", tier="city", parent=top)
     assign(conn, top, 1_000_000, 1_000_004)
     atc = login_client(app, "top")
     r = atc.post("/admin/segments/transfer", json={"to_agent_id": kid, "start": 1000000, "end": 1000001})

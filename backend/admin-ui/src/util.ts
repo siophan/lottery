@@ -35,7 +35,12 @@ export const NUMBER_STATUS_LABEL: Record<string, string> = {
 }
 
 export const REGION_LABEL: Record<string, string> = { province: '省级', city: '市级', vip: 'VIP' }
-export const TIER_LABEL: Record<string, string> = { senior: '高级', junior: '低级' }
+// 级别从高到低（发财猫需求第 2 条）：上级须高于下级；市代不能有下级代理
+export const TIER_LABEL: Record<string, string> = { general: '总代', province: '省代', city: '市代' }
+export const TIER_ORDER = ['general', 'province', 'city']
+export const LEAF_TIER = 'city'
+/** 级别 a 是否高于 b */
+export const tierAbove = (a: string, b: string) => TIER_ORDER.indexOf(a) > -1 && TIER_ORDER.indexOf(a) < TIER_ORDER.indexOf(b)
 export const AGENT_STATUS_LABEL: Record<string, string> = {
   active: '激活',
   paused: '暂停',
