@@ -7,7 +7,8 @@ const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, A
   patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
   KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
   patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M,
-  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT } = require('../scripts/patch-ds-client.js');
+  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT, RULES_MARK, RULES_PAGES, rulesDefault } = require('../scripts/patch-ds-client.js');
+const { render: renderRules } = require('../scripts/extract-rules-texts.js');
 const dsSources = require('../client/ds-sources.js');
 
 const DIR = path.join(__dirname, '..', 'client', 'js');
@@ -1232,4 +1233,97 @@ test('texts: 没有 window.dsTexts 时不报错', () => {
   const h = statementLoader(null);
   h.run();
   assert.deepStrictEqual(h.self.dsStatement, STATEMENT_DEFAULT);
+});
+
+// ---- 3D / 排列3 / 大乐透 / 双色球工作台「游戏规则」读文案编辑（rules v1）----
+const rulesSource = (name) => evalSources(miscRaw(name)).find((src) => src.includes(RULES_MARK));
+const RULES_ENDINGS = { // 各页规则原文的最后一条：补丁后只应出现在默认文案（JSON 字符串）里，不再是模板节点
+  'chunk-654b0783.e43d7763.js': '第二十五条 本规则自批准销售之日起执行。',
+  'chunk-4cfcd98b.22429ba7.js': '第二十三条 本规则自批准之日起执行。',
+  'chunk-7831875d.a4667623.js': '第三十二条 本规则自批准之日起执行。',
+  'chunk-287f091b.0e840345.js': '决定取消“快乐星期天”特别派奖的活动。',
+};
+
+test('rules: 四个工作台的规则区改为 dsRules 渲染，默认值为原规则，读最新文案', () => {
+  assert.deepStrictEqual(Object.keys(RULES_PAGES).sort(), Object.keys(RULES_ENDINGS).sort());
+  for (const [name, pg] of Object.entries(RULES_PAGES)) {
+    const src = rulesSource(name);
+    assert.ok(src, name);
+    const def = rulesDefault(pg.key);
+    assert.ok(src.includes(`dsRules: ${JSON.stringify(def)},`), name);
+    assert.ok(def.content.startsWith('<h3>第一章') && def.content.includes(RULES_ENDINGS[name]), name);
+    assert.ok(!src.includes(`_vm._v("${RULES_ENDINGS[name]}")`), name);                      // 原模板节点已移除
+    assert.ok(src.includes('_vm._v(_vm._s(_vm.dsRules.title))') && src.includes('"innerHTML": _vm._s(_vm.dsRules.content)'), name);
+    assert.ok(src.includes('this.dsLoadRules();\n    window.onresize') && src.includes('activated() {\n    this.dsLoadRules();'), name);
+    assert.ok(src.includes(`window.dsTexts.load(__webpack_require__("f121")["apiURL"], ["${pg.key}"])`), name);
+    // 规则区外层（.about 容器及其高度）不动
+    assert.ok(src.includes('staticClass: "about"'), name);
+  }
+  assert.ok(rulesDefault('ssq.rules').content.includes('<table width="100%" border="0" cellpadding="3" cellspacing="1" bgcolor="#B0D0E7">'));
+  assert.ok(!rulesSource('chunk-b7e0f68a.59391aa2.js') && !rulesSource('chunk-50732e0a.702f76ce.js'));   // 其他工作台不受影响
+});
+
+test('rules: 规则区模板渲染出标题与 v-html 正文', () => {
+  for (const name of Object.keys(RULES_PAGES)) {
+    const src = rulesSource(name);
+    const i = src.indexOf(`[${RULES_MARK}`);
+    const expr = src.slice(i, src.indexOf('})]', i) + 3);
+    const _c = (tag, data, kids) => ({ tag, data: Array.isArray(data) ? {} : data, kids: Array.isArray(data) ? data : kids });
+    const out = plain(vm.runInNewContext(expr, { _c, _vm: { _v: (t) => t, _s: (x) => x, dsRules: { title: 'T', content: '<p>C</p>' } } }));
+    assert.deepStrictEqual(out, [
+      { tag: 'h2', data: {}, kids: [{ tag: 'strong', data: {}, kids: ['T'] }] },
+      { tag: 'div', data: { domProps: { innerHTML: '<p>C</p>' } } },
+    ], name);
+  }
+});
+
+function rulesLoader(name, dsTexts) {
+  const body = rulesSource(name).match(/    dsLoadRules\(\) \{\n[\s\S]*?\n    \},\n/)[0].replace(/,\n$/, '');
+  const calls = [];
+  const ctx = {
+    window: dsTexts ? { dsTexts: { load: (api, keys) => { calls.push([api, keys]); return dsTexts(keys); } } } : {},
+    __webpack_require__: (id) => ({ f121: { apiURL: 'https://api.test/api' } })[id],
+  };
+  const methods = vm.runInNewContext(`({\n${body}\n})`, ctx);
+  const self = { dsRules: { title: '默认', content: '<p>默认</p>' } };
+  return { run: () => methods.dsLoadRules.call(self), self, calls };
+}
+
+test('rules: 读到后台文案替换；没有、正文为空或没有 dsTexts 时保留默认', async () => {
+  for (const [name, { key }] of Object.entries(RULES_PAGES)) {
+    let h = rulesLoader(name, async () => ({ [key]: { title: '新', content: '<p>新</p>' } }));
+    h.run();
+    await tick();
+    assert.deepStrictEqual(plain(h.calls), [['https://api.test/api', [key]]], name);
+    assert.deepStrictEqual(plain(h.self.dsRules), { title: '新', content: '<p>新</p>' }, name);
+    for (const data of [{}, { [key]: { title: 'x', content: '' } }]) {
+      h = rulesLoader(name, async () => data);
+      h.run();
+      await tick();
+      assert.deepStrictEqual(plain(h.self.dsRules), { title: '默认', content: '<p>默认</p>' }, name);
+    }
+    h = rulesLoader(name, async () => ({ [key]: { title: '', content: '<p>c</p>' } }));
+    h.run();
+    await tick();
+    assert.deepStrictEqual(plain(h.self.dsRules), { title: '默认', content: '<p>c</p>' }, name);
+    h = rulesLoader(name, null);
+    h.run();
+    assert.deepStrictEqual(plain(h.self.dsRules), { title: '默认', content: '<p>默认</p>' }, name);
+  }
+});
+
+test('rules: 首尾锚点缺失时报错', () => {
+  const name = 'chunk-7831875d.a4667623.js';
+  assert.throws(() => patchMisc("eval('zhouQiArr')", name), /首尾锚点未各命中一次/);
+});
+
+test('extract-rules-texts: render 把 Vue 模板节点转成 HTML', () => {
+  const code = `[_vm._m(3), _c('h3', [_vm._v(" 第一章 ")]), _c('p', [_vm._v("a<b & \\"c\\"")]), ` +
+    `_c('table', { attrs: { "width": "100%", "bgcolor": "#FFF" } }, [_c('tbody', [_c('tr', [_c('td', { staticClass: "kf3", attrs: { "rowspan": "2" } }, [_c('strong', [_vm._v("奖")]), _c('br'), _vm._v("x")])])])])]`;
+  assert.deepStrictEqual(renderRules(code, { 3: '标题' }), [
+    '<h2><strong>标题</strong></h2>', '<h3>第一章</h3>', '<p>a&lt;b &amp; "c"</p>',
+    '<table width="100%" bgcolor="#FFF"><tbody><tr><td rowspan="2"><strong>奖</strong><br>x</td></tr></tbody></table>',
+  ]);
+  assert.throws(() => renderRules(`[_c('p', { on: {} }, [])]`, {}), /未处理的 on/);
+  assert.throws(() => renderRules(`[_c('img', { attrs: { "src": "x" } })]`, {}), /未处理的属性 src/);
 });

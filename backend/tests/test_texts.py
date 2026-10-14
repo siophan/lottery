@@ -9,8 +9,13 @@ from app import db, db_texts
 from app.db_agents import BizError
 from tests.agent_helpers import audit, build_app, key_client, login_client, mk_admin, mk_agent_raw
 
+SEEDED = sorted(t[0] for t in db_texts.DEFAULT_TEXTS)     # 预置文案的 key
+
+def _keys(tc):
+    return [x["key"] for x in tc.get("/admin/texts").json()["texts"] if x["key"] not in SEEDED]
+
 def _new(tc, **kw):
-    body = {"category": "rules", "key": "pl3.rules", "title": "排列三规则", "content": "<p>玩法说明</p>"}
+    body = {"category": "rules", "key": "demo.rules", "title": "排列三规则", "content": "<p>玩法说明</p>"}
     body.update(kw)
     return tc.post("/admin/texts", json=body)
 
@@ -41,6 +46,13 @@ def _new(tc, **kw):
     ("<ul><li>一</li><li>二</li></ul>", "<ul><li>一</li><li>二</li></ul>"),
     ("<div><h3>标题</h3>&nbsp;&copy;</div>", "<div><h3>标题</h3>\xa0©</div>"),
     ("<!-- 注释 --><p>x</p>", "<p>x</p>"),
+    ('<table width="100%" border="0" cellpadding="3" cellspacing="1" bgcolor="#B0D0E7"><tbody><tr>'
+     '<td rowspan="2" colspan="2" align="center" bgcolor="#fff">x</td></tr></tbody></table>',
+     '<table width="100%" border="0" cellpadding="3" cellspacing="1" bgcolor="#B0D0E7"><tbody><tr>'
+     '<td rowspan="2" colspan="2" align="center" bgcolor="#fff">x</td></tr></tbody></table>'),
+    ('<table onclick="x()" width="expression(1)" background="x.png"><tr><th align="justify" bgcolor="red"'
+     ' colspan="999">t</th></tr></table>', "<table><tr><th>t</th></tr></table>"),
+    ('<p width="10" bgcolor="#000">x</p>', "<p>x</p>"),                 # 表格属性只在表格标签上保留
 ])
 def test_sanitize_html(raw, clean):
     assert db_texts.sanitize_html(raw) == clean
@@ -53,14 +65,14 @@ def test_staff_create_list_update_delete_with_audit():
     r = _new(tc, content='<p>玩法<script>x</script></p>')
     assert r.status_code == 200, r.text
     t = r.json()["text"]
-    assert (t["category"], t["key"], t["title"], t["content"]) == ("rules", "pl3.rules", "排列三规则", "<p>玩法</p>")
+    assert (t["category"], t["key"], t["title"], t["content"]) == ("rules", "demo.rules", "排列三规则", "<p>玩法</p>")
     assert t["updated_by"] == "admin-key" and isinstance(t["updated_at"], int)
-    assert [x["key"] for x in tc.get("/admin/texts").json()["texts"]] == ["pl3sim.statement", "pl3.rules"]
+    assert _keys(tc) == ["demo.rules"]
     r = tc.put(f"/admin/texts/{t['id']}", json={"title": "排列三玩法", "content": "<p>新</p>", "category": "data"})
     assert r.status_code == 200 and r.json()["text"]["content"] == "<p>新</p>"
-    assert r.json()["text"]["category"] == "data" and r.json()["text"]["key"] == "pl3.rules"
+    assert r.json()["text"]["category"] == "data" and r.json()["text"]["key"] == "demo.rules"
     assert tc.delete(f"/admin/texts/{t['id']}").json() == {"ok": True}
-    assert [x["key"] for x in tc.get("/admin/texts").json()["texts"]] == ["pl3sim.statement"]   # 只剩预置文案
+    assert _keys(tc) == []                                         # 只剩预置文案
     assert [len(audit(conn, a)) for a in ("text.create", "text.update", "text.delete")] == [1, 1, 1]
     assert "<p>新</p>" not in str(audit(conn, "text.update"))      # 审计只记元信息，不复制正文
 
@@ -97,13 +109,13 @@ def test_client_reads_latest_by_keys_without_login():
     tid = _new(tc).json()["text"]["id"]
     _new(tc, key="notice.home", category="notice", title="公告", content="<p>维护</p>")
     pub = TestClient(app)
-    r = pub.get("/api/texts?keys=pl3.rules,notice.home,missing")
+    r = pub.get("/api/texts?keys=demo.rules,notice.home,missing")
     assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
     d = r.json()
-    assert d["code"] == 0 and set(d["data"]) == {"pl3.rules", "notice.home"}
-    assert d["data"]["pl3.rules"]["content"] == "<p>玩法说明</p>"
+    assert d["code"] == 0 and set(d["data"]) == {"demo.rules", "notice.home"}
+    assert d["data"]["demo.rules"]["content"] == "<p>玩法说明</p>"
     tc.put(f"/admin/texts/{tid}", json={"content": "<p>改了</p>"})
-    assert pub.get("/api/texts?keys=pl3.rules").json()["data"]["pl3.rules"]["content"] == "<p>改了</p>"
+    assert pub.get("/api/texts?keys=demo.rules").json()["data"]["demo.rules"]["content"] == "<p>改了</p>"
 
 def test_client_reads_by_category_and_limits():
     conn, app = build_app()
@@ -145,13 +157,27 @@ def test_seed_statement_once_and_never_restored():
     db.init_db(conn)                                            # 删除后重启也不补回
     assert db_texts.texts_by_keys(conn, ["pl3sim.statement"]) == []
 
+def test_seed_rules_for_four_workbenches():
+    conn, app = build_app()
+    got = {t["key"]: t for t in key_client(app).get("/admin/texts").json()["texts"]}
+    assert set(got) == {"pl3sim.statement", "fc3d.rules", "pl3.rules", "dlt.rules", "ssq.rules"}
+    for key, title, sample in [("fc3d.rules", "“3D”电脑福利彩票游戏规则", "第二十五条 本规则自批准销售之日起执行。"),
+                               ("pl3.rules", "“排列3”电脑体育彩票游戏规则", "第二十三条 本规则自批准之日起执行。"),
+                               ("dlt.rules", "全国体育彩票“超级大乐透”玩法介绍", "第三十二条 本规则自批准之日起执行。"),
+                               ("ssq.rules", "“双色球”游戏规则", "<td width=\"10%\" rowspan=\"2\"")]:
+        t = got[key]
+        assert (t["category"], t["title"], t["updated_by"]) == ("rules", title, db_texts.SEED_ACTOR), key
+        assert sample in t["content"] and t["content"].startswith("<h3>第一章"), key
+        assert db_texts.sanitize_html(t["content"]) == t["content"], key       # 后台保存一次不会改坏内容
+
 def test_seed_matches_client_default():
     node = shutil.which("node")
     if not node:
         pytest.skip("node 不可用")
     script = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "patch-ds-client.js"
-    out = subprocess.run([node, "-e", f"console.log(JSON.stringify(require({json.dumps(str(script))}).STATEMENT_DEFAULT))"],
-                         capture_output=True, text=True, check=True).stdout
-    client = json.loads(out)
-    key, _, title, content = db_texts.DEFAULT_TEXTS[0]
-    assert key == "pl3sim.statement" and client == {"title": title, "content": content}
+    js = (f"const m = require({json.dumps(str(script))});"
+          "const out = { 'pl3sim.statement': m.STATEMENT_DEFAULT };"
+          "for (const p of Object.values(m.RULES_PAGES)) out[p.key] = m.rulesDefault(p.key);"
+          "console.log(JSON.stringify(out))")
+    client = json.loads(subprocess.run([node, "-e", js], capture_output=True, text=True, check=True).stdout)
+    assert client == {key: {"title": title, "content": content} for key, _, title, content in db_texts.DEFAULT_TEXTS}

@@ -737,10 +737,101 @@ const STATEMENT_LAYERS = [{
   ],
 }];
 
+// 3D / 排列3 / 大乐透 / 双色球工作台左侧的「游戏规则」改由后台「文案编辑」维护（客户 2026-10-15 回复：这些页面接入读取）。
+// 原规则文字由 scripts/extract-rules-texts.js 转成 HTML 存在 backend/app/text_defaults.json：后端首次升级时预置到
+// 「彩种规则」分类，客户端读不到后台时也显示这一份。标题→h2，正文 HTML→v-html；h3 / p 的样式沿用 app.css 的全局 .about 规则
+const RULES_MARK = '/* ds-patch rules v1 */';
+const RULES_DEFAULTS_FILE = path.join(__dirname, '..', 'backend', 'app', 'text_defaults.json');
+const RULES_PAGES = { // between：规则区 children 数组的首尾（含），整段换掉；其余为挂 data / mounted / activated / methods 的锚点
+  'chunk-654b0783.e43d7763.js': {
+    key: 'fc3d.rules',
+    staticTitles: { 10: '“3D”电脑福利彩票游戏规则' },
+    between: ['[_vm._m(10), _c(\'h3\', [_vm._v("第一章 总 则")])', '_vm._v("第二十五条 本规则自批准销售之日起执行。")])]'],
+    data: 'data() {\n    return {\n      format: {',
+    created: 'created() {\n    this.fUrl = config["fileURL"];',
+    methods: '  methods: {\n    openAi(pageName) {',
+  },
+  'chunk-4cfcd98b.22429ba7.js': {
+    key: 'pl3.rules',
+    staticTitles: { 11: '“排列3”电脑体育彩票游戏规则' },
+    between: ['[_vm._m(11), _c(\'h3\', [_vm._v("第一章 总则")])', '_vm._v("第二十三条 本规则自批准之日起执行。")])]'],
+    data: 'data() {\n    return {\n      planExpectList: [],',
+    created: 'created() {\n    this.fUrl = config["fileURL"];',
+    methods: '  methods: {\n    openAi(pageName) {',
+  },
+  'chunk-7831875d.a4667623.js': {
+    key: 'dlt.rules',
+    between: ['[_c(\'h2\', [_c(\'strong\', [_vm._v("全国体育彩票“超级大乐透”玩法介绍")])]), _c(\'h3\'',
+      '_vm._v("第三十二条 本规则自批准之日起执行。")])]'],
+    data: 'data() {\n    return {\n      zhouQiArr: [],',
+    created: 'created() {\n    this.screenHeight = window.innerHeight - 313;',
+    methods: '  methods: {\n    //基础号码组件展示点击事件\n    jiChuHaoMaDialogFunc() {',
+  },
+  'chunk-287f091b.0e840345.js': {
+    key: 'ssq.rules',
+    between: ['[_c(\'h2\', [_c(\'strong\', [_vm._v("“双色球”游戏规则")])]), _c(\'h3\'',
+      '决定取消“快乐星期天”特别派奖的活动。")]), _c(\'div\', {\n    staticClass: "clear"\n  })]'],
+    data: 'data() {\n    return {\n      zhouQiArr: [],',
+    created: 'created() {\n    this.screenHeight = window.innerHeight - 313;',
+    methods: '  methods: {\n    goToPageFunc() {',
+  },
+};
+function rulesDefault(key) {   // 用到时才读：extract-rules-texts.js 生成该文件前也要能加载本模块
+  const t = JSON.parse(fs.readFileSync(RULES_DEFAULTS_FILE, 'utf8')).find((x) => x.key === key);
+  if (!t) throw new Error(`text_defaults.json 里没有 ${key}`);
+  return { title: t.title, content: t.content };
+}
+const RULES_LAYERS = [{
+  mark: RULES_MARK,
+  only: Object.keys(RULES_PAGES),
+  replacements: (name) => {
+    const pg = RULES_PAGES[name];
+    return [
+      {
+        between: pg.between,
+        repl: `[${RULES_MARK} _c('h2', [_c('strong', [_vm._v(_vm._s(_vm.dsRules.title))])]), _c('div', {\n` +
+          `    domProps: {\n      "innerHTML": _vm._s(_vm.dsRules.content)\n    }\n  })]`,
+      },
+      {
+        find: pg.data,
+        repl: pg.data.replace('return {', `return {\n      dsRules: ${JSON.stringify(rulesDefault(pg.key))},`),
+        count: 1,
+      },
+      {
+        find: 'mounted() {\n    window.onresize = () => {',
+        repl: 'mounted() {\n    this.dsLoadRules();\n    window.onresize = () => {',
+        count: 1,
+      },
+      { // keep-alive 缓存的页面再次进入时也取一次最新文案
+        find: pg.created,
+        repl: `activated() {\n    this.dsLoadRules();\n  },\n  ${pg.created}`,
+        count: 1,
+      },
+      {
+        find: pg.methods,
+        repl: [
+          '  methods: {',
+          '    dsLoadRules() {',
+          '      if (!window.dsTexts) return;',
+          `      window.dsTexts.load(__webpack_require__("f121")["apiURL"], ["${pg.key}"]).then(d => {`,
+          `        const t = d["${pg.key}"];`,
+          '        if (t && typeof t.content === "string" && t.content) this.dsRules = { title: t.title || this.dsRules.title, content: t.content };',
+          '      });',
+          '    },',
+          pg.methods.slice('  methods: {\n'.length),
+        ].join('\n'),
+        count: 1,
+      },
+    ];
+  },
+}];
+
 // 其他页面 chunk：文件名 → [{ locator, layers }]，与上面各组互不影响（同一文件可以同时出现在 CHUNKS 里）
 const MISC_CHUNKS = {
   ...Object.fromEntries(Object.keys(NOCODE_MENU_M).map((name) => [name,
-    [{ locator: 'openMissDm', layers: [...NOCODE_LAYERS, ...NOMISS_LAYERS, ...STATEMENT_LAYERS] }]])),
+    [{ locator: 'openMissDm', layers: [...NOCODE_LAYERS, ...NOMISS_LAYERS, ...STATEMENT_LAYERS, ...RULES_LAYERS] }]])),
+  'chunk-7831875d.a4667623.js': [{ locator: 'zhouQiArr', layers: RULES_LAYERS }], // 大乐透
+  'chunk-287f091b.0e840345.js': [{ locator: 'zhouQiArr', layers: RULES_LAYERS }], // 双色球
   [NOMISS_AI_CHUNK]: [ // 智能模型（deepseek/lottery）「功能」问答
     {
       locator: '什么是组合遗漏',
@@ -804,6 +895,16 @@ function applyLayers(raw, locator, layers, name) {
     if (out.includes(mark)) continue;
     const reps = typeof layer.replacements === 'function' ? layer.replacements(name) : layer.replacements;
     for (const r of reps) {
+      if (r.between) { // 首尾锚点各命中一次，连同两者在内整段替换
+        const [s0, s1] = r.between.map((x) => enc(x, q));
+        const i = out.indexOf(s0);
+        const j = out.indexOf(s1);
+        if (out.split(s0).length !== 2 || out.split(s1).length !== 2 || j < i) {
+          throw new Error(`首尾锚点未各命中一次：${r.between[0].slice(0, 60)}`);
+        }
+        out = out.slice(0, i) + enc(r.repl, q) + out.slice(j + s1.length);
+        continue;
+      }
       const f = enc(r.find, q);
       const n = out.split(f).length - 1;
       if (n !== r.count) throw new Error(`锚点命中 ${n} 次（应为 ${r.count}）：${r.find.slice(0, 60)}`);
@@ -850,7 +951,7 @@ module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK,
   patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK, ONBOARD_SMS_MARK,
   KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
   patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M,
-  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT };
+  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT, RULES_MARK, RULES_PAGES, rulesDefault };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');

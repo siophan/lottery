@@ -1,6 +1,8 @@
 # 文案编辑（发财猫需求第 1 条）：数据层 + 富文本清洗。表结构在 db.init_db 中统一创建。
 # 正文是后台富文本编辑器产出的 HTML，客户端直接 innerHTML 渲染，入库前必须按白名单清洗。
 import html
+import json
+import pathlib
 import re
 import sqlite3
 from html.parser import HTMLParser
@@ -31,11 +33,13 @@ _STATEMENT_PARAS = [
     "发财猫软件提取哈希运算结果末尾5位数字，作为体彩排列五的模拟开奖号码，同时可供给排列三玩法，用来开展数据模拟推演练习。",
     "开发主体：发财猫技术团队",
 ]
+# 3D / 排列3 / 大乐透 / 双色球工作台的游戏规则：由 scripts/extract-rules-texts.js 从客户端原文生成，客户端补丁读同一个文件
+_RULES = json.loads((pathlib.Path(__file__).with_name("text_defaults.json")).read_text("utf-8"))
 DEFAULT_TEXTS = [  # (key, category, title, content)
     ("pl3sim.statement", "data", "发财猫软件 · 数据说明",
      "".join(f"<p>{p}</p>" for p in _STATEMENT_PARAS)
      + "<p><strong>法律声明</strong></p><p>严禁任何组织、个人利用本组模拟数据开展各类违法活动，一旦违规，相关主体将承担对应的法律责任！</p>"),
-]
+] + [(t["key"], t["category"], t["title"], t["content"]) for t in _RULES]
 SEED_ACTOR = "系统"
 
 def seed_defaults(conn, now: int) -> None:
@@ -51,7 +55,20 @@ def seed_defaults(conn, now: int) -> None:
 # ---------------- HTML 清洗 ----------------
 
 _TAGS = {"p", "br", "b", "strong", "i", "em", "u", "s", "span", "div", "blockquote",
-         "h1", "h2", "h3", "h4", "ul", "ol", "li", "a"}
+         "h1", "h2", "h3", "h4", "ul", "ol", "li", "a",
+         "table", "thead", "tbody", "tr", "th", "td"}
+_TABLE_TAGS = {"table", "thead", "tbody", "tr", "th", "td"}
+# 表格的排版属性（双色球规则里的奖级表就靠它们排版）：只收下列取值格式
+_TABLE_ATTRS = {
+    "width": re.compile(r"\d{1,4}%?"),
+    "border": re.compile(r"\d{1,2}"),
+    "cellpadding": re.compile(r"\d{1,2}"),
+    "cellspacing": re.compile(r"\d{1,2}"),
+    "rowspan": re.compile(r"\d{1,2}"),
+    "colspan": re.compile(r"\d{1,2}"),
+    "align": re.compile(r"left|center|right", re.I),
+    "bgcolor": re.compile(r"#[0-9a-fA-F]{3,8}"),
+}
 _VOID = {"br"}
 _DROP_CONTENT = {"script", "style", "iframe", "object", "embed", "noscript", "template",
                  "textarea", "select", "title", "svg", "math"}
@@ -91,6 +108,8 @@ class _Cleaner(HTMLParser):
                     parts.append(("style", style))
             elif tag == "a" and name == "href" and _HREF_OK.match(value.strip()):
                 parts.append(("href", value.strip()))
+            elif tag in _TABLE_TAGS and name in _TABLE_ATTRS and _TABLE_ATTRS[name].fullmatch(value.strip()):
+                parts.append((name, value.strip()))
             elif tag == "a" and name == "target" and value == "_blank":
                 parts.append(("target", "_blank"))
                 parts.append(("rel", "noopener noreferrer"))
