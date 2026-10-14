@@ -6,7 +6,7 @@ const vm = require('vm');
 const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS, AUTH_MARK, KICK_MARK,
   patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
   KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
-  patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG } = require('../scripts/patch-ds-client.js');
+  patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M } = require('../scripts/patch-ds-client.js');
 const dsSources = require('../client/ds-sources.js');
 
 const DIR = path.join(__dirname, '..', 'client', 'js');
@@ -952,11 +952,12 @@ test('app chunk: 首页模板在 .card 之后（#content 之前、不在 .card �
 });
 
 // 执行整个首页模块（依赖一律桩），取出 index.vue 的组件选项
-function indexHarness({ withProfile = true, points = '5' } = {}) {
+function indexHarness({ withProfile = true, points = '5', userInfo } = {}) {
   const mounts = [];
   const ctl = { refreshed: [], destroyed: 0, refresh(p) { this.refreshed.push(p); }, destroy() { this.destroyed++; } };
   const service = function () {};
   const store = { dsPoints: points };
+  if (userInfo) store.userInfo = JSON.stringify(userInfo);
   const src = indexSource() + '\n;__webpack_exports__.dsIndex = indexvue_type_script_lang_js_;';
   const fn = new vm.Script('(function(module, __webpack_exports__, __webpack_require__, window){' + src + '\n})')
     .runInNewContext({
@@ -1065,3 +1066,85 @@ for (const [name, api, arg, entry] of [
     assert.equal(entry in comp.methods, true);                            // 原方法仍在，只是不再被调用
   });
 }
+
+// ---- 会员编号去字母前缀（code v1）----
+test('首页：软件编号只显示数字部分（Y / Z 前缀去掉，纯数字原样）', () => {
+  assert.ok(indexSource().includes(CODE_MARK));
+  for (const [code, shown] of [['Y000055', '000055'], ['Z0000001', '0000001'], ['8800123', '8800123'], ['', '']]) {
+    const h = indexHarness({ userInfo: { username: code, type: 1 } });
+    h.comp.mounted.call(h.vmThis);
+    assert.strictEqual(h.vmThis.username, shown, code);
+  }
+});
+
+test('首页：userInfo 缺 username 时不报错，显示空', () => {
+  const h = indexHarness({ userInfo: { type: 1 } });
+  h.comp.mounted.call(h.vmThis);
+  assert.strictEqual(h.vmThis.username, '');
+});
+
+const miscRaw = (name) => fs.readFileSync(path.join(DIR, name), 'utf8');
+
+test('misc chunk: 已打补丁且再次运行不变（幂等），全部模块源码语法有效', () => {
+  for (const name of Object.keys(MISC_CHUNKS)) {
+    const raw = miscRaw(name);
+    assert.strictEqual(patchMisc(raw, name), raw, name);
+    for (const src of evalSources(raw)) new vm.Script(src);
+  }
+});
+
+test('misc chunk: 锚点不匹配时报错', () => {
+  const name = 'chunk-098a5041.6d45b853.js';
+  assert.throws(() => patchMisc("eval('软件编号')", name), /命中 0 次/);
+  assert.throws(() => patchMisc('nothing', name), /软件编号/);
+});
+
+test('个人信息页：软件编号只显示数字部分，其他字段不变', () => {
+  const src = evalSources(miscRaw('chunk-098a5041.6d45b853.js')).find((s) => s.includes('软件编号'));
+  assert.ok(src.includes(CODE_MARK));
+  assert.ok(!src.includes('_vm._s(_vm.userInfo.username)'));
+  assert.ok(src.includes('_vm._s(_vm.userInfo.name)'));
+  const expr = src.match(/_vm\._s\((\/\* ds-patch code v1 \*\/ [^\n]*?)\) \+ " "\)/)[1];
+  const show = (username) => vm.runInNewContext(expr, { _vm: { userInfo: { username } } });
+  assert.strictEqual(show('Y000055'), '000055');
+  assert.strictEqual(show('Z0000001'), '0000001');
+  assert.strictEqual(show(undefined), '');
+});
+
+// ---- 删除代码条件 / 代码图表入口（nocode v1）----
+const workbenchSource = (name) => evalSources(miscRaw(name)).find((s) => s.includes('openMissDm'));
+
+test('nocode: 五个工作台侧边栏去掉「代码条件」「代码图表」，其他菜单与面板方法保留', () => {
+  for (const name of Object.keys(NOCODE_MENU_M)) {
+    const src = workbenchSource(name);
+    assert.ok(src.includes(NOCODE_MARK), name);
+    assert.ok(!src.includes('_vm._v("代码条件 ")') && !src.includes('_vm._v("代码图表 ")'), name);
+    assert.ok(!src.includes('return _vm.openLeft(4);') && !src.includes('return _vm.openLeft(5);'), name);
+    assert.ok(src.includes('_vm._v("自选条件 ")') && src.includes('_vm._v("走势图表 ")'), name);
+    assert.ok(src.includes('"click": _vm.openMissDm'), name);           // 遗漏代码仍在
+    assert.ok(src.includes('openLeft(index) {') || src.includes('openLeft('), name);
+  }
+});
+
+test('nocode: 3D / 排列3 去掉「代码走势」按钮，「K线走势」保留；其余工作台没有该按钮', () => {
+  for (const name of Object.keys(NOCODE_MENU_M)) {
+    const src = workbenchSource(name);
+    assert.ok(!src.includes('_vm._v("代码走势")'), name);
+    assert.ok(!src.includes("_vm.openTrend('dmzs', 1)"), name);
+  }
+  for (const name of ['chunk-4cfcd98b.22429ba7.js', 'chunk-654b0783.e43d7763.js']) {
+    assert.ok(workbenchSource(name).includes(`_vm._v("K线走势")]), ${NOCODE_MARK} _vm._e()])`), name);
+  }
+});
+
+test('nocode: 用户协议服务范围去掉「代码图表」', () => {
+  const src = evalSources(miscRaw('chunk-4cb5c7e0.40436b3b.js')).find((s) => s.includes('综合功能'));
+  assert.ok(src.includes(NOCODE_MARK));
+  assert.ok(src.includes('及/或串关组合及/或综合功能'));
+  const code = src.split('sourceMappingURL')[0];
+  assert.ok(!code.includes('代码图表'));
+});
+
+test('nocode: 锚点不匹配时报错', () => {
+  assert.throws(() => patchMisc("eval('openMissDm')", 'chunk-b7e0f68a.59391aa2.js'), /命中 0 次/);
+});

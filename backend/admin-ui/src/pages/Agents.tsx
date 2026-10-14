@@ -10,7 +10,7 @@ import {
   ProFormTextArea,
   ProTable,
 } from '@ant-design/pro-components'
-import { App, Button, Popconfirm, Tag, Tooltip } from 'antd'
+import { App, Button, Popconfirm, Tag, Tooltip, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import {
   adjustAgentPoints,
@@ -18,7 +18,11 @@ import {
   AgentRow,
   ApiResult,
   createAgent,
+  createChildAgent,
+  CreateAgentResult,
+  CreationLogRow,
   listAgents,
+  listCreationLogs,
   Me,
   recycleAgent,
   renameAgent,
@@ -40,13 +44,18 @@ const PASSWORD_RULES = [
   { required: true, message: '请输入密码' },
   { min: 8, max: 64, message: '密码长度需为 8–64 位' },
 ]
+// 开通时密码可留空：服务端生成并只返回一次
+const CREATE_PASSWORD_RULES = [{ min: 8, max: 64, message: '密码长度需为 8–64 位' }]
+const CREATE_PASSWORD_EXTRA = '留空则自动生成，开通成功后只显示一次'
 
 export default function Agents({ me }: { me: Me }) {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const actionRef = useRef<ActionType>()
   const [all, setAll] = useState<AgentRow[]>([])
   const reload = () => actionRef.current?.reload()
   const canRename = me.role === 'super' || me.grants.includes('agent.rename')
+  // 代理身份：列表只有本人直属下级，只能开通低级代理；编辑 / 资格 / 积分 / 密码等仍是后台人员操作
+  const isAgent = me.role === 'agent'
 
   const run = async (p: Promise<ApiResult>, okMsg: string) => {
     const r = await p
@@ -59,6 +68,37 @@ export default function Agents({ me }: { me: Me }) {
     return r.ok
   }
 
+  // 开通代理：未填密码时弹窗显示服务端生成的密码（只此一次，关闭后无法再查看）
+  const runCreate = async (p: Promise<CreateAgentResult>, name: string, okMsg: string) => {
+    const r = await p
+    if (!r.ok) {
+      message.error(r.error || '操作失败')
+      return false
+    }
+    message.success(okMsg)
+    reload()
+    if (r.generated_password) {
+      modal.success({
+        title: '已生成登录密码',
+        content: (
+          <>
+            <div>代理名称：{name.trim()}</div>
+            <div>
+              登录密码：
+              <Typography.Text code copyable>
+                {r.generated_password}
+              </Typography.Text>
+            </div>
+            <div style={{ marginTop: 8, color: 'rgba(0,0,0,0.45)' }}>
+              密码只显示这一次，请复制后交给该代理；忘记后可由后台重置。
+            </div>
+          </>
+        ),
+      })
+    }
+    return true
+  }
+
   // 可做上级的代理：资格激活的高级代理（排除自己）
   const parentOptions = (selfId?: number) =>
     all
@@ -69,7 +109,13 @@ export default function Agents({ me }: { me: Me }) {
     { title: '名称', dataIndex: 'name', fieldProps: { placeholder: '按名称搜索' } },
     { title: '地区', dataIndex: 'region', valueType: 'select', valueEnum: toValueEnum(REGION_LABEL) },
     { title: '级别', dataIndex: 'tier', valueType: 'select', valueEnum: toValueEnum(TIER_LABEL) },
-    { title: '上级', dataIndex: 'parent_name', hideInSearch: true, render: (_, r) => r.parent_name || '—' },
+    {
+      title: '上级',
+      dataIndex: 'parent_name',
+      hideInSearch: true,
+      hideInTable: isAgent,
+      render: (_, r) => r.parent_name || '—',
+    },
     {
       title: '资格',
       dataIndex: 'status',
@@ -112,6 +158,7 @@ export default function Agents({ me }: { me: Me }) {
       title: '操作',
       valueType: 'option',
       key: 'option',
+      hideInTable: isAgent,
       render: (_, r) => [
         <ModalForm
           key="edit"
@@ -255,63 +302,131 @@ export default function Agents({ me }: { me: Me }) {
     },
   ]
 
+  const logColumns: ProColumns<CreationLogRow>[] = [
+    { title: '开通时间', dataIndex: 'created_at', render: (_, r) => fmtDateTime(r.created_at) },
+    { title: '代理名称', dataIndex: 'name' },
+    { title: '开通方', dataIndex: 'actor', render: (_, r) => (r.actor_type === 'agent' ? r.actor : '后台') },
+  ]
+
   return (
-    <ProTable<AgentRow>
-      rowKey="id"
-      actionRef={actionRef}
-      columns={columns}
-      cardBordered
-      search={{ labelWidth: 'auto' }}
-      options={{ reload: true, density: false, setting: true }}
-      pagination={{ pageSize: 20, showSizeChanger: true }}
-      // 行数据里的 children 是「下级数」（数字），不是树形子行；改掉 antd 默认的树形字段名，否则表格渲染崩溃。
-      expandable={{ childrenColumnName: '__no_tree__' }}
-      request={async (params) => {
-        const rows = await listAgents()
-        setAll(rows)
-        const kw = params.name ? String(params.name).toLowerCase() : ''
-        const data = rows.filter(
-          (a) =>
-            (!kw || a.name.toLowerCase().includes(kw)) &&
-            (!params.region || a.region === params.region) &&
-            (!params.tier || a.tier === params.tier) &&
-            (!params.status || a.status === params.status),
-        )
-        return { data, total: data.length, success: true }
-      }}
-      toolBarRender={() => [
-        <ModalForm
-          key="create"
-          title="新建代理"
-          width={420}
-          modalProps={{ destroyOnClose: true }}
-          trigger={
-            <Button type="primary" icon={<PlusOutlined />}>
-              新建代理
-            </Button>
-          }
-          onFinish={async (v: AgentInput & { parent_agent_id?: number }) =>
-            run(createAgent({ ...v, parent_agent_id: v.parent_agent_id ?? null }), '已新建代理')
-          }
-        >
-          <ProFormText
-            name="name"
-            label="代理名称"
-            rules={[{ required: true, whitespace: true, message: '请输入名称' }, { max: 20 }]}
-            extra="全局唯一（不区分大小写），同时作为后台登录用户名"
-          />
-          <ProFormText.Password name="password" label="登录密码" rules={PASSWORD_RULES} />
-          <ProFormSelect name="region" label="地区标签" valueEnum={REGION_LABEL} rules={[{ required: true }]} />
-          <ProFormSelect name="tier" label="级别" valueEnum={TIER_LABEL} rules={[{ required: true }]} />
-          <ProFormSelect
-            name="parent_agent_id"
-            label="上级代理"
-            options={parentOptions()}
-            fieldProps={{ allowClear: true }}
-            extra="可选；必须是资格激活的高级代理"
-          />
-        </ModalForm>,
-      ]}
-    />
+    <>
+      <ProTable<AgentRow>
+        rowKey="id"
+        actionRef={actionRef}
+        columns={columns}
+        cardBordered
+        search={{ labelWidth: 'auto' }}
+        options={{ reload: true, density: false, setting: true }}
+        pagination={{ pageSize: 20, showSizeChanger: true }}
+        // 行数据里的 children 是「下级数」（数字），不是树形子行；改掉 antd 默认的树形字段名，否则表格渲染崩溃。
+        expandable={{ childrenColumnName: '__no_tree__' }}
+        request={async (params) => {
+          const rows = await listAgents()
+          setAll(rows)
+          const kw = params.name ? String(params.name).toLowerCase() : ''
+          const data = rows.filter(
+            (a) =>
+              (!kw || a.name.toLowerCase().includes(kw)) &&
+              (!params.region || a.region === params.region) &&
+              (!params.tier || a.tier === params.tier) &&
+              (!params.status || a.status === params.status),
+          )
+          return { data, total: data.length, success: true }
+        }}
+        toolBarRender={() => [
+          isAgent ? (
+            <ModalForm
+              key="create-child"
+              title="开通下级代理"
+              width={420}
+              modalProps={{ destroyOnClose: true }}
+              trigger={
+                <Button type="primary" icon={<PlusOutlined />}>
+                  开通下级代理
+                </Button>
+              }
+              onFinish={async (v: { name: string; password?: string }) =>
+                runCreate(createChildAgent(v.name, v.password), v.name, '已开通下级代理')
+              }
+            >
+              <ProFormText
+                name="name"
+                label="代理名称"
+                rules={[{ required: true, whitespace: true, message: '请输入名称' }, { max: 20 }]}
+                extra="全局唯一（不区分大小写），同时作为后台登录用户名"
+              />
+              <ProFormText.Password
+                name="password"
+                label="登录密码"
+                rules={CREATE_PASSWORD_RULES}
+                extra={CREATE_PASSWORD_EXTRA}
+              />
+              <div style={{ color: 'rgba(0,0,0,0.45)' }}>
+                新代理为低级代理，挂在你名下，地区标签与你相同。积分为 0 时不能登录，请在「编号划拨」页给他转积分。
+              </div>
+            </ModalForm>
+          ) : (
+            <ModalForm
+              key="create"
+              title="新建代理"
+              width={420}
+              modalProps={{ destroyOnClose: true }}
+              trigger={
+                <Button type="primary" icon={<PlusOutlined />}>
+                  新建代理
+                </Button>
+              }
+              onFinish={async (v: AgentInput & { parent_agent_id?: number }) =>
+                runCreate(
+                  createAgent({ ...v, password: v.password || undefined, parent_agent_id: v.parent_agent_id ?? null }),
+                  v.name,
+                  '已新建代理',
+                )
+              }
+            >
+              <ProFormText
+                name="name"
+                label="代理名称"
+                rules={[{ required: true, whitespace: true, message: '请输入名称' }, { max: 20 }]}
+                extra="全局唯一（不区分大小写），同时作为后台登录用户名"
+              />
+              <ProFormText.Password
+                name="password"
+                label="登录密码"
+                rules={CREATE_PASSWORD_RULES}
+                extra={CREATE_PASSWORD_EXTRA}
+              />
+              <ProFormSelect name="region" label="地区标签" valueEnum={REGION_LABEL} rules={[{ required: true }]} />
+              <ProFormSelect name="tier" label="级别" valueEnum={TIER_LABEL} rules={[{ required: true }]} />
+              <ProFormSelect
+                name="parent_agent_id"
+                label="上级代理"
+                options={parentOptions()}
+                fieldProps={{ allowClear: true }}
+                extra="可选；必须是资格激活的高级代理"
+              />
+            </ModalForm>
+          ),
+        ]}
+      />
+      {isAgent && (
+        <ProTable<CreationLogRow>
+          style={{ marginTop: 16 }}
+          rowKey="id"
+          headerTitle="开通记录"
+          columns={logColumns}
+          cardBordered
+          search={false}
+          options={{ reload: true, density: false, setting: false }}
+          pagination={{ pageSize: 10 }}
+          params={{ all }} // 列表刷新（如刚开通）时一起刷新
+          request={async (params) => {
+            const pageSize = params.pageSize ?? 10
+            const { logs, total } = await listCreationLogs(pageSize, ((params.current ?? 1) - 1) * pageSize)
+            return { data: logs, total, success: true }
+          }}
+        />
+      )}
+    </>
   )
 }

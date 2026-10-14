@@ -288,14 +288,47 @@ export async function listAgents(): Promise<AgentRow[]> {
 
 export interface AgentInput {
   name: string
-  password: string
+  password?: string // 留空 → 服务端生成，结果里带回 generated_password
   region: string
   tier: string
   parent_agent_id: number | null
 }
 
-export async function createAgent(input: AgentInput): Promise<ApiResult> {
-  return result(await post('/agents', input))
+export interface CreateAgentResult extends ApiResult {
+  generated_password?: string // 未填密码时服务端生成，只在本次响应里出现
+}
+
+async function createResult(r: Response): Promise<CreateAgentResult> {
+  const d = await r.clone().json().catch(() => ({}))
+  return { ...(await result(r)), generated_password: d.generated_password }
+}
+
+export async function createAgent(input: AgentInput): Promise<CreateAgentResult> {
+  return createResult(await post('/agents', input))
+}
+
+// 高级代理开通下级：级别固定为低级、上级为本人、地区标签沿用本人，均由服务端决定
+export async function createChildAgent(name: string, password?: string): Promise<CreateAgentResult> {
+  return createResult(await post('/agents', password ? { name, password } : { name }))
+}
+
+export interface CreationLogRow {
+  id: number
+  name: string // 开通时的代理名称
+  actor_type: 'admin' | 'agent'
+  actor: string // 后台人员开通的显示为「后台」
+  created_at: number
+}
+
+// 代理视图：本人名下代理的开通记录
+export async function listCreationLogs(
+  limit: number,
+  offset: number,
+): Promise<{ logs: CreationLogRow[]; total: number }> {
+  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  const r = await req('/agents/creation-logs?' + qs.toString())
+  if (r.status !== 200) throw new Error('list creation logs failed: ' + r.status)
+  return r.json()
 }
 
 export async function updateAgent(
@@ -504,4 +537,58 @@ export async function saveTrialSettings(trialEnabled: boolean, trialPoints: numb
       body: JSON.stringify({ trial_enabled: trialEnabled, trial_points: trialPoints }),
     }),
   )
+}
+
+// ---- 文案编辑（仅后台人员）----
+
+export interface TextRow {
+  id: number
+  category: string
+  key: string // 客户端读取用的标识，创建后不可改
+  title: string
+  content: string // 清洗后的 HTML
+  updated_at: number
+  updated_by: string
+  created_at: number
+}
+
+export interface TextResult extends ApiResult {
+  text?: TextRow
+}
+
+async function textResult(r: Response): Promise<TextResult> {
+  const d = await r.clone().json().catch(() => ({}))
+  return { ...(await result(r)), text: d.text }
+}
+
+export async function listTextCategories(): Promise<{ value: string; label: string }[]> {
+  const r = await req('/texts/categories')
+  if (r.status !== 200) throw new Error('list text categories failed: ' + r.status)
+  return (await r.json()).categories
+}
+
+export async function listTexts(): Promise<TextRow[]> {
+  const r = await req('/texts')
+  if (r.status !== 200) throw new Error('list texts failed: ' + r.status)
+  return (await r.json()).texts
+}
+
+export async function createText(input: {
+  category: string
+  key: string
+  title: string
+  content: string
+}): Promise<TextResult> {
+  return textResult(await post('/texts', input))
+}
+
+export async function updateText(
+  id: number,
+  patch: { category?: string; title?: string; content?: string },
+): Promise<TextResult> {
+  return textResult(await req(`/texts/${id}`, { method: 'PUT', body: JSON.stringify(patch) }))
+}
+
+export async function deleteText(id: number): Promise<ApiResult> {
+  return result(await req(`/texts/${id}`, { method: 'DELETE' }))
 }

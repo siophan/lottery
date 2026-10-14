@@ -283,6 +283,19 @@ def list_agents(conn, *, parent_id: int | None = None) -> list[dict]:
         out.append(d)
     return out
 
+STAFF_ACTOR_LABEL = "后台"       # 代理视图里替代后台人员用户名的显示（与号段 / 积分流水一致）
+
+def list_child_creations(conn, parent_id: int, limit: int, offset: int) -> tuple[list[dict], int]:
+    """开通记录（代理视图）：上级为 parent_id 的代理的 agent.create 审计，新的在前。
+    按审计里记下的上级 id 匹配（不受改名影响）；后台人员开通的不暴露其用户名。name 为开通时的名称。"""
+    where = "WHERE action='agent.create' AND json_extract(detail_json,'$.parent_agent_id')=?"
+    total = conn.execute(f"SELECT COUNT(*) FROM audit_logs {where}", (parent_id,)).fetchone()[0]
+    rs = conn.execute(f"SELECT * FROM audit_logs {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+                      (parent_id, limit, offset)).fetchall()
+    return [{"id": r["id"], "name": r["target"], "actor_type": r["actor_type"],
+             "actor": r["actor"] if r["actor_type"] == "agent" else STAFF_ACTOR_LABEL,
+             "created_at": r["created_at"]} for r in rs], total
+
 # ---------------- 改名 ----------------
 
 def rename_agent(conn, agent_id: int, new_name, *, actor_type: str, actor: str, now: int) -> Agent:

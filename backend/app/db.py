@@ -283,11 +283,20 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_status_by(conn)
     _migrate_agent_charge(conn)
     _migrate_phone_verified(conn)
+    _migrate_site_texts(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
                                base_url=s["base_url"], headers={}, interval_sec=5,
                                enabled=True, lotteries=s["lotteries"])
+
+def _migrate_site_texts(conn) -> None:
+    # 发财猫需求第 1 条：文案编辑。key 为客户端读取用的标识，创建后不可改；content 为清洗后的 HTML
+    conn.execute("CREATE TABLE IF NOT EXISTS site_texts(id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                 " category TEXT NOT NULL, key TEXT UNIQUE NOT NULL, title TEXT NOT NULL,"
+                 " content TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL,"
+                 " updated_by TEXT NOT NULL, created_at INTEGER NOT NULL)")
+    conn.commit()
 
 def _migrate_users(conn) -> None:
     # 幂等迁移：缺列才 ADD COLUMN；本次新加了列才回填存量账号（视为已激活且已完成首登）。
