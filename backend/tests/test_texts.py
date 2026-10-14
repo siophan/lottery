@@ -1,7 +1,11 @@
 # 文案编辑（发财猫需求第 1 条）：后台管理文案，客户端按 key 读取最新内容。
+import json
+import pathlib
+import shutil
+import subprocess
 import pytest
 from fastapi.testclient import TestClient
-from app import db_texts
+from app import db, db_texts
 from app.db_agents import BizError
 from tests.agent_helpers import audit, build_app, key_client, login_client, mk_admin, mk_agent_raw
 
@@ -51,12 +55,12 @@ def test_staff_create_list_update_delete_with_audit():
     t = r.json()["text"]
     assert (t["category"], t["key"], t["title"], t["content"]) == ("rules", "pl3.rules", "排列三规则", "<p>玩法</p>")
     assert t["updated_by"] == "admin-key" and isinstance(t["updated_at"], int)
-    assert [x["key"] for x in tc.get("/admin/texts").json()["texts"]] == ["pl3.rules"]
+    assert [x["key"] for x in tc.get("/admin/texts").json()["texts"]] == ["pl3sim.statement", "pl3.rules"]
     r = tc.put(f"/admin/texts/{t['id']}", json={"title": "排列三玩法", "content": "<p>新</p>", "category": "data"})
     assert r.status_code == 200 and r.json()["text"]["content"] == "<p>新</p>"
     assert r.json()["text"]["category"] == "data" and r.json()["text"]["key"] == "pl3.rules"
     assert tc.delete(f"/admin/texts/{t['id']}").json() == {"ok": True}
-    assert tc.get("/admin/texts").json()["texts"] == []
+    assert [x["key"] for x in tc.get("/admin/texts").json()["texts"]] == ["pl3sim.statement"]   # 只剩预置文案
     assert [len(audit(conn, a)) for a in ("text.create", "text.update", "text.delete")] == [1, 1, 1]
     assert "<p>新</p>" not in str(audit(conn, "text.update"))      # 审计只记元信息，不复制正文
 
@@ -124,3 +128,30 @@ def test_db_layer_raises_biz_errors():
     with pytest.raises(BizError):
         db_texts.create_text(conn, category="rules", key="", title="t", content="",
                              actor_type="admin", actor="x", now=1)
+
+# ---------------- 预置文案 ----------------
+
+def test_seed_statement_once_and_never_restored():
+    conn, app = build_app()
+    tc = key_client(app)
+    t = next(x for x in tc.get("/admin/texts").json()["texts"] if x["key"] == "pl3sim.statement")
+    assert (t["category"], t["title"], t["updated_by"]) == ("data", "发财猫软件 · 数据说明", db_texts.SEED_ACTOR)
+    assert "开发主体：发财猫技术团队" in t["content"] and db_texts.sanitize_html(t["content"]) == t["content"]
+    assert TestClient(app).get("/api/texts?keys=pl3sim.statement").json()["data"]["pl3sim.statement"]["content"] == t["content"]
+    tc.put(f"/admin/texts/{t['id']}", json={"content": "<p>改过</p>"})
+    db.init_db(conn)                                            # 重启不覆盖管理员改动
+    assert db_texts.get_text(conn, t["id"])["content"] == "<p>改过</p>"
+    tc.delete(f"/admin/texts/{t['id']}")
+    db.init_db(conn)                                            # 删除后重启也不补回
+    assert db_texts.texts_by_keys(conn, ["pl3sim.statement"]) == []
+
+def test_seed_matches_client_default():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node 不可用")
+    script = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "patch-ds-client.js"
+    out = subprocess.run([node, "-e", f"console.log(JSON.stringify(require({json.dumps(str(script))}).STATEMENT_DEFAULT))"],
+                         capture_output=True, text=True, check=True).stdout
+    client = json.loads(out)
+    key, _, title, content = db_texts.DEFAULT_TEXTS[0]
+    assert key == "pl3sim.statement" and client == {"title": title, "content": content}

@@ -643,9 +643,125 @@ const NOCODE_LAYERS = [{
   },
 }];
 
+// 删除「遗漏代码」「代码胆拖」（客户 2026-10-15 回复：该两项删除）：五个工作台侧边栏的入口。两者各自开独立窗口
+// （/hash/omissionDm、danTuo 路由），去掉入口后无处可开，路由与页面 chunk 成为死代码；openMissDm / openDt 方法保留。
+// 智能模型页（deepseek/lottery）问答里讲这两项用法的两个问题一并去掉
+const NOMISS_MARK = '/* ds-patch nomiss v1 */';
+const NOMISS_MENU = { // 文件 → [[点击方法, 静态图标下标 _vm._m(n), 按钮文字]]
+  'chunk-b7e0f68a.59391aa2.js': [['openMissDm', 6, '遗漏代码']],
+  'chunk-50732e0a.702f76ce.js': [['openMissDm', 5, '遗漏代码']], // 外层 typeId 判断保留，分支改为空节点
+  'chunk-60235acf.b3ce76aa.js': [['openDt', 5, '代码胆拖'], ['openMissDm', 6, '遗漏代码']],
+  'chunk-4cfcd98b.22429ba7.js': [['openDt', 5, '代码胆拖'], ['openMissDm', 6, '遗漏代码']],
+  'chunk-654b0783.e43d7763.js': [['openDt', 5, '代码胆拖'], ['openMissDm', 6, '遗漏代码']],
+};
+const NOMISS_LAYERS = [{
+  mark: NOMISS_MARK,
+  replacements: (name) => NOMISS_MENU[name].map(([click, m, label]) => ({
+    find: `_c('div', {\n    staticClass: "up dh",\n    on: {\n      "click": _vm.${click}\n    }\n  }, [_vm._m(${m}), _vm._v("${label} ")])`,
+    repl: `${NOMISS_MARK} _vm._e()`,
+    count: 1,
+  })),
+}];
+const NOMISS_AI_CHUNK = 'chunk-630bbf2e.00bded53.js';
+
+// 排三模拟工具（hash 工作台）左侧「数据服务声明」改由后台「文案编辑」维护（客户 2026-10-15 回复）：标题与正文读
+// pl3sim.statement（标题→h2，正文 HTML→v-html）；读不到时显示下面的默认文案（客户提供的新版，后端首次升级时也写入同一份）。
+// 正文 HTML 已由后端清洗；p 的字号行距沿用 app.css 的全局 .about p，所以 v-html 插入的段落样式不变
+const TEXTS_MARK = '/* ds-patch texts v1 */';
+const STATEMENT_KEY = 'pl3sim.statement';
+const STATEMENT_DEFAULT = {
+  title: '发财猫软件 · 数据说明',
+  content: [
+    '很多人觉得区块链技术晦涩难懂，但这项技术其实已经落地在不少生活场景之中，哈希值就是构成这套体系的关键要素之一。',
+    '哈希算法能够把长短不一的数据内容，转换成一串长度固定的字符，这套转换机制依靠哈希函数完成。无论原始输入的数据体量大小，经过运算后都会输出固定长度的哈希串。在区块链体系内，哈希常用来完成信息存证与校验工作。当比对得出两份哈希结果一致，就代表原始数据没有遭到篡改。',
+    '除此之外，哈希算法也是区块链达成去中心化特性的重要基础。传统中心化系统里，全部数据的存放与管控，都交由单一中心机构负责。区块链网络则完全不同，网络里每一个节点设备都会保存一份完整账本副本，针对账本里每一笔交易运算哈希值，以此达成分布式的数据存储与管理模式。',
+    '哈希值同时还能够保障交易的匿名特性。区块链网络里的交易可以做到隐私保护、安全可查，原理就是每一笔交易信息都会由哈希串替代展示。这种机制可以守护使用者的个人隐私，让每一笔交易更加可靠安全。',
+    '综合来看，哈希在区块链体系里承担着不可或缺的作用。一方面能够校验数据有没有被改动，保障数据完整；另一方面支撑去中心化架构，同时实现交易匿名。以上特性，共同赋予区块链出色的安全能力与可信度。',
+    '伴随区块链技术持续迭代升级，哈希相关技术未来会拓展到更多行业场景落地使用。',
+    '发财猫软件提取哈希运算结果末尾5位数字，作为体彩排列五的模拟开奖号码，同时可供给排列三玩法，用来开展数据模拟推演练习。',
+    '开发主体：发财猫技术团队',
+  ].map((p) => `<p>${p}</p>`).join('') +
+    '<p><strong>法律声明</strong></p><p>严禁任何组织、个人利用本组模拟数据开展各类违法活动，一旦违规，相关主体将承担对应的法律责任！</p>',
+};
+const STATEMENT_OLD_PARAS = [
+  '区块链技术，这个看似高深的概念，其实在我们生活中有着广泛的应用。它的核心元素之一就是哈希值。',
+  '哈希值是一种将任意长度的数据映射为固定长度的字符串的方法。这个映射过程是通过一个哈希函数来实现的，它将输入的数据转化为一个特定长度的哈希值。在区块链技术中，哈希值被广泛用于记录和验证数据。如果哈希值匹配，那么就说明数据没有被篡改过。 ',
+  '其次，哈希值在区块链中起到了去中心化的作用。在传统的中心化系统中，数据的存储和管理都是由一个中心机构来完成的。而在区块链中，每个节点都有完整的账本副本，通过对账本中的每个交易进行哈希值的计算，来保证数据的去中心化存储和管理。 ',
+  '另外，哈希值还被用来实现匿名性。在区块链中，交易可以保持匿名和安全，这是因为每个交易都被哈希值所代替。这样就可以保护用户的隐私和安全，使得交易可以更加安全和可信。',
+  '总的来说，哈希值在区块链技术中扮演着非常重要的角色。它不仅可以验证数据的完整性，还可以实现去中心化和匿名性。这些都使得区块链技术具有很高的安全性和可信度。',
+  '随着区块链技术的不断发展，我们相信哈希值将会在更多的领域得到应用和发展。',
+  'lottery mao软件采用每个哈希值结果的最后五位阿拉伯数字做为体育彩票排列五的模拟开奖号码，用于排列三玩法的数据模拟练习。',
+  '任何单位和个人不得用于本数据从事违法行为，否则必追究其法律责任！！',
+  '青岛翔逸供应链有限公司法务部',
+];
+const STATEMENT_LAYERS = [{
+  mark: TEXTS_MARK,
+  only: ['chunk-b7e0f68a.59391aa2.js'],
+  replacements: [
+    {
+      find: `[_vm._m(10), ${STATEMENT_OLD_PARAS.map((p) => `_c('p', [_vm._v(${JSON.stringify(p)})])`).join(', ')}]`,
+      repl: `[${TEXTS_MARK} _c('h2', [_c('strong', [_vm._v(_vm._s(_vm.dsStatement.title))])]), _c('div', {\n` +
+        `    domProps: {\n      "innerHTML": _vm._s(_vm.dsStatement.content)\n    }\n  })]`,
+      count: 1,
+    },
+    {
+      find: 'data() {\n    return {\n      planExpectList: [],',
+      repl: `data() {\n    return {\n      dsStatement: ${JSON.stringify(STATEMENT_DEFAULT)},\n      planExpectList: [],`,
+      count: 1,
+    },
+    {
+      find: 'mounted() {\n    window.onresize = () => {',
+      repl: 'mounted() {\n    this.dsLoadStatement();\n    window.onresize = () => {',
+      count: 1,
+    },
+    { // keep-alive 缓存的页面再次进入时也取一次最新文案
+      find: 'created() {\n    this.fUrl = config["fileURL"];',
+      repl: 'activated() {\n    this.dsLoadStatement();\n  },\n  created() {\n    this.fUrl = config["fileURL"];',
+      count: 1,
+    },
+    {
+      find: '  methods: {\n    openAi(pageName) {',
+      repl: [
+        '  methods: {',
+        '    dsLoadStatement() {',
+        '      if (!window.dsTexts) return;',
+        `      window.dsTexts.load(__webpack_require__("f121")["apiURL"], ["${STATEMENT_KEY}"]).then(d => {`,
+        `        const t = d["${STATEMENT_KEY}"];`,
+        '        if (t && typeof t.content === "string" && t.content) this.dsStatement = { title: t.title || this.dsStatement.title, content: t.content };',
+        '      });',
+        '    },',
+        '    openAi(pageName) {',
+      ].join('\n'),
+      count: 1,
+    },
+  ],
+}];
+
 // 其他页面 chunk：文件名 → [{ locator, layers }]，与上面各组互不影响（同一文件可以同时出现在 CHUNKS 里）
 const MISC_CHUNKS = {
-  ...Object.fromEntries(Object.keys(NOCODE_MENU_M).map((name) => [name, [{ locator: 'openMissDm', layers: NOCODE_LAYERS }]])),
+  ...Object.fromEntries(Object.keys(NOCODE_MENU_M).map((name) => [name,
+    [{ locator: 'openMissDm', layers: [...NOCODE_LAYERS, ...NOMISS_LAYERS, ...STATEMENT_LAYERS] }]])),
+  [NOMISS_AI_CHUNK]: [ // 智能模型（deepseek/lottery）「功能」问答
+    {
+      locator: '什么是组合遗漏',
+      layers: [{
+        mark: NOMISS_MARK,
+        replacements: [
+          {
+            find: "          list.push({\n            msg: '什么是遗漏代码/遗漏代码如何应用',\n            id: 4,\n            type: 2,\n            isSelect: false\n          });\n",
+            repl: `          ${NOMISS_MARK}\n`,
+            count: 1,
+          },
+          {
+            find: '          if (!(this.playId.indexOf("1105") > -1)) {\n            list.push({\n' +
+              "              msg: '什么是代码的胆拖/代码的胆拖如何应用',\n              id: 10,\n              type: 2,\n              isSelect: false\n            });\n          }\n",
+            repl: '',
+            count: 1,
+          },
+        ],
+      }],
+    },
+  ],
   'chunk-4cb5c7e0.40436b3b.js': [ // 收费说明 / 用户协议（person/fee.vue）：服务范围去掉「代码图表」
     {
       locator: '综合功能',
@@ -733,7 +849,8 @@ function patchChunk(raw, name) {
 module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK, ONBOARD_SMS_MARK,
   KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
-  patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M };
+  patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M,
+  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');

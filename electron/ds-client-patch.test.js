@@ -6,7 +6,8 @@ const vm = require('vm');
 const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS, AUTH_MARK, KICK_MARK,
   patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
   KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
-  patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M } = require('../scripts/patch-ds-client.js');
+  patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M,
+  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT } = require('../scripts/patch-ds-client.js');
 const dsSources = require('../client/ds-sources.js');
 
 const DIR = path.join(__dirname, '..', 'client', 'js');
@@ -1121,7 +1122,7 @@ test('nocode: 五个工作台侧边栏去掉「代码条件」「代码图表」
     assert.ok(!src.includes('_vm._v("代码条件 ")') && !src.includes('_vm._v("代码图表 ")'), name);
     assert.ok(!src.includes('return _vm.openLeft(4);') && !src.includes('return _vm.openLeft(5);'), name);
     assert.ok(src.includes('_vm._v("自选条件 ")') && src.includes('_vm._v("走势图表 ")'), name);
-    assert.ok(src.includes('"click": _vm.openMissDm'), name);           // 遗漏代码仍在
+    assert.ok(src.includes('openMissDm() {'), name);                    // 方法保留（入口由 nomiss 层去掉）
     assert.ok(src.includes('openLeft(index) {') || src.includes('openLeft('), name);
   }
 });
@@ -1147,4 +1148,88 @@ test('nocode: 用户协议服务范围去掉「代码图表」', () => {
 
 test('nocode: 锚点不匹配时报错', () => {
   assert.throws(() => patchMisc("eval('openMissDm')", 'chunk-b7e0f68a.59391aa2.js'), /命中 0 次/);
+});
+
+// ---- 删除遗漏代码 / 代码胆拖入口（nomiss v1）----
+test('nomiss: 五个工作台侧边栏去掉「遗漏代码」「代码胆拖」，方法与其他菜单保留', () => {
+  for (const name of Object.keys(NOMISS_MENU)) {
+    const src = workbenchSource(name);
+    assert.ok(src.includes(NOMISS_MARK), name);
+    assert.ok(!src.includes('_vm._v("遗漏代码 ")') && !src.includes('_vm._v("代码胆拖 ")'), name);
+    assert.ok(!src.includes('"click": _vm.openMissDm') && !src.includes('"click": _vm.openDt'), name);
+    assert.ok(src.includes('openMissDm() {') && src.includes('openDt() {'), name);
+    assert.ok(src.includes('_vm._v("自选条件 ")') && src.includes('_vm._v("走势图表 ")'), name);
+  }
+  // 11选5：按钮外层的 typeId 判断保留，两个分支都是空节点
+  assert.ok(workbenchSource('chunk-50732e0a.702f76ce.js').includes(`_vm.typeId == '1105r5' ? ${NOMISS_MARK} _vm._e() : _vm._e()`));
+});
+
+test('nomiss: 智能模型问答去掉遗漏代码、代码的胆拖两个问题，其余问题保留', () => {
+  const src = evalSources(miscRaw(NOMISS_AI_CHUNK)).find((s) => s.includes('什么是组合遗漏'));
+  assert.ok(src.includes(NOMISS_MARK));
+  assert.ok(!src.includes("msg: '什么是遗漏代码/遗漏代码如何应用'") && !src.includes("msg: '什么是代码的胆拖/代码的胆拖如何应用'"));
+  for (const q of ['什么是遗漏查询', '什么是代码/代码如何应用', '什么是组合遗漏/组合遗漏如何应用', '什么是胆拖/胆拖如何应用']) {
+    assert.ok(src.includes(`msg: '${q}'`), q);
+  }
+});
+
+test('nomiss: 锚点不匹配时报错', () => {
+  assert.throws(() => patchMisc("eval('什么是组合遗漏')", NOMISS_AI_CHUNK), /命中 0 次/);
+});
+
+// ---- 排三模拟工具「数据服务声明」读文案编辑（texts v1）----
+const hashSource = () => workbenchSource('chunk-b7e0f68a.59391aa2.js');
+
+test('texts: 排三模拟工具声明改为 dsStatement 渲染，旧文案移除，默认值为客户新版', () => {
+  const src = hashSource();
+  assert.ok(src.includes(TEXTS_MARK));
+  assert.ok(src.includes('_vm._v(_vm._s(_vm.dsStatement.title))') && src.includes('"innerHTML": _vm._s(_vm.dsStatement.content)'));
+  const code = src.split('sourceMappingURL')[0];
+  assert.ok(!code.includes('青岛翔逸供应链有限公司法务部') && !code.includes('lottery mao软件采用'));
+  assert.ok(src.includes(`dsStatement: ${JSON.stringify(STATEMENT_DEFAULT)},`));
+  assert.strictEqual(STATEMENT_DEFAULT.title, '发财猫软件 · 数据说明');
+  assert.ok(STATEMENT_DEFAULT.content.includes('开发主体：发财猫技术团队') && STATEMENT_DEFAULT.content.includes('<strong>法律声明</strong>'));
+  assert.ok(src.includes('this.dsLoadStatement();\n    window.onresize') && src.includes('activated() {\n    this.dsLoadStatement();'));
+  // 其他工作台不受影响
+  for (const name of Object.keys(NOMISS_MENU).filter((n) => n !== 'chunk-b7e0f68a.59391aa2.js')) {
+    assert.ok(!workbenchSource(name).includes(TEXTS_MARK), name);
+  }
+});
+
+function statementLoader(dsTexts) {
+  const body = hashSource().match(/    dsLoadStatement\(\) \{\n[\s\S]*?\n    \},\n    openAi\(/)[0].replace(/,\n    openAi\($/, '');
+  const calls = [];
+  const ctx = {
+    window: dsTexts ? { dsTexts: { load: (api, keys) => { calls.push([api, keys]); return dsTexts(keys); } } } : {},
+    __webpack_require__: (id) => ({ f121: { apiURL: 'https://api.test/api' } })[id],
+  };
+  const methods = vm.runInNewContext(`({\n${body}\n})`, ctx);
+  const self = { dsStatement: { ...STATEMENT_DEFAULT } };
+  return { run: () => methods.dsLoadStatement.call(self), self, calls };
+}
+test('texts: 读到后台文案后替换标题与正文', async () => {
+  const h = statementLoader(async () => ({ [STATEMENT_KEY]: { title: '新标题', content: '<p>新正文</p>' } }));
+  h.run();
+  await tick();
+  assert.deepStrictEqual(plain(h.calls), [['https://api.test/api', [STATEMENT_KEY]]]);
+  assert.deepStrictEqual(plain(h.self.dsStatement), { title: '新标题', content: '<p>新正文</p>' });
+});
+
+test('texts: 后台没有该文案、正文为空或标题为空时保留默认 / 沿用默认标题', async () => {
+  for (const data of [{}, { [STATEMENT_KEY]: { title: 'x', content: '' } }]) {
+    const h = statementLoader(async () => data);
+    h.run();
+    await tick();
+    assert.deepStrictEqual(plain(h.self.dsStatement), STATEMENT_DEFAULT);
+  }
+  const h = statementLoader(async () => ({ [STATEMENT_KEY]: { title: '', content: '<p>c</p>' } }));
+  h.run();
+  await tick();
+  assert.deepStrictEqual(plain(h.self.dsStatement), { title: STATEMENT_DEFAULT.title, content: '<p>c</p>' });
+});
+
+test('texts: 没有 window.dsTexts 时不报错', () => {
+  const h = statementLoader(null);
+  h.run();
+  assert.deepStrictEqual(h.self.dsStatement, STATEMENT_DEFAULT);
 });
