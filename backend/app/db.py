@@ -297,6 +297,8 @@ def _migrate_site_texts(conn) -> None:
                  " content TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL,"
                  " updated_by TEXT NOT NULL, created_at INTEGER NOT NULL)")
     conn.commit()
+    from . import db_texts   # db_texts 依赖本模块，放在函数里导入避免循环
+    db_texts.seed_defaults(conn, int(time.time()))
 
 def _migrate_users(conn) -> None:
     # 幂等迁移：缺列才 ADD COLUMN；本次新加了列才回填存量账号（视为已激活且已完成首登）。

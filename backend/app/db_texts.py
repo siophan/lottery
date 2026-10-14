@@ -19,6 +19,35 @@ TITLE_MAX = 50
 CONTENT_MAX = 100_000             # 清洗前的原始长度上限
 KEYS_MAX = 50                     # 客户端单次按 key 读取的上限
 
+# 预置文案：各只在首次升级时写入一次（settings 里记 text_seeded:<key>），之后管理员改动或删除都不会被补回。
+# 内容须与客户端补丁里的默认值一致（scripts/patch-ds-client.js 的 STATEMENT_DEFAULT），读不到后台时客户端显示的就是它
+_STATEMENT_PARAS = [
+    "很多人觉得区块链技术晦涩难懂，但这项技术其实已经落地在不少生活场景之中，哈希值就是构成这套体系的关键要素之一。",
+    "哈希算法能够把长短不一的数据内容，转换成一串长度固定的字符，这套转换机制依靠哈希函数完成。无论原始输入的数据体量大小，经过运算后都会输出固定长度的哈希串。在区块链体系内，哈希常用来完成信息存证与校验工作。当比对得出两份哈希结果一致，就代表原始数据没有遭到篡改。",
+    "除此之外，哈希算法也是区块链达成去中心化特性的重要基础。传统中心化系统里，全部数据的存放与管控，都交由单一中心机构负责。区块链网络则完全不同，网络里每一个节点设备都会保存一份完整账本副本，针对账本里每一笔交易运算哈希值，以此达成分布式的数据存储与管理模式。",
+    "哈希值同时还能够保障交易的匿名特性。区块链网络里的交易可以做到隐私保护、安全可查，原理就是每一笔交易信息都会由哈希串替代展示。这种机制可以守护使用者的个人隐私，让每一笔交易更加可靠安全。",
+    "综合来看，哈希在区块链体系里承担着不可或缺的作用。一方面能够校验数据有没有被改动，保障数据完整；另一方面支撑去中心化架构，同时实现交易匿名。以上特性，共同赋予区块链出色的安全能力与可信度。",
+    "伴随区块链技术持续迭代升级，哈希相关技术未来会拓展到更多行业场景落地使用。",
+    "发财猫软件提取哈希运算结果末尾5位数字，作为体彩排列五的模拟开奖号码，同时可供给排列三玩法，用来开展数据模拟推演练习。",
+    "开发主体：发财猫技术团队",
+]
+DEFAULT_TEXTS = [  # (key, category, title, content)
+    ("pl3sim.statement", "data", "发财猫软件 · 数据说明",
+     "".join(f"<p>{p}</p>" for p in _STATEMENT_PARAS)
+     + "<p><strong>法律声明</strong></p><p>严禁任何组织、个人利用本组模拟数据开展各类违法活动，一旦违规，相关主体将承担对应的法律责任！</p>"),
+]
+SEED_ACTOR = "系统"
+
+def seed_defaults(conn, now: int) -> None:
+    for key, category, title, content in DEFAULT_TEXTS:
+        flag = f"text_seeded:{key}"
+        if conn.execute("SELECT 1 FROM settings WHERE key=?", (flag,)).fetchone():
+            continue
+        conn.execute("INSERT OR IGNORE INTO site_texts(category,key,title,content,updated_at,updated_by,created_at)"
+                     " VALUES(?,?,?,?,?,?,?)", (category, key, title, content, now, SEED_ACTOR, now))
+        conn.execute("INSERT INTO settings(key,value) VALUES(?,?)", (flag, "1"))
+    conn.commit()
+
 # ---------------- HTML 清洗 ----------------
 
 _TAGS = {"p", "br", "b", "strong", "i", "em", "u", "s", "span", "div", "blockquote",
