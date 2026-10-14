@@ -10,3 +10,6 @@ dist/
 build/*.icns
 .DS_Store
 *.orig
+/data/
+.backup/
+docs/*.docx
