@@ -57,6 +57,8 @@ export default function UsersTable({ me }: { me: Me }) {
   const [agentEnum, setAgentEnum] = useState<Record<string, { text: string }>>({})
   const [selected, setSelected] = useState<Key[]>([])
   const [myPoints, setMyPoints] = useState<number | null>(me.agent?.points ?? null)
+  // 代理视图：本人配额（总配额 = 名下账号数，与后台代理列表的统计口径一致），随列表刷新
+  const [myQuota, setMyQuota] = useState<{ total: number; activated: number } | null>(null)
 
   useEffect(() => {
     if (isAgent) return
@@ -383,7 +385,14 @@ export default function UsersTable({ me }: { me: Me }) {
       search={{ labelWidth: 'auto' }}
       options={{ reload: true, density: false, setting: true }}
       pagination={{ pageSize: 10, showSizeChanger: true }}
-      headerTitle={isAgent ? `我的积分：${myPoints ?? '—'}` : undefined}
+      headerTitle={
+        isAgent
+          ? `我的积分：${myPoints ?? '—'}` +
+            (myQuota
+              ? `　总配额：${myQuota.total}　已激活：${myQuota.activated}　未激活：${myQuota.total - myQuota.activated}`
+              : '')
+          : undefined
+      }
       // 跨页保留勾选，批量充值可一次选多页（单次最多 1000 个）
       rowSelection={{ selectedRowKeys: selected, onChange: setSelected, preserveSelectedRowKeys: true }}
       tableAlertOptionRender={() => <a onClick={() => setSelected([])}>清空选择</a>}
@@ -394,6 +403,7 @@ export default function UsersTable({ me }: { me: Me }) {
             .catch(() => undefined)
         }
         const all = await listUsers(!isAgent && params.agent_id ? Number(params.agent_id) : undefined)
+        if (isAgent) setMyQuota({ total: all.length, activated: all.filter((u) => u.activated).length })
         let rows = all
         if (params.code) {
           const kw = String(params.code).toLowerCase()

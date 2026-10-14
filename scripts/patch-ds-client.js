@@ -432,6 +432,18 @@ const PROFILE_APP_REPLACEMENTS = [
   },
 ];
 
+// 会员编号去字母前缀（发财猫需求第 3 条）：首页「软件编号：」与个人信息页「软件编号」只显示数字部分
+// （Y000055 → 000055，Z0000001 → 0000001）。只改显示：登录仍输完整编号，localStorage.userInfo 原样保留
+const CODE_MARK = '/* ds-patch code v1 */';
+const codeDigits = (expr) => `String(${expr} || "").replace(/^[A-Za-z]+/, "")`;
+const CODE_APP_REPLACEMENTS = [
+  { // 首页 username 只用于模板显示
+    find: '      this.username = userInfo.username;\n',
+    repl: `      this.username = ${codeDigits('userInfo.username')}; ${CODE_MARK}\n`,
+    count: 1,
+  },
+];
+
 const APP_LAYERS = [
   { locator: 'function topRows(params)', layers: [{ mark: APP_MARK, replacements: APP_REPLACEMENTS }] },
   {
@@ -442,7 +454,13 @@ const APP_LAYERS = [
       { mark: KICK2_MARK, replacements: KICK2_REPLACEMENTS },
     ],
   },
-  { locator: INDEX_LOCATOR, layers: [{ mark: PROFILE_MARK, replacements: PROFILE_APP_REPLACEMENTS }] },
+  {
+    locator: INDEX_LOCATOR,
+    layers: [
+      { mark: PROFILE_MARK, replacements: PROFILE_APP_REPLACEMENTS },
+      { mark: CODE_MARK, replacements: CODE_APP_REPLACEMENTS },
+    ],
+  },
 ];
 
 // 登录页 chunk（src/views/login/index.vue）：login() 收到 10030（首次登录需改密并绑定手机）时打开首登弹窗
@@ -592,6 +610,70 @@ const SHOP_CHUNKS = {
   },
 };
 
+// 删除「代码条件」「代码图表」（发财猫需求第 4 条）：五个工作台侧边栏的两个入口，以及 3D / 排列3 走势区里属于
+// 代码图表一族的「代码走势」按钮（它打开的走势页 code_id 分支与 K 线 dmzs 页随之成为死代码）。只去入口：
+// Dm 条件组件、conditionDmListObj、submiting 的 Dm 分支与「遗漏代码」「代码胆拖」及已保存的条件共用，保留
+const NOCODE_MARK = '/* ds-patch nocode v1 */';
+const NOCODE_MENU_M = { // 两个按钮各自的静态图标下标 _vm._m(n)：[代码条件, 代码图表]
+  'chunk-b7e0f68a.59391aa2.js': [4, 5], // 哈希
+  'chunk-50732e0a.702f76ce.js': [2, 3], // 11选5（按钮外层的 typeId 判断保留，分支改为空节点）
+  'chunk-60235acf.b3ce76aa.js': [3, 4], // 运动会
+  'chunk-4cfcd98b.22429ba7.js': [2, 3], // 排列3
+  'chunk-654b0783.e43d7763.js': [2, 3], // 福彩3D
+};
+const nocodeMenuButton = (left, m, label) => ({
+  find: `_c('div', {\n    staticClass: "up dh",\n    on: {\n      "click": function ($event) {\n` +
+    `        return _vm.openLeft(${left});\n      }\n    }\n  }, [_vm._m(${m}), _vm._v("${label} ")])`,
+  repl: `${NOCODE_MARK} _vm._e()`,
+  count: 1,
+});
+const NOCODE_TREND_BUTTON = {
+  find: `_vm._v("K线走势")]), _c('div', {\n    staticClass: "rbbt dh",\n    on: {\n      "click": function ($event) {\n` +
+    `        return _vm.openTrend('dmzs', 1);\n      }\n    }\n  }, [_vm._v("代码走势")])])`,
+  repl: `_vm._v("K线走势")]), ${NOCODE_MARK} _vm._e()])`,
+  count: 1,
+};
+const NOCODE_LAYERS = [{
+  mark: NOCODE_MARK,
+  replacements: (name) => {
+    const [m4, m5] = NOCODE_MENU_M[name];
+    const reps = [nocodeMenuButton(4, m4, '代码条件'), nocodeMenuButton(5, m5, '代码图表')];
+    if (name === 'chunk-4cfcd98b.22429ba7.js' || name === 'chunk-654b0783.e43d7763.js') reps.push(NOCODE_TREND_BUTTON);
+    return reps;
+  },
+}];
+
+// 其他页面 chunk：文件名 → [{ locator, layers }]，与上面各组互不影响（同一文件可以同时出现在 CHUNKS 里）
+const MISC_CHUNKS = {
+  ...Object.fromEntries(Object.keys(NOCODE_MENU_M).map((name) => [name, [{ locator: 'openMissDm', layers: NOCODE_LAYERS }]])),
+  'chunk-4cb5c7e0.40436b3b.js': [ // 收费说明 / 用户协议（person/fee.vue）：服务范围去掉「代码图表」
+    {
+      locator: '综合功能',
+      layers: [{
+        mark: NOCODE_MARK,
+        replacements: [{
+          find: '_vm._v("/或图表分析及/或专家方案走势及/或组合K线及/或串关组合及/或代码图表及/或综合功能")',
+          repl: `_vm._v(${NOCODE_MARK} "/或图表分析及/或专家方案走势及/或组合K线及/或串关组合及/或综合功能")`,
+          count: 1,
+        }],
+      }],
+    },
+  ],
+  'chunk-098a5041.6d45b853.js': [ // 个人信息页（/person/info）
+    {
+      locator: '软件编号',
+      layers: [{
+        mark: CODE_MARK,
+        replacements: [{
+          find: '_vm._v(" " + _vm._s(_vm.userInfo.username) + " ")',
+          repl: `_vm._v(" " + _vm._s(${CODE_MARK} ${codeDigits('_vm.userInfo.username')}) + " ")`,
+          count: 1,
+        }],
+      }],
+    },
+  ],
+};
+
 // 在 locator 所在模块的 eval 字符串编码下，依次叠加尚未打过的层
 function applyLayers(raw, locator, layers, name) {
   const p = raw.indexOf(locator);
@@ -636,6 +718,13 @@ function patchShop(raw, name) {
   return applyLayers(raw, c.locator, [{ mark: SHOP_MARK, replacements: c.replacements }]);
 }
 
+// name：MISC_CHUNKS 的键之一
+function patchMisc(raw, name) {
+  let out = raw;
+  for (const g of MISC_CHUNKS[name]) out = applyLayers(out, g.locator, g.layers, name);
+  return out;
+}
+
 // name：chunk 文件名（CHUNKS 之一），部分层的锚点因 chunk 而异
 function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
@@ -644,7 +733,7 @@ function patchChunk(raw, name) {
 module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK, ONBOARD_SMS_MARK,
   KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
-  patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG };
+  patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');
@@ -681,6 +770,17 @@ if (require.main === module) {
     const file = path.join(dir, name);
     const raw = fs.readFileSync(file, 'utf8');
     const out = patchShop(raw, name);
+    if (out === raw) {
+      console.log(`skip    ${name}（已打过补丁）`);
+    } else {
+      fs.writeFileSync(file, out);
+      console.log(`patched ${name}`);
+    }
+  }
+  for (const name of Object.keys(MISC_CHUNKS)) {
+    const file = path.join(dir, name);
+    const raw = fs.readFileSync(file, 'utf8');
+    const out = patchMisc(raw, name);
     if (out === raw) {
       console.log(`skip    ${name}（已打过补丁）`);
     } else {

@@ -27,6 +27,7 @@ from .routes import admin_agents as admin_agents_routes
 from .routes import admin_staff as admin_staff_routes
 from .routes import admin_segments as admin_segments_routes
 from .routes import admin_points as admin_points_routes
+from .routes import texts as texts_routes
 
 METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 
@@ -99,6 +100,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all
     app.include_router(ds_routes.router, prefix="/api")     # 多数据源，先于 catch-all
     app.include_router(user_routes.router, prefix="/api")   # 用户信息区，先于 catch-all
+    app.include_router(texts_routes.router, prefix="/api")  # 文案读取，先于 catch-all
     app.include_router(local_router, prefix="/api")
     app.include_router(admin_routes.router, prefix="/admin")
     app.include_router(admin_ds_routes.router, prefix="/admin")
@@ -106,6 +108,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
     app.include_router(admin_staff_routes.router, prefix="/admin")
     app.include_router(admin_segments_routes.router, prefix="/admin")
     app.include_router(admin_points_routes.router, prefix="/admin")
+    app.include_router(texts_routes.admin_router, prefix="/admin")
 
     _static_dir = os.path.join(os.path.dirname(__file__), "static")
     _downloads_dir = os.path.join(_static_dir, "downloads")

@@ -201,7 +201,7 @@ def test_agent_sees_only_direct_children_and_cannot_mutate():
     assert [a["name"] for a in tc.get("/admin/agents").json()["agents"]] == ["kid"]
     r = tc.post("/admin/agents", json={"name": "z", "password": "Passw0rd!", "region": "city",
                                         "tier": "senior"})
-    assert r.status_code == 403 and r.json() == {"error": "forbidden"}
+    assert r.status_code == 403 and r.json()["error"] == "只能开通低于自身级别的代理"
     assert tc.patch(f"/admin/agents/{me}", json={"region": "vip"}).status_code == 403
     assert tc.post(f"/admin/agents/{me}/status", json={"status": "paused", "reason": "x"}).status_code == 403
     assert TestClient(app).get("/admin/agents").status_code == 403
@@ -216,3 +216,121 @@ def test_paused_agent_login_blocked_end_to_end():
     assert agent_tc.get("/admin/agents").status_code == 403          # 已有会话被逐请求拒绝
     r = TestClient(app).post("/admin/login", json={"username": "ag", "password": "Passw0rd!"})
     assert r.status_code == 403 and r.json()["error"] == "代理资格已暂停，无法登录"
+
+# ---------------- 代理开通下级代理（发财猫需求第 2 条） ----------------
+
+def test_senior_agent_creates_junior_child_with_own_region_and_audit():
+    conn, app = build_app()
+    me = mk_agent_raw(conn, "me", region="province")
+    tc = login_client(app, "me")
+    r = tc.post("/admin/agents", json={"name": "kid", "password": "Passw0rd!"})
+    assert r.status_code == 200, r.text
+    a = r.json()["agent"]
+    assert (a["tier"], a["parent_agent_id"], a["region"], a["status"]) == ("junior", me, "province", "active")
+    # 新代理用自己的账号密码登录后台（0 积分时 login_client 先补 1 分）
+    assert login_client(app, "kid", "Passw0rd!").get("/admin/me").json()["agent"]["id"] == a["id"]
+    assert [x["name"] for x in tc.get("/admin/agents").json()["agents"]] == ["kid"]
+    logs = audit(conn, "agent.create")
+    assert len(logs) == 1 and logs[0]["actor_type"] == "agent" and logs[0]["actor"] == "me"
+
+def test_agent_create_rejects_tier_parent_region_beyond_own():
+    """级别只能是低级、上级只能是自己；地区标签沿用本人（传了别的值按越权拒绝）。"""
+    conn, app = build_app()
+    me = mk_agent_raw(conn, "me", region="city")
+    other = mk_agent_raw(conn, "other")
+    tc = login_client(app, "me")
+    base = {"name": "kid", "password": "Passw0rd!"}
+    for extra in ({"tier": "senior"}, {"parent_agent_id": other}, {"parent_agent_id": None},
+                  {"region": "vip"}):
+        r = tc.post("/admin/agents", json={**base, **extra})
+        assert r.status_code == 403 and r.json()["error"] == "只能开通低于自身级别的代理", extra
+    ok = tc.post("/admin/agents", json={**base, "tier": "junior", "parent_agent_id": me, "region": "city"})
+    assert ok.status_code == 200, ok.text
+    assert audit(conn, "agent.create")[0]["actor"] == "me"
+
+def test_junior_agent_cannot_create_agents():
+    conn, app = build_app()
+    boss = mk_agent_raw(conn, "boss")
+    mk_agent_raw(conn, "jr", tier="junior", parent=boss)
+    r = login_client(app, "jr").post("/admin/agents", json={"name": "kid", "password": "Passw0rd!"})
+    assert r.status_code == 403 and r.json()["error"] == "低级代理不能开通下级代理"
+    assert audit(conn, "agent.create") == []
+
+def test_agent_create_still_validates_name_and_password():
+    conn, app = build_app()
+    mk_agent_raw(conn, "me")
+    mk_admin(conn, "staffer")
+    tc = login_client(app, "me")
+    assert tc.post("/admin/agents", json={"name": "Staffer", "password": "Passw0rd!"}).status_code == 409
+    r = tc.post("/admin/agents", json={"name": "kid", "password": "1"})
+    assert r.status_code == 400 and r.json()["ok"] is False
+
+# ---------------- 开通时自动生成密码（发财猫需求第 2 条） ----------------
+
+@pytest.mark.parametrize("pw", [None, "", "   "])
+def test_create_without_password_generates_one_and_returns_it_once(pw):
+    conn, app = build_app()
+    body = {"name": "gen", "region": "city", "tier": "junior"}
+    if pw is not None:
+        body["password"] = pw
+    r = key_client(app).post("/admin/agents", json=body)
+    assert r.status_code == 200, r.text
+    gen = r.json()["generated_password"]
+    assert 8 <= len(gen) <= 64 and any(c.isalpha() for c in gen) and any(c.isdigit() for c in gen)
+    assert login_client(app, "gen", gen).get("/admin/me").json()["agent"]["name"] == "gen"
+    # 只出现在本次响应里：列表、审计都不含明文
+    assert gen not in key_client(app).get("/admin/agents").text
+    assert gen not in str(audit(conn, "agent.create"))
+
+def test_create_with_password_does_not_return_generated():
+    conn, app = build_app()
+    r = key_client(app).post("/admin/agents", json={"name": "a", "password": "Passw0rd!",
+                                                     "region": "city", "tier": "junior"})
+    assert r.status_code == 200 and "generated_password" not in r.json()
+
+def test_agent_created_child_can_get_generated_password():
+    conn, app = build_app()
+    mk_agent_raw(conn, "me")
+    r = login_client(app, "me").post("/admin/agents", json={"name": "kid"})
+    assert r.status_code == 200, r.text
+    assert login_client(app, "kid", r.json()["generated_password"]).get("/admin/me").status_code == 200
+
+def test_generated_passwords_differ():
+    from app.routes.admin_agents import generate_password
+    pws = {generate_password() for _ in range(50)}
+    assert len(pws) == 50
+
+# ---------------- 代理查看本人名下的开通记录 ----------------
+
+def test_agent_creation_logs_cover_own_children_only_and_hide_staff_names():
+    conn, app = build_app()
+    me = mk_agent_raw(conn, "me")
+    mk_agent_raw(conn, "other")
+    key = key_client(app)
+    key.post("/admin/agents", json={"name": "byStaff", "password": "Passw0rd!", "region": "city",
+                                    "tier": "junior", "parent_agent_id": me})
+    key.post("/admin/agents", json={"name": "notMine", "password": "Passw0rd!", "region": "city",
+                                    "tier": "junior", "parent_agent_id": None})
+    tc = login_client(app, "me")
+    tc.post("/admin/agents", json={"name": "byMe", "password": "Passw0rd!"})
+    other = login_client(app, "other")
+    other.post("/admin/agents", json={"name": "theirs", "password": "Passw0rd!"})
+    r = tc.get("/admin/agents/creation-logs")
+    assert r.status_code == 200, r.text
+    logs = r.json()["logs"]
+    assert [(x["name"], x["actor_type"], x["actor"]) for x in logs] == [
+        ("byMe", "agent", "me"), ("byStaff", "admin", "后台")]
+    assert all(isinstance(x["created_at"], int) for x in logs) and r.json()["total"] == 2
+    assert other.get("/admin/agents/creation-logs").json()["total"] == 1
+
+def test_agent_creation_logs_paging_and_role():
+    conn, app = build_app()
+    mk_agent_raw(conn, "me")
+    tc = login_client(app, "me")
+    for i in range(3):
+        tc.post("/admin/agents", json={"name": f"k{i}", "password": "Passw0rd!"})
+    r = tc.get("/admin/agents/creation-logs?limit=2&offset=2").json()
+    assert r["total"] == 3 and [x["name"] for x in r["logs"]] == ["k0"]
+    assert tc.get("/admin/agents/creation-logs?limit=x").status_code == 400
+    assert key_client(app).get("/admin/agents/creation-logs").status_code == 403   # 后台人员看操作日志
+    assert TestClient(app).get("/admin/agents/creation-logs").status_code == 403

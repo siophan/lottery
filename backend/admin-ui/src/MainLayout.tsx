@@ -5,6 +5,7 @@ import {
   ApartmentOutlined,
   ApiOutlined,
   DashboardOutlined,
+  EditOutlined,
   ExperimentOutlined,
   FileSearchOutlined,
   LogoutOutlined,
@@ -23,6 +24,7 @@ import DataSources from './pages/DataSources'
 import PointsLedger from './pages/PointsLedger'
 import Segments from './pages/Segments'
 import Staff from './pages/Staff'
+import Texts from './pages/Texts'
 import TrialSettings from './pages/TrialSettings'
 import UsersTable from './pages/UsersTable'
 import { ROLE_LABEL } from './util'
@@ -36,11 +38,14 @@ interface MenuRoute {
 // 菜单按角色裁剪（只是辅助：权限以服务端校验为准）。
 function routesFor(me: Me): MenuRoute[] {
   if (me.role === 'agent') {
+    const senior = me.agent?.tier === 'senior'
     return [
       { path: '/users', name: '我的账号', icon: <TeamOutlined /> },
+      // 高级代理可以开通、查看本人名下的低级代理
+      ...(senior ? [{ path: '/agents', name: '下级代理', icon: <ApartmentOutlined /> }] : []),
       {
         path: '/segments',
-        name: me.agent?.tier === 'senior' ? '编号划拨' : '编号流水',
+        name: senior ? '编号划拨' : '编号流水',
         icon: <PartitionOutlined />,
       },
       { path: '/points-ledger', name: '积分流水', icon: <TransactionOutlined /> },
@@ -54,6 +59,7 @@ function routesFor(me: Me): MenuRoute[] {
     { path: '/points-ledger', name: '积分流水', icon: <TransactionOutlined /> },
     { path: '/trial', name: '体验期设置', icon: <ExperimentOutlined /> },
     { path: '/data-sources', name: '数据源', icon: <ApiOutlined /> },
+    { path: '/texts', name: '文案编辑', icon: <EditOutlined /> },
     { path: '/audit-logs', name: '操作日志', icon: <FileSearchOutlined /> },
   ]
   if (me.role === 'super') {
@@ -78,6 +84,8 @@ function renderPage(pathname: string, me: Me): ReactNode {
       return <PointsLedger me={me} />
     case '/trial':
       return <TrialSettings />
+    case '/texts':
+      return <Texts />
     case '/audit-logs':
       return <AuditLogs />
     case '/staff':
