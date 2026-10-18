@@ -286,6 +286,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_site_texts(conn)
     _migrate_agent_tiers(conn)
     _migrate_own_userinfo_sessions(conn)
+    _migrate_member_data(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
@@ -300,6 +301,39 @@ def _migrate_own_userinfo_sessions(conn) -> None:
         return
     conn.execute("DELETE FROM sessions")
     conn.execute("INSERT INTO settings(key,value) VALUES(?,?)", (flag, "1"))
+    conn.commit()
+
+def _migrate_member_data(conn) -> None:
+    # 会员各自的方案 / 关注专家 / 上游数据归属（app/member_data.py）。只建表，不回填：共用账号名下的旧数据无法区分归属
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS member_plans(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          kind TEXT NOT NULL,
+          data TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_member_plans_user ON member_plans(user_id, kind, id);
+        CREATE TABLE IF NOT EXISTS member_favorites(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          expert_id INTEGER NOT NULL,
+          expert_type INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          UNIQUE(user_id, expert_id, expert_type)
+        );
+        CREATE TABLE IF NOT EXISTS member_upstream_items(
+          kind TEXT NOT NULL,
+          upstream_id TEXT NOT NULL,
+          user_id INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY(kind, upstream_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_member_upstream_items_user ON member_upstream_items(user_id, kind);
+        """
+    )
     conn.commit()
 
 def _migrate_site_texts(conn) -> None:
@@ -623,6 +657,8 @@ def delete_user(conn, code: str, *, actor_type: str = "system", actor: str = "ma
                                            actor_type=actor_type, actor=actor, now=now, reason="删除账号")
         conn.execute("DELETE FROM sessions WHERE user_id=?", (u.id,))
         conn.execute("DELETE FROM user_avatars WHERE user_id=?", (u.id,))
+        for table in ("member_plans", "member_favorites", "member_upstream_items"):
+            conn.execute(f"DELETE FROM {table} WHERE user_id=?", (u.id,))
         conn.execute("DELETE FROM users WHERE id=?", (u.id,))
         _audit_nocommit(conn, actor_type, actor, "user.delete", u.code, {"points": u.points}, now)
         conn.commit()

@@ -14,21 +14,14 @@ BLOCKED_PATHS = {"user/updatepwd", "user/updatemobile", "user/updateinfo", "user
 # 上游下单 / 续费 / 订单查询同样以共用账号的身份进行（含「积分支付」直接扣共用账号余额，订单列表人人可见），整段拦截
 BLOCKED_PREFIXES = ("order",)
 BLOCKED = {"code": 1, "msg": "该功能暂不可用"}
-# 我的方案 / 均衡方案 / 倍投方案 / 专家关注 / 遗漏预警 / 课程报名都存在共用账号名下：人人可见可删，还带着原账号主人
-# 以前存的数据，所以都不在下面的放行清单里。其中的读取接口按「没有数据」回成功而不是报错：遗漏预警页每 30 秒刷新一次
-# 列表，报错会反复弹提示；课程报名查询报错时职业培训页不加载价格
+# 均衡方案 / 倍投方案 / 关注专家 / 遗漏监控 / 模拟练习原本存在共用账号名下（人人可见可删），现由 member_data.py 按会员
+# 隔离处理，在兜底转发里先于下面的放行清单分派，都不在放行清单里。课程报名入口已去掉，查询按「未报名」回成功
+# （报错时职业培训页不加载），报名接口拦截
 EMPTY_DATA = {
-    "usernumplan/list": {"list": [], "total": []},
-    "averageplan/list": {"list": []},
-    "doubleplan/list": {"list": []},
-    "expertfavorites/list": [],
-    "misscontrol/list": [],
     "coursemsg/info": None,       # 未报名
 }
 # 返回共用账号 userInfo 的接口：响应里的 data 要换成当前账号自己的视图（userinfo.rewrite_user_info）
 USERINFO_PATHS = {"user/isexpire", "user/info"}
-# 响应顶层带着共用账号自身状态的接口 → 要置空的字段（userinfo.redact_fields）。专家页 favorites 是共用账号的关注记录
-SHARED_STATE_FIELDS = {"sportexpertplan/footballjc/expert": ("favorites",)}
 # 允许转发的路径形状：非空段、只含字母数字下划线连字符（上游所有接口都是这种形状）。
 # 上游若按 Servlet / Spring 规则处理路径，「user/updatePwd;x」「user/updatePwd.json」「user/updatePwd.」
 # 都会落到被拦的接口上，所以 ; . 空白 控制字符 反斜杠 空段 一律不转发，不去猜上游怎么规范化
