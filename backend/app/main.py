@@ -9,6 +9,7 @@ from fastapi.responses import Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from .config import Settings, load_settings
 from .upstream import build_client, forward, filter_response_headers
+from .userinfo import rewrite_user_info, redact_fields, UpstreamNames, LegacyCheckLimiter
 from .routes import local_router
 from .db import connect, init_db
 from .dayys_session import DataYsSession
@@ -93,6 +94,8 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
         sms = build_sms_sender(settings, app.state.sms_client)
     app.state.sms = sms
     app.state.login_throttle = LoginThrottle()      # 登录失败限流（进程内）
+    app.state.upstream_names = UpstreamNames()       # 用过的共用账号编号（userinfo.py）
+    app.state.legacy_limiter = LegacyCheckLimiter()  # 旧编号查询限次（routes/user.py）
     app.state.maintenance_task = None
     app.state.charge_task = None
     app.state.collector = collector or Collector(app.state.db_conn, enabled=settings.collector_enabled)
@@ -135,13 +138,18 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
         from . import gate
 
         if gate.is_blocked(path):
-            return JSONResponse(gate.BLOCKED)
+            empty = gate.empty_response(path)
+            if empty is None:
+                return JSONResponse(gate.BLOCKED)
+            ok, err = gate.authorize(app.state.db_conn, request.headers.get("token", ""))
+            return JSONResponse(empty if ok else err)
         body = await request.body()
         headers = dict(request.headers)
 
+        user = None
         if path not in gate.PREAUTH_PATHS:
-            ok, err = gate.authorize(app.state.db_conn, headers.get("token", ""))
-            if not ok:
+            user, err = gate.authorize_user(app.state.db_conn, headers.get("token", ""))
+            if user is None:
                 return JSONResponse(err)
             headers["token"] = await app.state.dayys.get_token()   # 换成 data-ys token
         for k in [k for k in headers if k.lower() == "fromid"]:    # 去掉客户端自带的任意大小写 fromId
@@ -165,7 +173,13 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
             return JSONResponse(status_code=502,
                                 content={"error": "upstream_unreachable", "detail": str(e)})
         print(f"{request.method} /api/{path} -> {resp.status_code} {int((time.monotonic()-t0)*1000)}ms token={masked}")
-        return Response(content=resp.content, status_code=resp.status_code,
+        content = resp.content
+        norm = gate.normalize(path)
+        if user is not None and norm in gate.USERINFO_PATHS:
+            content = rewrite_user_info(content, user)
+        elif norm in gate.SHARED_STATE_FIELDS:
+            content = redact_fields(content, gate.SHARED_STATE_FIELDS[norm])
+        return Response(content=content, status_code=resp.status_code,
                         headers=filter_response_headers(dict(resp.headers)))
     return app
 

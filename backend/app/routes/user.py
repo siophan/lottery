@@ -1,8 +1,9 @@
 # 客户端用户信息区（子项目 D）：头像、昵称与积分余额。以请求头 token 认证，
 # 拦截规则与其他业务请求一致（gate.authorize_user：10020 / 10022 / 10024 / 10025）。
 import json
+import time
 from fastapi import APIRouter, Request
-from .. import db, gate, profile
+from .. import db, gate, profile, userinfo
 
 router = APIRouter()
 
@@ -67,3 +68,22 @@ async def save_profile(request: Request):
     if changes:
         db.set_user_profile(conn, u.id, **changes)
     return _profile(conn, db.get_user_by_id(conn, u.id))
+
+@router.post("/user/legacy-prefixes")
+async def legacy_prefixes(request: Request):
+    """遗漏页本地数据找回（client/legacy-keys.js）：客户端把本地 key 的前缀发来，回其中哪些是用过的共用账号编号。
+    客户端只能确认它本地已有的前缀，共用账号编号本身不下发。"""
+    u, err = _auth(request)
+    if err:
+        return err
+    try:
+        payload = json.loads(await request.body() or b"{}")
+    except (ValueError, RecursionError):
+        return _fail("参数错误")
+    cands = payload.get("candidates") if isinstance(payload, dict) else None
+    if (not isinstance(cands, list) or len(cands) > userinfo.LEGACY_CANDIDATES_MAX
+            or not all(isinstance(c, str) and 0 < len(c) <= userinfo.LEGACY_CANDIDATE_LEN_MAX for c in cands)):
+        return _fail("参数错误")
+    if not request.app.state.legacy_limiter.allow(u.id, int(time.time())):
+        return _fail("操作过于频繁，请明天再试")
+    return _ok({"matches": userinfo.legacy_matches(request.app.state.db_conn, [c for c in cands if c != u.code])})

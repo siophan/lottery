@@ -10,6 +10,7 @@ from ..security import hash_password, verify_password
 from ..throttle import LOCKED_MSG, client_ip
 from ..dayys_session import DataYsLoginError
 from ..gate import POINTS_EMPTY
+from ..userinfo import client_user_info
 
 router = APIRouter()
 
@@ -132,11 +133,13 @@ async def login(request: Request):
     if user.points <= 0:            # 已激活且余额为 0（积分暂停）：不发会话
         return deny(POINTS_EMPTY)
 
-    # 取共享 data-ys 账号的 userInfo（确保服务端已登录上游）
+    # 确保服务端已登录共享 data-ys 账号；其 userInfo 只取功能字段，身份资料换成本账号的
     try:
-        user_info = await dayys.get_user_info()
+        upstream_info = await dayys.get_user_info()
     except DataYsLoginError as e:
         return JSONResponse({"code": 502, "msg": f"上游账号不可用: {e}"}, status_code=502)
+    request.app.state.upstream_names.remember(conn, upstream_info, now)   # 供客户端找回旧编号下的本地数据（routes/user.py）
+    user_info = client_user_info(upstream_info, user)
 
     token = db.create_session(conn, user.id, settings.session_ttl)
     # points：客户端据此在登录后提示低积分（0 < points < 7）

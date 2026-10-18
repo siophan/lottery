@@ -39,7 +39,7 @@ def test_login_success_returns_balance():
     db.create_user(conn, "USER01", "pw", None)
     set_points_raw(conn, "USER01", 3)
     body = login(tc)
-    assert body["code"] == 0 and body["data"]["points"] == 3 and body["data"]["userInfo"] == {"vip": 1}
+    assert body["code"] == 0 and body["data"]["points"] == 3
 
 def test_login_priority_ban_pause_expiry_onboarding_before_points():
     conn, tc, _ = build()

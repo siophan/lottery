@@ -444,6 +444,27 @@ const CODE_APP_REPLACEMENTS = [
   },
 ];
 
+// 遗漏页本地数据兼容旧编号：首页 mounted 时（已登录、令牌有效）交给 window.dsLegacyKey（client/legacy-keys.js）
+// 把共用账号旧编号下的本地数据复制到本账号编号下；每个账号只跑一次，失败下次登录再试，不影响首页
+const LEGACY_KEY_MARK = '/* ds-patch legacy-key v1 */';
+const LEGACY_KEY_APP_REPLACEMENTS = [
+  {
+    find: '        points: localStorage.getItem("dsPoints")\n      });\n    }\n  },\n  activated() {',
+    repl: [
+      '        points: localStorage.getItem("dsPoints")',
+      '      });',
+      '    }',
+      `    ${LEGACY_KEY_MARK}`,
+      '    if (window.dsLegacyKey) {',
+      '      window.dsLegacyKey.migrate(__webpack_require__("f121")["apiURL"], localStorage.getItem("token"), userInfo && userInfo.username);',
+      '    }',
+      '  },',
+      '  activated() {',
+    ].join('\n'),
+    count: 1,
+  },
+];
+
 const APP_LAYERS = [
   { locator: 'function topRows(params)', layers: [{ mark: APP_MARK, replacements: APP_REPLACEMENTS }] },
   {
@@ -459,6 +480,7 @@ const APP_LAYERS = [
     layers: [
       { mark: PROFILE_MARK, replacements: PROFILE_APP_REPLACEMENTS },
       { mark: CODE_MARK, replacements: CODE_APP_REPLACEMENTS },
+      { mark: LEGACY_KEY_MARK, replacements: LEGACY_KEY_APP_REPLACEMENTS },
     ],
   },
 ];
@@ -951,7 +973,7 @@ module.exports = { patchChunk, CHUNKS, MARK, enc, patchApp, APP_CHUNK, APP_MARK,
   patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK, ONBOARD_SMS_MARK,
   KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
   patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M,
-  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT, RULES_MARK, RULES_PAGES, rulesDefault };
+  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT, RULES_MARK, RULES_PAGES, rulesDefault, LEGACY_KEY_MARK };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');

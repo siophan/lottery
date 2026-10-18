@@ -954,12 +954,13 @@ test('app chunk: 首页模板在 .card 之后（#content 之前、不在 .card �
 });
 
 // 执行整个首页模块（依赖一律桩），取出 index.vue 的组件选项
-function indexHarness({ withProfile = true, points = '5', userInfo } = {}) {
+function indexHarness({ withProfile = true, points = '5', userInfo, legacy, token } = {}) {
   const mounts = [];
   const ctl = { refreshed: [], destroyed: 0, refresh(p) { this.refreshed.push(p); }, destroy() { this.destroyed++; } };
   const service = function () {};
   const store = { dsPoints: points };
   if (userInfo) store.userInfo = JSON.stringify(userInfo);
+  if (token) store.token = token;
   const src = indexSource() + '\n;__webpack_exports__.dsIndex = indexvue_type_script_lang_js_;';
   const fn = new vm.Script('(function(module, __webpack_exports__, __webpack_require__, window){' + src + '\n})')
     .runInNewContext({
@@ -974,6 +975,7 @@ function indexHarness({ withProfile = true, points = '5', userInfo } = {}) {
   });
   const win = { electron: { ipcRenderer: { send() {}, on() {} } } };
   if (withProfile) win.dsProfile = { mount: (el, o) => { mounts.push([el, o]); return ctl; } };
+  if (legacy) win.dsLegacyKey = legacy;
   fn({ exports: exp }, exp, req, win);
   const comp = exp.dsIndex;
   const el = { id: 'mount-point' };
@@ -982,6 +984,19 @@ function indexHarness({ withProfile = true, points = '5', userInfo } = {}) {
   });
   return { comp, vmThis, mounts, ctl, el, service, store };
 }
+
+test('首页 mounted 用 apiURL、令牌、本账号编号调 dsLegacyKey.migrate；脚本未加载或无 userInfo 时不报错', () => {
+  const calls = [];
+  const legacy = { migrate: (...a) => { calls.push(a); return Promise.resolve(0); } };
+  const h = indexHarness({ legacy, token: 'TOK', userInfo: { username: 'Z0000001', type: 1 } });
+  h.comp.mounted.call(h.vmThis);
+  assert.deepStrictEqual(calls, [[API_URL, 'TOK', 'Z0000001']]);
+  const none = indexHarness({ legacy, token: 'TOK' });
+  none.comp.mounted.call(none.vmThis);
+  assert.deepStrictEqual(calls[1], [API_URL, 'TOK', null]);
+  const without = indexHarness({ userInfo: { username: 'Z1' } });
+  without.comp.mounted.call(without.vmThis);
+});
 
 test('首页 mounted 调用 dsProfile.mount，activated 刷新，destroyed 卸载', () => {
   const h = indexHarness();
