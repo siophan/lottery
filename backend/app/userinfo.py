@@ -49,16 +49,6 @@ def rewrite_user_info(content: bytes, user: db.User) -> bytes:
         payload["data"] = client_user_info(payload["data"], user)
     return _rewrite_json(content, fn)
 
-def redact_fields(content: bytes, fields) -> bytes:
-    """上游响应顶层的这些字段是共用账号自己的状态（如关注记录），置为 null（客户端按「没有」处理）。"""
-    def fn(payload):
-        if not any(payload.get(f) is not None for f in fields):
-            return False
-        for f in fields:
-            if f in payload:
-                payload[f] = None
-    return _rewrite_json(content, fn)
-
 class UpstreamNames:
     """用过的共用账号编号：settings 每个一行，值为最后一次见到的时间（换过共用账号时按它挑最新的一份）。
     进程内记住上次写入的编号，登录时只在编号变了（换号或重启后第一次）才写库。"""

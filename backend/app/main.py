@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import time
 from contextlib import asynccontextmanager
@@ -9,7 +10,8 @@ from fastapi.responses import Response, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from .config import Settings, load_settings
 from .upstream import build_client, forward, filter_response_headers
-from .userinfo import rewrite_user_info, redact_fields, UpstreamNames, LegacyCheckLimiter
+from .userinfo import rewrite_user_info, UpstreamNames, LegacyCheckLimiter
+from .member_data import MemberData, UpstreamUnavailable, EXPERT_PAGE
 from .routes import local_router
 from .db import connect, init_db
 from .dayys_session import DataYsSession
@@ -98,6 +100,8 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
     app.state.legacy_limiter = LegacyCheckLimiter()  # 旧编号查询限次（routes/user.py）
     app.state.maintenance_task = None
     app.state.charge_task = None
+    # 会员各自的方案 / 关注 / 遗漏监控 / 模拟练习（member_data.py）
+    app.state.member = MemberData(app.state.db_conn, app.state.client, app.state.dayys, settings.from_id)
     app.state.collector = collector or Collector(app.state.db_conn, enabled=settings.collector_enabled)
 
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all
@@ -137,6 +141,21 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
         from fastapi.responses import JSONResponse
         from . import gate
 
+        norm = gate.normalize(path)
+        if gate.SAFE_PATH.fullmatch(path) and norm in app.state.member.handlers:
+            user, err = gate.authorize_user(app.state.db_conn, request.headers.get("token", ""))
+            if user is None:
+                return JSONResponse(err)
+            try:
+                payload = json.loads(await request.body() or b"{}")
+            except (ValueError, RecursionError):
+                payload = {}
+            try:
+                result = await app.state.member.handle(norm, user, payload if isinstance(payload, dict) else {})
+            except UpstreamUnavailable as e:
+                return JSONResponse(status_code=502, content={"error": "upstream_unreachable", "detail": str(e)})
+            print(f"{request.method} /api/{path} -> member user={user.id} code={result.get('code')}")
+            return JSONResponse(result)
         if gate.is_blocked(path):
             empty = gate.empty_response(path)
             if empty is None:
@@ -174,11 +193,10 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
                                 content={"error": "upstream_unreachable", "detail": str(e)})
         print(f"{request.method} /api/{path} -> {resp.status_code} {int((time.monotonic()-t0)*1000)}ms token={masked}")
         content = resp.content
-        norm = gate.normalize(path)
         if user is not None and norm in gate.USERINFO_PATHS:
             content = rewrite_user_info(content, user)
-        elif norm in gate.SHARED_STATE_FIELDS:
-            content = redact_fields(content, gate.SHARED_STATE_FIELDS[norm])
+        elif user is not None and norm == EXPERT_PAGE:
+            content = app.state.member.rewrite_expert_page(content, user, body)
         return Response(content=content, status_code=resp.status_code,
                         headers=filter_response_headers(dict(resp.headers)))
     return app

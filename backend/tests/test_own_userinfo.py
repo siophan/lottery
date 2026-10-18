@@ -1,5 +1,5 @@
 # 客户端拿到的 userInfo 必须是当前账号自己的，不能带出共用上游账号的身份资料；
-# 存在共用上游账号名下的方案 / 收藏 / 遗漏预警 / 课程报名一律不转发。
+# 课程报名不转发（方案 / 关注 / 遗漏监控 / 模拟练习改为按会员隔离，见 test_member_data.py）。
 import json, httpx
 from fastapi.testclient import TestClient
 from app.config import Settings
@@ -101,11 +101,6 @@ def test_expert_page_favorites_of_shared_account_removed():
         assert body == {**plan, "favorites": None}
     assert len(calls) == 2
 
-def test_redact_fields_leaves_other_shapes_alone():
-    from app.userinfo import redact_fields
-    for raw in (b"not json", b"[1]", b'{"code":0,"data":[]}', b'{"code":0,"favorites":null}'):
-        assert redact_fields(raw, ("favorites",)) == raw
-
 def _legacy(tc, tok, body):
     return tc.post("/api/user/legacy-prefixes", content=json.dumps(body), headers={"token": tok}).json()
 
@@ -182,28 +177,6 @@ def test_user_init_not_forwarded():
     conn, user, tc, calls = build()
     r = tc.post("/api/user/init", json={}, headers={"token": _session(conn, user)})
     assert r.json()["code"] == 1 and calls == []
-
-def test_shared_account_lists_return_empty():
-    conn, user, tc, calls = build()
-    tok = _session(conn, user)
-    expect = {"userNumPlan/list": {"list": [], "total": []},
-              "averagePlan/list": {"list": []}, "doublePlan/list": {"list": []},
-              "expertFavorites/list": [], "misscontrol/list": []}
-    for path, data in expect.items():
-        assert tc.post(f"/api/{path}", json={}, headers={"token": tok}).json() == {"code": 0, "msg": "成功", "data": data}
-        assert tc.post(f"/api/{path.lower()}", json={}, headers={"token": tok}).json()["data"] == data
-    assert calls == []
-
-def test_shared_account_writes_and_details_blocked():
-    conn, user, tc, calls = build()
-    tok = _session(conn, user)
-    for path in ("userNumPlan/save", "userNumPlan/del", "userNumPlan/info",
-                 "averagePlan/save", "averagePlan/del", "averagePlan/info",
-                 "doublePlan/save", "doublePlan/del", "doublePlan/info",
-                 "expertFavorites/save", "expertFavorites/del",
-                 "misscontrol/save", "misscontrol/del", "coursemsg/save"):
-        assert tc.post(f"/api/{path}", json={}, headers={"token": tok}).json() == {"code": 1, "msg": "该功能暂不可用"}, path
-    assert calls == []
 
 def test_shared_account_lists_still_require_login():
     conn, user, tc, calls = build()
