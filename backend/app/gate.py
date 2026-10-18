@@ -14,6 +14,21 @@ BLOCKED_PATHS = {"user/updatepwd", "user/updatemobile", "user/updateinfo", "user
 # 上游下单 / 续费 / 订单查询同样以共用账号的身份进行（含「积分支付」直接扣共用账号余额，订单列表人人可见），整段拦截
 BLOCKED_PREFIXES = ("order",)
 BLOCKED = {"code": 1, "msg": "该功能暂不可用"}
+# 我的方案 / 均衡方案 / 倍投方案 / 专家关注 / 遗漏预警 / 课程报名都存在共用账号名下：人人可见可删，还带着原账号主人
+# 以前存的数据，所以都不在下面的放行清单里。其中的读取接口按「没有数据」回成功而不是报错：遗漏预警页每 30 秒刷新一次
+# 列表，报错会反复弹提示；课程报名查询报错时职业培训页不加载价格
+EMPTY_DATA = {
+    "usernumplan/list": {"list": [], "total": []},
+    "averageplan/list": {"list": []},
+    "doubleplan/list": {"list": []},
+    "expertfavorites/list": [],
+    "misscontrol/list": [],
+    "coursemsg/info": None,       # 未报名
+}
+# 返回共用账号 userInfo 的接口：响应里的 data 要换成当前账号自己的视图（userinfo.rewrite_user_info）
+USERINFO_PATHS = {"user/isexpire", "user/info"}
+# 响应顶层带着共用账号自身状态的接口 → 要置空的字段（userinfo.redact_fields）。专家页 favorites 是共用账号的关注记录
+SHARED_STATE_FIELDS = {"sportexpertplan/footballjc/expert": ("favorites",)}
 # 允许转发的路径形状：非空段、只含字母数字下划线连字符（上游所有接口都是这种形状）。
 # 上游若按 Servlet / Spring 规则处理路径，「user/updatePwd;x」「user/updatePwd.json」「user/updatePwd.」
 # 都会落到被拦的接口上，所以 ; . 空白 控制字符 反斜杠 空段 一律不转发，不去猜上游怎么规范化
@@ -22,16 +37,12 @@ SAFE_PATH = re.compile(r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*")
 # 扣费 / 改账号接口，清单外的一律不转发。客户端更新用到新接口时，要先把它加进来
 ALLOWED_PATHS = frozenset(p.lower() for p in """
 version
-averagePlan/del averagePlan/info averagePlan/list averagePlan/save
 basketballGameInfoJc/historySchedule basketballGameInfoJc/matchDetailData basketballGameInfoJc/meetingList
 basketballGameInfoJc/schedule basketballGameInfoJc/scheduleChart basketballGameInfoJc/searchOdds
 codeTrend/animalsDm codeTrend/chart
 core/serviceAi
-coursemsg/info coursemsg/save
 crawler/getList crawler/numList
 dantuo/getHot dantuo/getList
-doublePlan/del doublePlan/info doublePlan/list doublePlan/save
-expertFavorites/del expertFavorites/list expertFavorites/save
 footballHistoryClash/schedule footballHistoryMeetingJc/schedule
 footballHistorySchedule/historySchedule footballHistorySchedule/schedule
 footballHistoryScheduleJc/historySchedule footballHistoryScheduleJc/schedule
@@ -46,7 +57,6 @@ hisData/getHistoryDataList hisData/getOddsList
 lotteryNumber/getOpenNum lotteryNumber/mantissaDate lotteryNumber/mantissaTopRows lotteryNumber/topRows
 lotterynumberplan/info lotterynumberplan/list lotterynumberplan/page
 miss3dp3/list missanimal/list misshash/list
-misscontrol/del misscontrol/list misscontrol/save
 numExpert/rankingAll numExpertPlan/expect numExpertPlan/list
 omission/getOpenNumber
 planFixed/list
@@ -58,19 +68,26 @@ sportExpert/infoList sportExpert/rankingAll
 sportExpertPlan/basketballJc/plan sportExpertPlan/chartJc sportExpertPlan/football/plan
 sportExpertPlan/footballJc/expert sportExpertPlan/footballJc/plan sportExpertPlan/footballJc/planInfo
 sportExpertPlan/kLink
-user/info user/init user/isExpire user/isVip
-userNumPlan/del userNumPlan/info userNumPlan/list userNumPlan/save
+user/info user/isExpire user/isVip
 video/list videodirectory/list
 vipplan/history vipplan/list vipplan/profit vipplan/statistics
 """.split())
+
+def normalize(path: str) -> str:
+    return posixpath.normpath("/" + path).strip("/").lower()
 
 def is_blocked(path: str) -> bool:
     """形状不合规、不在放行清单、或命中拦截清单与前缀（按小写比较）的路径一律拦截。"""
     if not SAFE_PATH.fullmatch(path):
         return True
-    norm = posixpath.normpath("/" + path).strip("/").lower()
+    norm = normalize(path)
     return (norm not in ALLOWED_PATHS or norm in BLOCKED_PATHS
             or norm.split("/", 1)[0] in BLOCKED_PREFIXES)
+
+def empty_response(path: str) -> dict | None:
+    """已拦截的读取接口要回的「没有数据」响应；不是这类接口返回 None。只对 is_blocked 为真的路径调用。"""
+    norm = normalize(path)
+    return {"code": 0, "msg": "成功", "data": EMPTY_DATA[norm]} if norm in EMPTY_DATA else None
 
 def authorize_user(conn, token_header: str):
     """与 authorize 相同的校验；通过 → (User, None)，否则 (None, 错误响应)。"""

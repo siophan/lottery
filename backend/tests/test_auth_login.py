@@ -18,7 +18,7 @@ def build():
     app = create_app(settings, client=client, conn=conn, dayys=dayys)
     return conn, TestClient(app)
 
-def test_login_success_returns_our_token_and_dayys_userinfo():
+def test_login_success_returns_our_token_and_own_userinfo():
     conn, tc = build()
     db.create_user(conn, "USER01", "pw", None)
     set_points_raw(conn, "USER01", 10)
@@ -26,7 +26,8 @@ def test_login_success_returns_our_token_and_dayys_userinfo():
                                          "device": "pc", "deviceId": "x"})
     body = r.json()
     assert body["code"] == 0
-    assert body["data"]["userInfo"] == {"vip": 1}
+    info = body["data"]["userInfo"]
+    assert info["vip"] == 1 and info["username"] == "USER01"   # 功能字段沿用上游，身份换成本账号（详见 test_own_userinfo）
     tok = body["data"]["token"]
     assert db.get_session(conn, tok) is not None        # 是我方会话 token
     assert tok != "DYTOK"                                 # 不是 data-ys 的 token

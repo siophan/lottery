@@ -285,11 +285,22 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_phone_verified(conn)
     _migrate_site_texts(conn)
     _migrate_agent_tiers(conn)
+    _migrate_own_userinfo_sessions(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
                                base_url=s["base_url"], headers={}, interval_sec=5,
                                enabled=True, lotteries=s["lotteries"])
+
+def _migrate_own_userinfo_sessions(conn) -> None:
+    # 客户端 userInfo 改成本账号视图（app/userinfo.py）后，已登录的客户端本地仍缓存着共用账号的姓名、手机号、身份证，
+    # 重新登录才会换掉：升级时一次性清掉全部客户会话（settings 记标记，只做一次；后台会话不动）
+    flag = "sessions_reset:own_userinfo"
+    if conn.execute("SELECT 1 FROM settings WHERE key=?", (flag,)).fetchone():
+        return
+    conn.execute("DELETE FROM sessions")
+    conn.execute("INSERT INTO settings(key,value) VALUES(?,?)", (flag, "1"))
+    conn.commit()
 
 def _migrate_site_texts(conn) -> None:
     # 发财猫需求第 1 条：文案编辑。key 为客户端读取用的标识，创建后不可改；content 为清洗后的 HTML
