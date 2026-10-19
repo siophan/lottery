@@ -196,6 +196,25 @@ var k_util = function() {
 			}
 			zdyfa_plan = opengudingarr;
 			
+			k_util.markRows(data, play_id, opengudingarr);
+			if(opengudingarr[opengudingarr.length-1]==""||opengudingarr[opengudingarr.length-1]==null||typeof(opengudingarr[opengudingarr.length-1]) == undefined){
+				data.len=opengudingarr.length-1
+			}else{
+				data.len=opengudingarr.length
+			}
+			
+			// K线主图记下本次已标好命中的数据，新一期到达时只标新的一期、其余复用（k_2main.js kFeed）；同屏小图不记
+			if (typeof kFeed != "undefined" && onBack === window.onBack) kFeed.remember(data, play_id, opengudingarr);
+			var drawn = onBack(data);
+			// 号码处理完、图画好之后才可提交（k_submit.js）
+			if (typeof kSubmit != "undefined") kSubmit.ready();
+			return drawn;
+		},
+		
+		/**
+		 * 按方案号码给每期开奖标命中：result 为 "y"（中）/ "n"（未中）。新一期到达时只对新增的几期调用
+		 */
+		markRows : function(data,play_id,opengudingarr){
 			for(var i=0;i<data.length;i++){
 				var opennumber = data[i].opennumber;
 				if(play_id == 'animalsp3'){
@@ -247,16 +266,6 @@ var k_util = function() {
 				}
 				
 			}
-			if(opengudingarr[opengudingarr.length-1]==""||opengudingarr[opengudingarr.length-1]==null||typeof(opengudingarr[opengudingarr.length-1]) == undefined){
-				data.len=opengudingarr.length-1
-			}else{
-				data.len=opengudingarr.length
-			}
-			
-			var drawn = onBack(data);
-			// 号码处理完、图画好之后才可提交（k_submit.js）
-			if (typeof kSubmit != "undefined") kSubmit.ready();
-			return drawn;
 		},
 		
 		/**

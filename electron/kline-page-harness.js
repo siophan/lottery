@@ -59,7 +59,8 @@ function fakeFrame(n, calls) {
 
 const QUERY = { topid: '1105r5_kline', typeId: '1105r5', pid: '1105r5', code: '201', cat: '11x5', title: 'K线走势' };
 
-function load({ query = QUERY, now = 1700000000000, stored = {} } = {}) {
+// drawFeed：给定时挂到 window.drawFeed，并提供 fetch 与 config.apiURL，用来测开奖推送（startFeed）
+function load({ query = QUERY, now = 1700000000000, stored = {}, drawFeed } = {}) {
   const src = evalSources(fs.readFileSync(CHUNK, 'utf8')).find((s) => s.includes('src/views/templetes/kLine.vue?vue&type=template'));
   assert.ok(src, 'kLine.vue 模块未找到');
   const sent = [];
@@ -74,16 +75,18 @@ function load({ query = QUERY, now = 1700000000000, stored = {} } = {}) {
     addEventListener() {}, removeEventListener() {},
     outerWidth: 1600, outerHeight: 900,
   };
+  if (drawFeed) winObj.drawFeed = drawFeed;
   const documentObj = { getElementById: (id) => frames[Number(String(id).replace('iframeId', ''))] || null };
   const FakeDate = { now: () => now };
   const fn = new vm.Script('(function(module, __webpack_exports__, __webpack_require__){' + src + '\n})')
-    .runInNewContext({ window: winObj, document: documentObj, JSON, Object, Math, String, Number, Array, Date: FakeDate, Event: function (t) { this.type = t; }, setTimeout: (f) => timers.push(f), clearTimeout() {}, console, localStorage: { setItem: (k, v) => { store[k] = v; }, getItem: (k) => store[k] } });
+    .runInNewContext({ window: winObj, document: documentObj, JSON, Object, Math, String, Number, Array, Date: FakeDate, Event: function (t) { this.type = t; }, setTimeout: (f) => timers.push(f), clearTimeout() {}, console, fetch: drawFeed ? () => {} : undefined, localStorage: { setItem: (k, v) => { store[k] = v; }, getItem: (k) => store[k] } });
   const exp = {};
   const normalizer = { a: (o, render) => ({ exports: Object.assign({}, o, { render }) }) };
   const planFixedList = () => ({ then: (f) => { f({ code: 0, data: [{ id: 9, name: '固定1', content: '[]' }] }); return { catch() {} }; } });
   const req = Object.assign((id) => {
     if (id === '2877') return normalizer;
     if (id === 'b456') return { p: planFixedList };
+    if (id === 'f121') return { apiURL: 'https://api.test/api' };
     return { a: {} };
   }, { r() {}, d(e, n, g) { Object.defineProperty(e, n, { get: g, enumerable: true }); } });
   fn({ exports: exp }, exp, req);

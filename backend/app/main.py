@@ -31,6 +31,8 @@ from .routes import admin_staff as admin_staff_routes
 from .routes import admin_segments as admin_segments_routes
 from .routes import admin_points as admin_points_routes
 from .routes import texts as texts_routes
+from .routes import draws as draws_routes
+from .draw_feed import DrawFeedHub
 
 METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
 
@@ -39,6 +41,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        app.state.draw_feed.install_exit_hook()     # 退出时先结束推送长连接，否则 uvicorn 一直等它们
         if app.state.settings.collector_enabled:
             try:
                 await app.state.collector.start()
@@ -59,6 +62,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
                         await task
                     except asyncio.CancelledError:
                         pass
+                await app.state.draw_feed.stop()
                 await app.state.collector.stop()
             finally:       # collector.stop() 抛异常也要关掉短信客户端
                 if app.state.sms_client is not None:
@@ -103,11 +107,15 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
     # 会员各自的方案 / 关注 / 遗漏监控 / 模拟练习（member_data.py）
     app.state.member = MemberData(app.state.db_conn, app.state.client, app.state.dayys, settings.from_id)
     app.state.collector = collector or Collector(app.state.db_conn, enabled=settings.collector_enabled)
+    # 开奖推送（K线即时刷新）：我方数据源入库后由采集器通知，上游彩种由推送模块自己查（draw_feed.py）
+    app.state.draw_feed = DrawFeedHub(app.state.db_conn, app.state.client, settings.from_id)
+    app.state.collector.on_insert = app.state.draw_feed.notify_ds
 
     app.include_router(auth_routes.router, prefix="/api")   # 先于 catch-all
     app.include_router(ds_routes.router, prefix="/api")     # 多数据源，先于 catch-all
     app.include_router(user_routes.router, prefix="/api")   # 用户信息区，先于 catch-all
     app.include_router(texts_routes.router, prefix="/api")  # 文案读取，先于 catch-all
+    app.include_router(draws_routes.router, prefix="/api")  # 开奖推送，先于 catch-all
     app.include_router(local_router, prefix="/api")
     app.include_router(admin_routes.router, prefix="/admin")
     app.include_router(admin_ds_routes.router, prefix="/admin")

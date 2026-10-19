@@ -44,6 +44,24 @@ var kSync = function() {
 		el.style.display = "";
 	}
 
+	// 按数据来源选接口：尾数 → mantissaTopRows；requestUrl（数据源）→ GET 该地址；否则 topRows
+	function send(src, done, failed) {
+		if (given(src.mantissa)) {
+			k_util.request('/lotteryNumber/mantissaTopRows', {
+				code: src.code,
+				rows: src.rows,
+				mantissa: src.mantissa
+			}, "", done, true, failed);
+		} else if (given(src.requestUrl, true)) {
+			k_util.requestA(src.requestUrl + '?code=' + src.code + "&rows=" + src.rows, done, failed);
+		} else {
+			k_util.request('/lotteryNumber/topRows', {
+				code: src.code,
+				rows: src.rows
+			}, "", done, true, failed);
+		}
+	}
+
 	function ok() {
 		var el = document.getElementById(BOX_ID);
 		if (el) el.style.display = "none";
@@ -57,7 +75,7 @@ var kSync = function() {
 			var stale = function() {
 				return !!isCurrent && !isCurrent();
 			};
-			var done = function(res) {
+			send(src, function(res) {
 				if (stale()) return;
 				if (!res || !Array.isArray(res.data)) {
 					fail(retry);
@@ -65,25 +83,19 @@ var kSync = function() {
 				}
 				ok();
 				successRes(res);
-			};
-			var failed = function() {
+			}, function() {
 				if (stale()) return;
 				fail(retry);
-			};
-			if (given(src.mantissa)) {
-				k_util.request('/lotteryNumber/mantissaTopRows', {
-					code: src.code,
-					rows: src.rows,
-					mantissa: src.mantissa
-				}, "", done, true, failed);
-			} else if (given(src.requestUrl, true)) {
-				k_util.requestA(src.requestUrl + '?code=' + src.code + "&rows=" + src.rows, done, failed);
-			} else {
-				k_util.request('/lotteryNumber/topRows', {
-					code: src.code,
-					rows: src.rows
-				}, "", done, true, failed);
-			}
+			});
+		},
+		/**
+		 * 只取最新几期（新开奖兜底刷新用，见 kFeed.fetchLatest）：不显示失败状态，失败时调 failed
+		 */
+		fetchLatest : function(src, done, failed) {
+			send(src, function(res) {
+				if (res && Array.isArray(res.data)) done(res.data);
+				else failed();
+			}, failed);
 		}
 	};
 }();
