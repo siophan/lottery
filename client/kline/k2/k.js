@@ -268,7 +268,8 @@ function macdFunction() {
 	} else {
 		localStorage.setItem(userName+"_macdK","");
 	}
-	loadingData();
+	// 用已有数据重算重画，不重新取数；还没画好时照旧整屏加载
+	if (!kFeed.redraw()) loadingData();
 }
 //KDJ
 function kdjFunction() {
@@ -279,7 +280,7 @@ function kdjFunction() {
 	} else {
 		localStorage.setItem(userName+"_kdjK", "")
 	}
-	loadingData();
+	if (!kFeed.redraw()) loadingData();
 }
 /**
  * @创建人：关宏岩

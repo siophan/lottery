@@ -39,6 +39,10 @@ var kSubmit = function() {
 		isCurrent : function(s) {
 			return s === seq;
 		},
+		// 当前画图序号（新一期追加时判断缓存是不是本次画图的）
+		current : function() {
+			return seq;
+		},
 		// getyesAndno 拿到当前方案的号码
 		ready : function() {
 			ready = hasPlan();

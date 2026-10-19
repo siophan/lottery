@@ -33,6 +33,7 @@ class Collector:
         self._tasks: dict[int, asyncio.Task] = {}
         self._backfills: dict[tuple[int, str], asyncio.Task] = {}   # (source_id, lottery_code) → 回填任务
         self._locks: dict[int, asyncio.Lock] = {}                   # 按源串行化 reload，避免并发重建出孤儿任务
+        self.on_insert = None       # (source_id, lottery_code) → None；有新开奖入库时调用（开奖推送，见 draw_feed.py）
 
     async def _fetch_one(self, src, lot, rows: int = FETCH_ROWS, timeout: float = FETCH_TIMEOUT) -> None:
         try:
@@ -57,8 +58,10 @@ class Collector:
             draws = parse(obj)
         except ParseError as e:
             raise FetchError(str(e))
-        db.insert_draws(self.conn, src.id, lot.lottery_code, draws, int(time.time()))
+        added = db.insert_draws(self.conn, src.id, lot.lottery_code, draws, int(time.time()))
         db.prune_draws(self.conn, src.id, lot.lottery_code, KEEP_ROWS)
+        if added and self.on_insert is not None:
+            self.on_insert(src.id, lot.lottery_code)
 
     async def tick(self, source_id: int) -> bool:
         """拉一轮该源的全部彩种；任一彩种失败不影响其余彩种。返回本轮是否全部成功。"""

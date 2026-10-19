@@ -220,36 +220,12 @@ function loadingData(f) {
 			main.style.height = window.innerHeight * 0.84 + 'px';
 			myChart.resize();
 		};
-		zgValue = [], sgValue = [], xgValue = [], qhSum = [], difList = [],
-			deaList = [],
-			macdList = [];
-		openNumber = [];
-		kList = [], dList = [], jList = [], zdjList = [], zgjList = [], zgValue = [], sgValue = [], xgValue = [],
-			zqValue = [],
-			bcnCnum = [];
-		sunZs = 0, faZs = 0, hm1 = 0, bcfw = 20, zgz1 = 0, hlxzh = 0, xs = 2, sumC = 0, kssc = 0, ksc = 0; // 步长范围内所有c之和
-		kdjZq = 9, zdj = 0, zgj = 0, kdjK = 50, kdjD = 50, syqK = 0, syqD = 0, macdZb = 0, sygParam = 0, zqNum = 0,
-			cwNum =
-			0;
-		syqEma12 = 0,
-			syqEma26 = 0,
-			syqDea = 0;
+		resetCalc();
 		var fa = k.planMode(); // 关联到保存方案时按自定义方案取数
 		var Id = "";
 		// typeZs();
 		wfType = $('#wf').val();
-		let info = localStorage.getItem("klink_info");
-		var data;
-		if (typeof(info) == undefined || info == "" || info == null) {
-			data = {};
-			data.dataRange = 120;
-			data.step = 20;
-			data.coefficient = 2;
-			data.macd = 0;
-			data.cycle = 9;
-		} else {
-			data = JSON.parse(info);
-		}
+		var data = calcSettings();
 		sjfw = data.dataRange; // /数据范围
 		bcfw = data.step; // /步长范围
 		xs = data.coefficient; // /系数范围
@@ -371,6 +347,156 @@ function loadingData(f) {
 }
 
 /**
+ * 清空各指标的累计状态（K值、布林、MACD、KDJ），每次重画前调用
+ */
+function resetCalc() {
+	zgValue = [], sgValue = [], xgValue = [], qhSum = [], difList = [],
+		deaList = [],
+		macdList = [];
+	openNumber = [];
+	kList = [], dList = [], jList = [], zdjList = [], zgjList = [], zgValue = [], sgValue = [], xgValue = [],
+		zqValue = [],
+		bcnCnum = [];
+	sunZs = 0, faZs = 0, hm1 = 0, bcfw = 20, zgz1 = 0, hlxzh = 0, xs = 2, sumC = 0, kssc = 0, ksc = 0; // 步长范围内所有c之和
+	kdjZq = 9, zdj = 0, zgj = 0, kdjK = 50, kdjD = 50, syqK = 0, syqD = 0, macdZb = 0, sygParam = 0, zqNum = 0,
+		cwNum =
+		0;
+	syqEma12 = 0,
+		syqEma26 = 0,
+		syqDea = 0;
+}
+
+// 指标参数（设置参数弹窗存在 klink_info 里）
+function calcSettings() {
+	var data = null;
+	try {
+		data = JSON.parse(localStorage.getItem("klink_info"));
+	} catch (e) {}
+	if (!data) {
+		data = { dataRange: 120, step: 20, coefficient: 2, macd: 0, cycle: 9 };
+	}
+	return data;
+}
+
+/**
+ * 新一期开奖到达时增量刷新本屏（开奖推送，见 client/draw-feed.js 和 kLine.vue pushDraws）：
+ * 上次画图时已标好命中的数据记在 cache 里，新一期只标它自己的命中，拼到最前面、挤掉最旧的一期，
+ * 然后在内存里重算指标、在原图上更新（不清空图表、不重新取数）。
+ * 指标要整段重算：K 值的步长取决于整段数据里的命中次数，窗口滑动一期，每一期的值都会变，只算最后一期会画错。
+ * 这段计算只是几百期的循环，耗时在毫秒级。
+ * 接不上（本屏还没画完、换了方案、跳了期、固定方案 f001/f002 不走这里）时整屏重载。
+ */
+var kFeed = function() {
+	var LATEST_ROWS = 5;
+	var cache = null; // {seq, rows（新的在前，已标命中）, len, playId, plan, size, info, flags}
+
+	// 指标参数与 MACD / KDJ 显示开关都存在 localStorage，六屏共用：别的屏改了，本屏的缓存也要跟着判断
+	function info() {
+		return localStorage.getItem("klink_info");
+	}
+
+	function flags() {
+		var userName = localStorage.getItem("userName");
+		return (localStorage.getItem(userName + "_macdK") || "") + "|" + (localStorage.getItem(userName + "_kdjK") || "");
+	}
+
+	function expects(rows) {
+		var m = {};
+		for (var i = 0; i < rows.length; i++) m[rows[i].expect] = true;
+		return m;
+	}
+
+	function valid() {
+		return !!cache && cache.seq === kSubmit.current() && cache.rows.length > 0;
+	}
+
+	// 用 cache 里的数据重画。追加新一期时图表结构不变，不清空，ECharts 在原图上按新数据更新；
+	// 切换 MACD / KDJ 会增减子图，要先清空，否则旧子图留在图上
+	function draw(fresh) {
+		if (fresh) myChart.clear();
+		cache.flags = flags();
+		resetCalc();
+		var s = calcSettings();
+		sjfw = s.dataRange, bcfw = s.step, xs = s.coefficient, macdZb = s.macd, kdjZq = s.cycle;
+		var data = cache.rows.slice();
+		data.len = cache.len;
+		onBack(data);
+	}
+
+	return {
+		// getyesAndno 标好命中、画图之前调用
+		remember : function(data, playId, plan) {
+			cache = {
+				seq: kSubmit.current(),
+				rows: data.slice(),
+				len: data.len,
+				playId: playId,
+				plan: plan,
+				size: Math.max(Number(sjfw) || 0, data.length),
+				info: info(),
+				flags: flags()
+			};
+		},
+		/**
+		 * msg.rows：新的在前；msg.prev：推送时为新增之前那一期的期号（工作台轮询兜底时不带，rows 是最新几期）。
+		 * 返回 "noop"（没有新的）/"append"（已增量画好）/"reload"（接不上，已整屏重载）
+		 */
+		apply : function(msg) {
+			var list = (msg && Array.isArray(msg.rows)) ? msg.rows.filter(function(r) {
+				return r && r.expect != null && r.opennumber != null;
+			}) : [];
+			if (!list.length) return "noop";
+			// 没画好、或别的屏改过参数（数据范围等，期数都变了）：整屏重载
+			if (!valid() || cache.info !== info()) {
+				loadingData();
+				return "reload";
+			}
+			var have = expects(cache.rows);
+			var top = cache.rows[0].expect;
+			var fresh = null;
+			for (var i = 0; i < list.length; i++) {
+				if (list[i].expect == top) {
+					fresh = list.slice(0, i);
+					break;
+				}
+			}
+			if (fresh === null) {
+				if (msg.prev !== undefined && msg.prev !== null && msg.prev == top) {
+					fresh = list;
+				} else if (list.every(function(r) { return have[r.expect]; })) {
+					fresh = []; // 本屏已经比这条消息新（例如刚整屏重载过）
+				} else {
+					loadingData();
+					return "reload";
+				}
+			}
+			fresh = fresh.filter(function(r) { return !have[r.expect]; });
+			if (!fresh.length) return "noop";
+			var added = fresh.map(function(r) { return $.extend({}, r); });
+			k_util.markRows(added, cache.playId, cache.plan);
+			cache.rows = added.concat(cache.rows).slice(0, cache.size);
+			draw(cache.flags !== flags()); // 别的屏切换过 MACD / KDJ：子图有增减，清空重画
+			return "append";
+		},
+		// 切换 MACD / KDJ 显示：用已有数据重画，不重新取数。没有可用缓存时返回 false
+		redraw : function() {
+			if (!valid()) return false;
+			draw(true);
+			return true;
+		},
+		// 取最新几期（工作台轮询发现新一期时由 kLine.vue 调一个屏来取，再分给各屏）
+		fetchLatest : function(done, failed) {
+			kSync.fetchLatest({
+				code: main_id,
+				rows: LATEST_ROWS,
+				mantissa: getQueryVariable("mantissa"),
+				requestUrl: requestUrl
+			}, done, failed);
+		}
+	};
+}();
+
+/**
  * @创建人：关宏岩
  * @备注：回调方法
  */
@@ -486,6 +612,10 @@ function addMainData(data23) {
 	var ma1 = 0;
 	var bc = jsbcr5();
 	var pjyl = "";
+	// 隐藏的指标不算（与 k_line.js 判断一致：标记为空 = 显示）；切换显示时 kFeed.redraw 用已有数据重算
+	var userName = localStorage.getItem("userName");
+	var macdOn = !localStorage.getItem(userName + "_macdK");
+	var kdjOn = !localStorage.getItem(userName + "_kdjK");
 	// console.log("理论遗漏："+bc)
 	var yl1 = 0;
 	for (var i = 0; i < data23.length; i++) { // 计算k线
@@ -574,6 +704,7 @@ function addMainData(data23) {
 		zg1 = parseFloat(zg1).toFixed(2);
 		zgz1 = zg1;
 		// 第二个图表
+		if (macdOn) {
 		var dqqEma12 = (syqEma12 * 11 / 13) + (spjC * 2 / 13);
 		var dqqEma26 = (syqEma26 * 25 / 27) + (spjC * 2 / 27);
 		syqEma12 = dqqEma12;
@@ -585,6 +716,8 @@ function addMainData(data23) {
 		deaList.push(dqDea);
 		macdList.push(dqMacd);
 		syqDea = dqDea;
+		}
+		if (kdjOn) {
 		var js2 = i - (kdjZq - 1);
 		if (js2 > 0) {
 			zdjList.splice(0, 1);
@@ -617,6 +750,7 @@ function addMainData(data23) {
 		jList.push(kdjJ);
 		syqK = kdjK;
 		syqD = kdjD;
+		}
 	}
 
 	ktitle = faName + "【" + faZs + "组合    实出：" + ksc + "/" + kssc // /右上角显示信息
