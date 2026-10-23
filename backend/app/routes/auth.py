@@ -141,6 +141,7 @@ async def login(request: Request):
     request.app.state.upstream_names.remember(conn, upstream_info, now)   # 供客户端找回旧编号下的本地数据（routes/user.py）
     user_info = client_user_info(upstream_info, user)
 
+    db.mark_first_login(conn, user.id, now)     # 首次登录才开始计费；之后的登录不变
     token = db.create_session(conn, user.id, settings.session_ttl)
     # points：客户端据此在登录后提示低积分（0 < points < 7）
     return JSONResponse({"code": 0, "data": {"token": token, "userInfo": user_info, "points": user.points}})
@@ -228,4 +229,4 @@ async def onboard(request: Request):
                                   audit_detail={"phone": db.mask_phone(phone),
                                                 "phoneVerified": ONBOARD_SMS_REQUIRED}):
         return JSONResponse(_TICKET_INVALID)
-    return JSONResponse({"code": 0, "msg": "密码修改与手机号绑定成功，请使用新密码重新登录"})
+    return JSONResponse({"code": 0, "msg": "设置成功！请用刚设置的新密码登录，初始密码 123456 已失效"})

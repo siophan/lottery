@@ -53,6 +53,21 @@ def test_migration_keeps_existing_accounts_at_zero_without_billing(tmp_path):
         assert u.first_activated_at == activated          # 不得被 _migrate_users 式回填
     assert conn.execute("SELECT COUNT(*) FROM points_ledger").fetchone()[0] == 0
 
+def test_first_login_migration_backfills_accounts_that_have_used_the_app():
+    conn = db.connect(":memory:"); db.init_db(conn)
+    conn.execute("ALTER TABLE users DROP COLUMN first_login_at")     # 模拟升级前的库
+    rows = (("ONB", 100, 200), ("SESS", 300, None), ("NEVER", 400, None), ("PEND", None, None))
+    for code, act, onb in rows:
+        conn.execute("INSERT INTO users(code,password_hash,salt,status,created_at,first_activated_at,onboarded_at)"
+                     " VALUES(?,'h','s','active',1,?,?)", (code, act, onb))
+    sid = conn.execute("SELECT id FROM users WHERE code='SESS'").fetchone()[0]
+    conn.execute("INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES('t',?,1,2)", (sid,))
+    conn.commit()
+    db.init_db(conn); db.init_db(conn)                                 # 幂等
+    got = {c: db.get_user_by_code(conn, c).first_login_at for c, _, _ in rows}
+    # 完成过首登或有过会话的账号视为已登录过，计费不受影响；从没登录过的等首次登录再开始扣
+    assert got == {"ONB": 200, "SESS": 300, "NEVER": None, "PEND": None}
+
 def test_balances_can_never_go_negative_at_db_level():
     conn = db.connect(":memory:"); db.init_db(conn)
     db.create_user(conn, "U1", "pw", None)

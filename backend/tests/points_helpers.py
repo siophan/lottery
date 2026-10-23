@@ -28,10 +28,10 @@ def ledger(conn, **where) -> list[dict]:
     return [dict(r) for r in conn.execute(sql + " ORDER BY id", args)]
 
 def activated_user(conn, code: str, points: int = 0, *, now: int = NOW) -> db.User:
-    """已激活 + 已完成首登的账号（create_user 非 pending），可选设置余额。"""
+    """已激活 + 已完成首登 + 登录过（可计费）的账号（create_user 非 pending），可选设置余额。"""
     u = db.create_user(conn, code, "pw", None)
-    conn.execute("UPDATE users SET first_activated_at=?, activated_at=?, onboarded_at=? WHERE id=?",
-                 (now, now, now, u.id))
+    conn.execute("UPDATE users SET first_activated_at=?, activated_at=?, onboarded_at=?, first_login_at=?"
+                 " WHERE id=?", (now, now, now, now, u.id))
     conn.commit()
     if points:
         set_points_raw(conn, code, points)

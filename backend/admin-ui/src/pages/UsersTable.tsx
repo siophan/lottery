@@ -47,6 +47,9 @@ import UserProfileLink from './UserProfileLink'
 const AMOUNT_RULES = [{ required: true, message: '请输入积分数量' }]
 
 // 后台人员：全部账号 + 全部操作（含加分 / 扣分 / 批量充值）；
+// 用户常把首登弹窗当成登录失败、改完密码又输 123456：激活成功时提示代理转告完整步骤
+const ACTIVATED_MSG = '已激活。请告知用户：初始密码 123456，首次登录需修改密码并绑定手机号，之后用新密码登录'
+
 // 代理：只读本人名下账号，可激活待激活账号、暂停 / 恢复（管理员暂停或封禁的不能恢复）、
 // 用自身积分给名下账号充值 / 批量充值。
 export default function UsersTable({ me }: { me: Me }) {
@@ -68,10 +71,10 @@ export default function UsersTable({ me }: { me: Me }) {
   }, [isAgent])
 
   // 统一处理接口结果：成功提示并刷新，失败优先显示后端 error 文案。
-  const run = async (p: Promise<ApiResult>, okMsg: string, failMsg: string) => {
+  const run = async (p: Promise<ApiResult>, okMsg: string, failMsg: string, okSeconds?: number) => {
     const r = await p
     if (r.ok) {
-      message.success(okMsg)
+      message.success(okMsg, okSeconds)
       reload()
     } else {
       message.error(r.error || failMsg)
@@ -192,7 +195,7 @@ export default function UsersTable({ me }: { me: Me }) {
             title="激活后初始密码为 123456，确认激活？"
             okText="激活"
             cancelText="取消"
-            onConfirm={() => run(activateUser(record.code), '已激活', '激活失败')}
+            onConfirm={() => run(activateUser(record.code), ACTIVATED_MSG, '激活失败', 8)}
           >
             <a>激活</a>
           </Popconfirm>
