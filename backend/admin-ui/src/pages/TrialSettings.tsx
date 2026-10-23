@@ -3,7 +3,7 @@ import { ProCard, ProForm, ProFormDigit, ProFormSwitch } from '@ant-design/pro-c
 import { App, Descriptions, Spin } from 'antd'
 import { getTrialSettings, saveTrialSettings, TrialSettings as Trial } from '../api'
 
-// 体验期设置（仅后台人员）：只有开关与赠送分数可改；首次扣减延迟与扣减周期固定 24 小时，只读显示。
+// 体验期设置（仅后台人员）：只有开关与赠送分数可改；首次扣减（首次登录后）与扣减周期固定 24 小时，只读显示。
 export default function TrialSettings() {
   const { message } = App.useApp()
   const [cfg, setCfg] = useState<Trial | null>(null)
@@ -43,7 +43,7 @@ export default function TrialSettings() {
         />
       </ProForm>
       <Descriptions column={1} size="small" style={{ marginTop: 24 }} title="扣减规则（固定）">
-        <Descriptions.Item label="首次扣减延迟">{cfg.first_charge_delay_hours} 小时</Descriptions.Item>
+        <Descriptions.Item label="首次扣减">首次登录后 {cfg.first_charge_delay_hours} 小时（激活后未登录不扣）</Descriptions.Item>
         <Descriptions.Item label="扣减周期">每 {cfg.charge_period_hours} 小时扣 1 分</Descriptions.Item>
       </Descriptions>
     </ProCard>

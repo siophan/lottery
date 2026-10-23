@@ -19,13 +19,36 @@ def enable_trial(conn, points=7):
 
 # ---------------- 首次激活：计费起点与体验赠送 ----------------
 
-def test_activation_sets_charge_anchor_without_trial_by_default():
+def test_activation_does_not_start_billing_and_no_trial_by_default():
     conn, _ = build_app()
     db.create_user(conn, "P1", "pw", None, pending=True)
     assert db.activate_user(conn, "P1", NOW) == "ok"
     u = user(conn, "P1")
-    assert (u.points, u.charge_anchor_at, u.next_charge_at, u.trial_granted_at) == (0, NOW, NOW + DAY, None)
+    assert (u.points, u.charge_anchor_at, u.next_charge_at, u.first_login_at, u.trial_granted_at) == \
+        (0, None, None, None, None)
     assert ledger(conn) == [] and audit(conn, "points.trial") == []
+
+def test_trial_points_are_not_charged_before_first_login():
+    conn, _ = build_app()
+    enable_trial(conn, 7)
+    db.create_user(conn, "P1", "pw", None, pending=True)
+    db.activate_user(conn, "P1", NOW)
+    for d in range(1, 10):                                          # 激活后久不登录：体验积分原样保留
+        assert run(conn, NOW + d * DAY) == {"stopped": 0, "started": 0, "reset": 0, "charged": 0, "suspended": 0}
+    assert points_of(conn, "P1") == 7 and user(conn, "P1").next_charge_at is None
+
+def test_first_login_starts_billing_once():
+    conn, _ = build_app()
+    enable_trial(conn, 7)
+    db.create_user(conn, "P1", "pw", None, pending=True)
+    db.activate_user(conn, "P1", NOW)
+    assert db.mark_first_login(conn, user(conn, "P1").id, NOW + 5 * DAY) is True
+    u = user(conn, "P1")
+    assert (u.first_login_at, u.charge_anchor_at, u.next_charge_at) == (NOW + 5 * DAY, NOW + 5 * DAY, NOW + 6 * DAY)
+    assert db.mark_first_login(conn, u.id, NOW + 5 * DAY + 100) is False   # 之后的登录不重置计费周期
+    assert user(conn, "P1").next_charge_at == NOW + 6 * DAY
+    assert run(conn, NOW + 6 * DAY - 1)["charged"] == 0
+    assert run(conn, NOW + 6 * DAY)["charged"] == 1 and points_of(conn, "P1") == 6
 
 def test_activation_grants_trial_once_when_enabled():
     conn, _ = build_app()
@@ -60,7 +83,7 @@ def test_trial_disabled_later_does_not_backfill():
     db.create_user(conn, "P1", "pw", None, pending=True)
     db.activate_user(conn, "P1", NOW)                               # 关闭时激活
     enable_trial(conn)                                              # 之后开启：不补发
-    assert user(conn, "P1").points == 0 and run(conn, NOW + 10)["stopped"] == 1
+    assert user(conn, "P1").points == 0 and run(conn, NOW + 10)["charged"] == 0
 
 def test_failed_activation_rolls_back_trial():
     conn, _ = build_app()
@@ -73,11 +96,12 @@ def test_failed_activation_rolls_back_trial():
 
 # ---------------- 扣减 Worker ----------------
 
-def test_charges_one_point_every_24h_from_activation():
+def test_charges_one_point_every_24h_from_first_login():
     conn, _ = build_app()
     enable_trial(conn, 3)
     db.create_user(conn, "P1", "pw", None, pending=True)
-    db.activate_user(conn, "P1", NOW)
+    db.activate_user(conn, "P1", NOW - DAY)                         # 激活与首次登录相隔一天：从登录起算
+    db.mark_first_login(conn, user(conn, "P1").id, NOW)
     assert run(conn, NOW + DAY - 1)["charged"] == 0
     assert run(conn, NOW + DAY)["charged"] == 1
     assert run(conn, NOW + DAY + 60)["charged"] == 0                # 同一周期不重复扣
@@ -91,6 +115,7 @@ def test_late_but_under_24h_still_charges_on_schedule():
     enable_trial(conn, 3)
     db.create_user(conn, "P1", "pw", None, pending=True)
     db.activate_user(conn, "P1", NOW)
+    db.mark_first_login(conn, user(conn, "P1").id, NOW)
     assert run(conn, NOW + 2 * DAY - 1)["charged"] == 1             # 逾期 24h-1 秒
     assert user(conn, "P1").next_charge_at == NOW + 2 * DAY          # 周期不漂移
 
@@ -99,6 +124,7 @@ def test_overdue_24h_or_more_resets_without_charging():
     enable_trial(conn, 3)
     db.create_user(conn, "P1", "pw", None, pending=True)
     db.activate_user(conn, "P1", NOW)
+    db.mark_first_login(conn, user(conn, "P1").id, NOW)
     res = run(conn, NOW + 2 * DAY)                                  # 逾期正好 24h（Worker 停机）
     assert (res["reset"], res["charged"]) == (1, 0)
     u = user(conn, "P1")
@@ -109,6 +135,7 @@ def test_charge_to_zero_suspends_then_stops():
     enable_trial(conn, 1)
     db.create_user(conn, "P1", "pw", None, pending=True)
     db.activate_user(conn, "P1", NOW)
+    db.mark_first_login(conn, user(conn, "P1").id, NOW)
     assert run(conn, NOW + DAY)["suspended"] == 1
     [e] = audit(conn, "points.suspended")
     assert (e["actor_type"], e["target"]) == ("system", "P1")

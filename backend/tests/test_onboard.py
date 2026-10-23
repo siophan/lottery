@@ -259,7 +259,7 @@ def test_onboard_success_full_flow():
     t = ticket_for(conn, u)
     code = issue_code(conn)
     r = submit(tc, t, smsCode=code)
-    assert r == {"code": 0, "msg": "密码修改与手机号绑定成功，请使用新密码重新登录"}
+    assert r == {"code": 0, "msg": "设置成功！请用刚设置的新密码登录，初始密码 123456 已失效"}
 
     after = db.get_user_by_code(conn, "USER01")
     assert after.phone == PHONE and after.onboarded_at is not None

@@ -130,3 +130,29 @@ def test_login_onboarded_user_still_succeeds():
     db.create_user(conn, "USER01", "pw", None)
     set_points_raw(conn, "USER01", 10)
     assert tc.post("/api/auth/login", json={"username": "USER01", "password": "pw"}).json()["code"] == 0
+
+# ---------------- 计费从首次登录开始 ----------------
+
+def test_first_successful_login_starts_billing_and_later_logins_keep_it():
+    conn, tc = build()
+    db.create_user(conn, "USER01", "pw", None)
+    set_points_raw(conn, "USER01", 7)
+    assert db.get_user_by_code(conn, "USER01").next_charge_at is None
+    assert tc.post("/api/auth/login", json={"username": "USER01", "password": "pw"}).json()["code"] == 0
+    u = db.get_user_by_code(conn, "USER01")
+    assert u.first_login_at is not None
+    assert (u.charge_anchor_at, u.next_charge_at) == (u.first_login_at, u.first_login_at + 86400)
+    conn.execute("UPDATE users SET next_charge_at=12345 WHERE code='USER01'"); conn.commit()
+    assert tc.post("/api/auth/login", json={"username": "USER01", "password": "pw"}).json()["code"] == 0
+    u2 = db.get_user_by_code(conn, "USER01")
+    assert (u2.first_login_at, u2.next_charge_at) == (u.first_login_at, 12345)
+
+def test_first_login_dialog_does_not_start_billing():
+    conn, tc = build()
+    db.create_user(conn, "Z0000001", "pw", None, pending=True)
+    db.activate_user(conn, "Z0000001", int(time.time()))
+    set_points_raw(conn, "Z0000001", 7)
+    r = tc.post("/api/auth/login", json={"username": "Z0000001", "password": "123456"}).json()
+    assert r["code"] == 10030
+    u = db.get_user_by_code(conn, "Z0000001")
+    assert (u.first_login_at, u.next_charge_at) == (None, None)

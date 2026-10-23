@@ -9,8 +9,8 @@ from .db_agents import begin_write
 
 CHARGE_INTERVAL = 60
 PERIOD = db_points.CHARGE_PERIOD
-# 可计费账号：已激活、使用控制正常、未过到期时间、余额 > 0（与 gate 的到期判定一致：expires_at < now 为已到期）
-_CHARGEABLE = ("first_activated_at IS NOT NULL AND status='active'"
+# 可计费账号：已激活且登录过、使用控制正常、未过到期时间、余额 > 0（与 gate 的到期判定一致：expires_at < now 为已到期）
+_CHARGEABLE = ("first_activated_at IS NOT NULL AND first_login_at IS NOT NULL AND status='active'"
                " AND (expires_at IS NULL OR expires_at >= :now) AND points > 0")
 # 可计费代理（需求回复第 12 条，代理自身账号同样按天扣分）：资格激活、未回收、余额 > 0
 _AGENT_CHARGEABLE = "status='active' AND recycled_at IS NULL AND points > 0"

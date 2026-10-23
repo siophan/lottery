@@ -36,6 +36,7 @@ class User:
     nickname: str | None = None             # 自定义昵称；None = 使用默认昵称（子项目 D）
     status_by: str | None = None            # 暂停 / 封禁的操作方：admin | agent；None = 正常或存量（按 admin 处理）
     phone_verified_at: int | None = None    # 手机号经短信验证的时间；None = 未验证（短信关闭期间首登绑定的号）
+    first_login_at: int | None = None       # 首次登录成功（拿到会话）的时间；None = 从未登录，不计费
 
 @dataclass
 class Session:
@@ -283,6 +284,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_status_by(conn)
     _migrate_agent_charge(conn)
     _migrate_phone_verified(conn)
+    _migrate_first_login(conn)
     _migrate_site_texts(conn)
     _migrate_agent_tiers(conn)
     _migrate_own_userinfo_sessions(conn)
@@ -470,6 +472,23 @@ def _migrate_phone_verified(conn) -> None:
             raise
     conn.commit()
 
+def _migrate_first_login(conn) -> None:
+    # 计费从首次登录开始（激活后久不登录，体验积分不再被白白扣光）。新加列时回填：完成过首登或有过会话的
+    # 已激活账号视为登录过，沿用原计费不受影响；从没登录过的留 NULL，等首次登录再起算。
+    if "first_login_at" not in {r["name"] for r in conn.execute("PRAGMA table_info(users)")}:
+        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN first_login_at INTEGER")
+            conn.execute("UPDATE users SET first_login_at=COALESCE(onboarded_at, first_activated_at)"
+                         " WHERE first_activated_at IS NOT NULL AND (onboarded_at IS NOT NULL"
+                         " OR EXISTS(SELECT 1 FROM sessions s WHERE s.user_id=users.id))")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    conn.commit()
+
 def mask_phone(phone: str | None) -> str | None:
     if phone is None:
         return None
@@ -481,7 +500,7 @@ def _row_to_user(r: sqlite3.Row) -> User:
                 r["first_activated_at"], r["activated_at"], r["phone"], r["onboarded_at"],
                 r["agent_id"], r["activated_by_agent_id"], r["agent_chain_json"],
                 r["points"], r["charge_anchor_at"], r["next_charge_at"], r["trial_granted_at"],
-                r["nickname"], r["status_by"], r["phone_verified_at"])
+                r["nickname"], r["status_by"], r["phone_verified_at"], r["first_login_at"])
 
 def get_user_by_code(conn, code: str) -> User | None:
     r = conn.execute("SELECT * FROM users WHERE code=?", (code.upper(),)).fetchone()
@@ -525,8 +544,8 @@ def activate_user(conn, code: str, now: int, *, by_agent_id: int | None = None) 
     """首次激活。by_agent_id 不为 None 表示代理本人操作：只能激活归属自己的账号，
     否则按 not_found 处理（不暴露他人账号是否存在）。
     首次激活时记录归属代理的关系链（直接/间接/次间接上级）与操作代理；
-    积分（子项目 C）：计费起点 = 激活时间、下次扣费 = 激活时间 + 24h，体验期开启时赠送体验积分，
-    与激活在同一 BEGIN IMMEDIATE 事务内完成。"""
+    积分（子项目 C）：体验期开启时赠送体验积分，与激活在同一 BEGIN IMMEDIATE 事务内完成。
+    激活不开始计费：计费起点是首次登录成功（mark_first_login），激活后久不登录不扣分。"""
     from . import db_points      # 函数内导入：db_points 依赖 db，模块顶层互相导入会循环
     u = get_user_by_code(conn, code)
     if not u or (by_agent_id is not None and u.agent_id != by_agent_id):
@@ -541,10 +560,9 @@ def activate_user(conn, code: str, now: int, *, by_agent_id: int | None = None) 
         # 条件更新保证并发下只有一次激活成功；归属在检查后被划走则不激活
         cur = conn.execute(
             "UPDATE users SET password_hash=?, salt=?, first_activated_at=?, activated_at=?,"
-            " onboarded_at=NULL, activated_by_agent_id=?, agent_chain_json=?,"
-            " charge_anchor_at=?, next_charge_at=?"
+            " onboarded_at=NULL, activated_by_agent_id=?, agent_chain_json=?"
             " WHERE id=? AND first_activated_at IS NULL AND status='active' AND agent_id IS ?",
-            (h, salt, now, now, by_agent_id, chain, now, now + db_points.CHARGE_PERIOD, u.id, u.agent_id),
+            (h, salt, now, now, by_agent_id, chain, u.id, u.agent_id),
         )
         if cur.rowcount == 1:
             db_points.grant_trial_nocommit(conn, u.code, now)
@@ -558,6 +576,17 @@ def activate_user(conn, code: str, now: int, *, by_agent_id: int | None = None) 
     if again and again.first_activated_at is not None:
         return "already"
     return "blocked" if again and again.status != "active" and again.agent_id == u.agent_id else "not_found"
+
+def mark_first_login(conn, user_id: int, now: int) -> bool:
+    """首次登录成功：记录时间并开始计费（计费起点 = now，首次扣减在 24 小时后）。
+    只在从未登录过时生效，返回是否本次写入；之后的登录不重置计费周期。
+    调用方（登录接口）已确认账号可计费：已激活、正常、未到期、余额 > 0。"""
+    from . import db_points
+    cur = conn.execute("UPDATE users SET first_login_at=?, charge_anchor_at=?, next_charge_at=?"
+                       " WHERE id=? AND first_login_at IS NULL",
+                       (now, now, now + db_points.CHARGE_PERIOD, user_id))
+    conn.commit()
+    return cur.rowcount == 1
 
 def reset_user_password(conn, code: str) -> str:
     u = get_user_by_code(conn, code)
