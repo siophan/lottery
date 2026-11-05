@@ -326,8 +326,8 @@ test('index.html 在业务脚本之前加载 workbench-calc.js', () => {
   assert.ok(i < html.indexOf('app://./js/app.9ba1133b.js></script>'));
 });
 
-test('客户端 apiURL 指向香港 lottery-hk.jh8.ai', () => {
+test('客户端 apiURL 指向 lottery.jh8.ai（已解析到香港），不再用 lottery-hk.jh8.ai', () => {
   const app = fs.readFileSync(path.join(DIR, 'app.9ba1133b.js'), 'utf8');
-  assert.ok(app.includes('apiURL: "https://lottery-hk.jh8.ai/api"'));
-  assert.ok(!app.includes('lottery.jh8.ai'));
+  assert.ok(app.includes('apiURL: "https://lottery.jh8.ai/api"'));
+  assert.ok(!app.includes('lottery-hk.jh8.ai'));
 });
