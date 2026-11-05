@@ -262,15 +262,14 @@ sudo systemctl restart ys-backend
 
 ## 正式环境现状（2026-11-05 起：后端在香港）
 
-- 后端与唯一的数据库在香港 AWS（`lottery-hk.jh8.ai`，登录用 `ubuntu@lottery-hk.jh8.ai`，命令前加 `sudo`）。
+- 后端与唯一的数据库在香港 AWS（18.162.184.136），域名只用 `lottery.jh8.ai`（DNS 已指向香港）；
+  `lottery-hk.jh8.ai` 已停用。登录用 `ubuntu@lottery.jh8.ai`，命令前加 `sudo`。
   目录、服务名、端口、环境变量文件与下面相同：`/opt/ys-middleware/backend`、`ys-middleware.service`、
   `127.0.0.1:8020`、`/etc/ys-middleware.env`。这台机器上还跑着别的项目，只动 `ys-middleware` 和宝塔里
-  `lottery-hk.jh8.ai` 这一个站点。
-- 新客户端 `apiURL` = `https://lottery-hk.jh8.ai/api`。旧客户端写死的 `lottery.jh8.ai` 仍指向新加坡，
-  新加坡上的 `ys-middleware` 已停用，该站点 nginx 整站转发到 `https://lottery-hk.jh8.ai`；香港站点用
-  `set_real_ip_from <新加坡 IP>; real_ip_header X-Real-IP;` 取回用户真实 IP（登录限流按真实 IP 计）。
-  旧客户端都换成新版之前不要删新加坡的站点和证书。
-- 下面命令里的 `root@lottery.jh8.ai` 换成 `ubuntu@lottery-hk.jh8.ai`；rsync 加 `--rsync-path="sudo rsync"`。
+  `lottery.jh8.ai` 这一个站点（`location ^~ /admin/` 与 `location /` 反代到 `127.0.0.1:8020`）。
+- 客户端 `apiURL` = `https://lottery.jh8.ai/api`。
+- 新加坡旧服务器（66.42.63.196）上的 `ys-middleware` 与 `lottery.jh8.ai` 站点均已停用。
+- 下面命令里的 `root@lottery.jh8.ai` 换成 `ubuntu@lottery.jh8.ai`；rsync 加 `--rsync-path="sudo rsync"`。
 
 ## 上线：账号生命周期、代理号段、积分、头像昵称（正式环境命令）
 
