@@ -260,6 +260,18 @@ sudo systemctl restart ys-backend
 2. 备份数据库，部署并重启。余额 > 0 的代理从重启后 Worker 第一轮起算，满 24 小时扣第 1 分。
 3. 后台「代理管理」里资格为激活、积分为 0 的代理显示「积分暂停」标签。
 
+## 正式环境现状（2026-11-05 起：后端在香港）
+
+- 后端与唯一的数据库在香港 AWS（`lottery-hk.jh8.ai`，登录用 `ubuntu@lottery-hk.jh8.ai`，命令前加 `sudo`）。
+  目录、服务名、端口、环境变量文件与下面相同：`/opt/ys-middleware/backend`、`ys-middleware.service`、
+  `127.0.0.1:8020`、`/etc/ys-middleware.env`。这台机器上还跑着别的项目，只动 `ys-middleware` 和宝塔里
+  `lottery-hk.jh8.ai` 这一个站点。
+- 新客户端 `apiURL` = `https://lottery-hk.jh8.ai/api`。旧客户端写死的 `lottery.jh8.ai` 仍指向新加坡，
+  新加坡上的 `ys-middleware` 已停用，该站点 nginx 整站转发到 `https://lottery-hk.jh8.ai`；香港站点用
+  `set_real_ip_from <新加坡 IP>; real_ip_header X-Real-IP;` 取回用户真实 IP（登录限流按真实 IP 计）。
+  旧客户端都换成新版之前不要删新加坡的站点和证书。
+- 下面命令里的 `root@lottery.jh8.ai` 换成 `ubuntu@lottery-hk.jh8.ai`；rsync 加 `--rsync-path="sudo rsync"`。
+
 ## 上线：账号生命周期、代理号段、积分、头像昵称（正式环境命令）
 
 四部分一次上线。迁移只加表加列：老账号保留状态与到期时间，回填为已激活、已完成首登，**余额全部为 0**；
