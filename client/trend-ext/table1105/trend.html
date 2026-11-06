@@ -31,6 +31,7 @@
 		<script type="text/javascript" charset="utf-8" src="js/jquery-1.8.3.min.js"></script>
 		<script type="text/javascript" src="js/jweixin-1.6.0.js"></script>
 		<script type="text/javascript" src="js/uni.webview.1.5.2.js"></script>
+		<script type="text/javascript" src="../trend-bridge.js"></script>
 		<script>
 			document.write("<script type='text/javascript' src='js/ceng.js?t=" + Date.now() + "'><\/script>");
 			document.write("<script type='text/javascript' src='js/layer.js?t=" + Date.now() + "'><\/script>");
@@ -68,6 +69,9 @@
 					obj.back = val;
 				} else if (key == "from_type") {
 					obj.from_type = val;
+				} else if (key == "api" || key == "ds") {
+					// 走势窗口带来的 apiURL 与工作台所选数据源 requestUrl（见 js/common.js request）
+					try { obj[key] = decodeURIComponent(val || ""); } catch (e) { obj[key] = ""; }
 				}
 			}
 			common.cookieSet("trendid", obj.chart_id);

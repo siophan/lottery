@@ -217,6 +217,7 @@ var common = {
 		}
 	},
 	request: function(s, a, e, c) {
+		if (trendSyncRequest(s, a, c)) return;
 		let obj = JSON.parse(this.cookieGet("obj"))
 		a.from_Id = obj.from_Id, a.token = obj.token;
 		if (obj.play_id.indexOf("hash") > -1 || obj.play_id.indexOf("animals") > -1) {

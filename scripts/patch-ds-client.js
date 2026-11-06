@@ -282,9 +282,60 @@ const TREND_CATCH_REPLACEMENTS = [
     count: 1,
   },
 ];
+// 工单「K线与基本走势图开奖号码不一致」：走势图改为与 K 线同源取数（client/trend-sync.js，选源规则同 k_sync.js）。
+// 1) topRows 的「非 dm / 非 code_id」分支整段换成 trendSync.load：不再读工作台本地缓存 num_xxx（5 分钟才同步、
+//    开奖后不刷新、排列5 从不同步）；回调存成局部变量，走势页轮询最新一期时再调 topRows 不会抢走正在进行的整表回调
+const TREND_SYNC_MARK = '/* ds-patch trend-sync v1 */';
+const TREND_SYNC_REPLACEMENTS = [
+  {
+    between: [
+      `        ${TREND_MARK}\n        if (this.data.requestUrl) {`,
+      `          this.htmlCallback(JSON.parse(this.$store.getters['num_' + res.code]).splice(0, res.rows));\n        }`,
+    ],
+    repl: [
+      // 前两层的标记留着（已被本层取代），否则再跑一次补丁会去重打前两层而找不到锚点
+      `        ${TREND_SYNC_MARK} ${TREND_MARK} ${TREND_CATCH_MARK}`,
+      `        const cb = callback;`,
+      `        const dsHash = this.data.requestUrl ? this.data.cat == "hash" : res.code == 6001 || res.code == 6002 || res.code == 6003;`,
+      `        window.trendSync.load({`,
+      `          api: config["apiURL"],`,
+      `          code: res.code,`,
+      `          rows: res.rows,`,
+      `          requestUrl: this.data.requestUrl`,
+      `        }).then(rows => {`,
+      `          if (!rows.length) return;`,
+      `          cb(rows.map(item => dsHash ? Object.assign({}, item, { opennumber: item.opennumber.split(",").slice(0, 3).join(",") }) : item));`,
+      `        }).catch(e => console.warn("[trend-data] 取数失败 " + res.code + "：" + (e && e.message)));`,
+    ].join('\n'),
+  },
+];
+// 2) 哈希 / 运动会 / 11选5 的基本走势页原是 chart.data-ys.com 的外部页面，写死从区块链统计取数；改用 client/trend-ext
+//    下的本地副本（其 request 已改为经 window.parent.trendSync 取数），并把 apiURL 与所选数据源 requestUrl 带过去。
+//    代码走势（code_id）页面的菜单已下线，仍用原外部页面
+const TREND_PAGE_MARK = '/* ds-patch trend-page v1 */';
+const TREND_PAGE_REPLACEMENTS = [
+  {
+    find: `aurl: config["chartURL"] + 'pc-trend/table/trend.html?`,
+    repl: `${TREND_PAGE_MARK}\n      aurl: '/trend-ext/table/trend.html?`,
+    count: 1,
+  },
+  {
+    find: `syxw: config["chartURL"] + 'pc-trend/table1105/trend.html?`,
+    repl: `syxw: '/trend-ext/table1105/trend.html?`,
+    count: 1,
+  },
+  {
+    find: '      this.url = iframeUrl;\n',
+    repl: '      this.url = iframeUrl + (this.data.code_id ? "" : "&api=" + encodeURIComponent(config["apiURL"]) + ' +
+      '"&ds=" + encodeURIComponent(this.data.requestUrl || ""));\n',
+    count: 2,
+  },
+];
 const TREND_LAYERS = [
   { mark: TREND_MARK, replacements: TREND_SRC_REPLACEMENTS },
   { mark: TREND_CATCH_MARK, replacements: TREND_CATCH_REPLACEMENTS },
+  { mark: TREND_SYNC_MARK, replacements: TREND_SYNC_REPLACEMENTS },
+  { mark: TREND_PAGE_MARK, replacements: TREND_PAGE_REPLACEMENTS },
 ];
 
 // app chunk 的 request 工具（src/utils/request.js）：拦截器原本给所有请求都带 token/fromId，包括第三方 requestUrl；
@@ -969,7 +1020,7 @@ function patchChunk(raw, name) {
   return applyLayers(raw, 'switchCode(index) {', CHUNK_LAYERS, name);
 }
 
-module.exports = { patchChunk, CHUNKS, MARK, enc, applyLayers, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
+module.exports = { patchChunk, CHUNKS, MARK, enc, applyLayers, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, TREND_SYNC_MARK, TREND_PAGE_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK, ONBOARD_SMS_MARK,
   KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
   patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M,

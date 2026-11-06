@@ -227,6 +227,7 @@ var common = function() {
 		},
 		//获取数据
 		request: function(url, data, beforeSend, successRes, type) {
+			if (trendSyncRequest(url, data, successRes)) return;
 			let code = data.code + ""
 			let flag = code.substring(0, 2) == "11" ? true : false
 			$.ajax({

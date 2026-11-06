@@ -51,6 +51,7 @@ var common = function() {
 			//this.receive(); //网页调用接口进行测试
 		},
 		receiveWindows: function(num) {
+			this.lastNum = num; // 新开奖自动刷新时按用户当前选的期数重取（见 pollLatest）
 			var rows = 0;
 			if (null == num) {
 				rows = 100;
@@ -74,6 +75,20 @@ var common = function() {
 				data.dm = obj.dm
 			}
 			var result = parent.topRows(data, this.opennumberRes);
+		},
+		// 新开奖自动刷新（工单「K线与基本走势图开奖号码不一致」）：原先走势图打开后不再取数，K 线已到新一期、这里还停在旧的。
+		// 每 10 秒经 parent.topRows（与 K 线同源，见 client/trend-sync.js）取最新一期，期号或号码和当前表格第一行不同就按当前期数重取。
+		// 代码走势（code_id / dm）的数据走算号引擎，不在这里刷新
+		pollLatest: function() {
+			if (obj.from_Id != 901 || !parent.topRows || !common.lastDraw) return;
+			if (common.isNull(common.cookieGet("code_id")) || common.isNull(obj.dm)) return;
+			parent.topRows({
+				rows: 1,
+				code: obj.code
+			}, function(list) {
+				var top = list && list[0];
+				if (top && top.expect + "|" + top.opennumber != common.lastDraw) common.receiveWindows(common.lastNum);
+			});
 		},
 		receivePhone: function(num) {
 			var rows = 0;
@@ -280,6 +295,7 @@ var common = function() {
 			this.request(url, data, "", successRes);
 		},
 		opennumberRes: function(result) {
+			common.lastDraw = result && result[0] ? result[0].expect + "|" + result[0].opennumber : null;
 			content.server(result);
 			var flagLeft = $('#width1').parent().scrollLeft(); //记录原横滚位置
 			setTimeout(function() {
