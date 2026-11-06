@@ -382,82 +382,111 @@ test('trend chunk: 锚点不匹配时报错', () => {
   assert.throws(() => patchTrend('nothing'), /topRows\(res, callback\)/);
 });
 
+// 走势窗口 topRows（非 dm / 非 code_id）一律经 window.trendSync.load 取数（与 K 线同源，见 client/trend-sync.js），
+// 不再读工作台本地缓存 num_xxx。reply：数组 → resolve，Error → reject
 function trendHarness(data, reply) {
   const calls = [];
-  const softNum = { t: (p) => { calls.push(p); return Promise.resolve(reply); } };
-  const comp = loadComponent(trendSource(), { modules: { b456: softNum, f121: {} } });
+  const trendSync = { load: (src) => { calls.push(src); return reply instanceof Error ? Promise.reject(reply) : Promise.resolve(reply); } };
+  const warns = [];
+  const comp = loadComponent(trendSource(), {
+    modules: { f121: { apiURL: API_URL } },
+    window: { trendSync },
+    globals: { console: { warn: (m) => warns.push(m), log() {}, info() {} } },
+  });
   const got = [];
   const vmThis = {
     data, code_id: null, topid: 't', htmlCallback: '',
-    $store: { getters: { num_101: JSON.stringify([{ expect: 's1', opennumber: '9,9,9' }, { expect: 's2' }]) } },
+    $store: { getters: { num_101: JSON.stringify([{ expect: 's1', opennumber: '9,9,9' }]) } },
   };
-  const run = (res) => comp.methods.topRows.call(vmThis, res, (arr) => got.push(arr));
-  return { calls, got, run };
+  const run = (res, cb) => comp.methods.topRows.call(vmThis, res, cb || ((arr) => got.push(arr)));
+  return { calls, got, run, warns, vmThis };
 }
-const ROWS = () => ({ code: 0, data: [{ expect: '1', opennumber: '1,2,3,4,5' }, { expect: '2', opennumber: '6,7,8,9,0' }] });
+const ROWS = () => [{ expect: '2', opennumber: '6,7,8,9,0' }, { expect: '1', opennumber: '1,2,3,4,5' }];
 
-test('trend: 选了数据源（requestUrl）时按该源取数；哈希只保留前 3 位且不改原对象', async () => {
+test('trend: 选了数据源时按该源取数（带 apiURL / code / rows）；哈希只保留前 3 位且不改原对象', async () => {
   const reply = ROWS();
-  const { calls, got, run } = trendHarness({ cat: 'hash', requestUrl: SRV('qqtj') }, reply);
-  run({ code: 'trxbhffc', rows: 30 });
+  const h = trendHarness({ cat: 'hash', requestUrl: SRV('qqtj') }, reply);
+  h.run({ code: 'trxbhffc', rows: 30 });
   await tick();
-  assert.deepStrictEqual(plain(calls), [{ code: 'trxbhffc', rows: 30, requestUrl: SRV('qqtj') }]);
-  assert.strictEqual(got.length, 1);
-  assert.deepStrictEqual(plain(got[0].map((x) => x.opennumber)), ['1,2,3', '6,7,8']);
-  assert.strictEqual(reply.data[0].opennumber, '1,2,3,4,5');
-  assert.strictEqual(got[0][0].expect, '1');
+  assert.deepStrictEqual(plain(h.calls), [{ api: API_URL, code: 'trxbhffc', rows: 30, requestUrl: SRV('qqtj') }]);
+  assert.deepStrictEqual(plain(h.got[0].map((x) => x.opennumber)), ['6,7,8', '1,2,3']);
+  assert.strictEqual(reply[0].opennumber, '6,7,8,9,0');
 });
 
-test('trend: 6001 也走所选数据源；非哈希原样回传；失败不回调', async () => {
-  let h = trendHarness({ cat: 'hash', requestUrl: SRV('qkltj') }, ROWS());
-  h.run({ code: 6001, rows: 2 });
+test('trend: 3D 等彩种不再读本地缓存 num_xxx，与 K 线一样实时取数并原样回传', async () => {
+  const h = trendHarness({ cat: '3d' }, ROWS());
+  h.run({ code: 101, rows: 1 });
   await tick();
-  assert.strictEqual(h.calls[0].requestUrl, SRV('qkltj'));
-  assert.deepStrictEqual(plain(h.got[0].map((x) => x.opennumber)), ['1,2,3', '6,7,8']);
-  const reply = ROWS();
-  h = trendHarness({ cat: '1105', requestUrl: 'https://x.example/api' }, reply);
+  assert.deepStrictEqual(plain(h.calls), [{ api: API_URL, code: 101, rows: 1 }]);
+  assert.deepStrictEqual(plain(h.got[0].map((x) => x.expect)), ['2', '1']);
+  assert.strictEqual(h.got[0][0].opennumber, '6,7,8,9,0');
+});
+
+test('trend: 没有数据源时 600x 只保留前 3 位；非哈希的数据源原样回传', async () => {
+  let h = trendHarness({ cat: 'hash', requestUrl: null }, ROWS());
+  h.run({ code: 6002, rows: 2 });
+  await tick();
+  assert.deepStrictEqual(plain(h.got[0].map((x) => x.opennumber)), ['6,7,8', '1,2,3']);
+  h = trendHarness({ cat: '1105', requestUrl: 'https://x.example/api' }, ROWS());
   h.run({ code: 'c1', rows: 2 });
   await tick();
-  assert.deepStrictEqual(plain(h.got[0].map((x) => x.opennumber)), ['1,2,3,4,5', '6,7,8,9,0']);
-  h = trendHarness({ cat: 'hash', requestUrl: SRV('qqtj') }, { code: 10020, msg: 'x' });
-  h.run({ code: 'trxbhffc', rows: 2 });
-  await tick();
-  assert.strictEqual(h.got.length, 0);
+  assert.deepStrictEqual(plain(h.got[0].map((x) => x.opennumber)), ['6,7,8,9,0', '1,2,3,4,5']);
 });
 
-test('trend: 所选数据源请求失败（reject）时不产生未处理的 Promise 拒绝，也不回调', async () => {
+test('trend: 取数失败或空列表不回调，失败记日志且不产生未处理的 Promise 拒绝', async () => {
   const unhandled = [];
   const onUnhandled = (e) => unhandled.push(e);
   process.on('unhandledRejection', onUnhandled);
   try {
-    const calls = [];
-    const softNum = { t: (p) => { calls.push(p); return Promise.reject(new Error('offline')); } };
-    const comp = loadComponent(trendSource(), { modules: { b456: softNum, f121: {} } });
-    const got = [];
-    const vmThis = { data: { cat: 'hash', requestUrl: SRV('qqtj') }, htmlCallback: '' };
-    comp.methods.topRows.call(vmThis, { code: 'trxbhffc', rows: 2 }, (arr) => got.push(arr));
+    let h = trendHarness({ cat: 'hash', requestUrl: SRV('qqtj') }, new Error('offline'));
+    h.run({ code: 'trxbhffc', rows: 2 });
     await tick();
     await tick();
-    assert.strictEqual(calls.length, 1);
-    assert.strictEqual(got.length, 0);
+    assert.strictEqual(h.got.length, 0);
+    assert.ok(h.warns.some((m) => m.includes('[trend-data]') && m.includes('offline')));
+    h = trendHarness({ cat: '3d' }, []);
+    h.run({ code: 202, rows: 2 });
+    await tick();
+    assert.strictEqual(h.got.length, 0);
     assert.strictEqual(unhandled.length, 0, String(unhandled[0]));
   } finally {
     process.off('unhandledRejection', onUnhandled);
   }
 });
 
-test('trend: 没有 requestUrl 时保持原逻辑（600x 走后端、其他走 store）', async () => {
-  let h = trendHarness({ cat: 'hash', requestUrl: null }, ROWS());
-  h.run({ code: 6002, rows: 2 });
+test('trend: 每次调用用自己的回调——轮询最新一期不会抢走正在进行的整表回调', async () => {
+  const h = trendHarness({ cat: '3d' }, ROWS());
+  const full = [];
+  const poll = [];
+  h.run({ code: 202, rows: 100 }, (a) => full.push(a));
+  h.run({ code: 202, rows: 1 }, (a) => poll.push(a));
   await tick();
-  assert.deepStrictEqual(plain(h.calls), [{ code: 6002, rows: 2 }]);
-  assert.deepStrictEqual(plain(h.got[0].map((x) => x.opennumber)), ['1,2,3', '6,7,8']);
-  h = trendHarness({ cat: 'hash' }, ROWS());
-  h.run({ code: 101, rows: 1 });
-  await tick();
-  assert.strictEqual(h.calls.length, 0);
-  assert.strictEqual(h.got[0].length, 1);
-  assert.strictEqual(h.got[0][0].expect, 's1');
+  assert.strictEqual(full.length, 1);
+  assert.strictEqual(poll.length, 1);
+});
+
+test('trend: 哈希 / 运动会 / 11选5 的基本走势页改用本地副本，并带上 apiURL 与所选数据源', () => {
+  const src = trendSource();
+  assert.ok(src.includes("aurl: '/trend-ext/table/trend.html?"));
+  assert.ok(src.includes("syxw: '/trend-ext/table1105/trend.html?"));
+  assert.ok(!/aurl: config\["chartURL"\]/.test(src));
+  const comp = loadComponent(src, {
+    modules: { f121: { apiURL: API_URL, chartURL: 'https://chart.example/' } },
+    globals: { localStorage: { getItem: () => 'T1' } },
+  });
+  const make = (data) => {
+    const vm0 = Object.assign({}, comp.data(), { $route: { query: { data: JSON.stringify(data) } } });
+    comp.created.call(vm0);
+    return vm0.url;
+  };
+  const hash = make({ cat: 'hash', play_id: 'hasha3', code: '6001', chart_id: 'trend_jibenZouShi', requestUrl: SRV('qqtj') });
+  assert.ok(hash.startsWith('/trend-ext/table/trend.html?'), hash);
+  assert.ok(hash.endsWith('&api=' + encodeURIComponent(API_URL) + '&ds=' + encodeURIComponent(SRV('qqtj'))), hash);
+  const syxw = make({ cat: '1105', play_id: '1105a3', code: '5001', chart_id: 'trend_jibenZouShi', requestUrl: null });
+  assert.ok(syxw.startsWith('/trend-ext/table1105/trend.html?'), syxw);
+  assert.ok(syxw.endsWith('&ds='), syxw);
+  const dm = make({ cat: 'hash', play_id: 'hasha3', code: '6001', chart_id: 'x', code_id: '1', requestUrl: SRV('qqtj') });
+  assert.ok(dm.startsWith('https://chart.example/') && !dm.includes('&ds='), dm);
 });
 
 // ---- app 入口 chunk：topRows 的第三方请求分支归一化返回体 ----

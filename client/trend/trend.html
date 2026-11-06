@@ -76,6 +76,9 @@
 					return;
 				}
 				common.server();
+				window.setInterval(function() {
+					common.pollLatest();
+				}, 10000);
 			});
 		</script>
 
