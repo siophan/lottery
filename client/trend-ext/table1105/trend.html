@@ -1,0 +1,184 @@
+<style>
+	.ret {
+		position: fixed;
+		top: 33px;
+		font-size: 14px;
+		z-index: 999;
+		right: 10px;
+	}
+
+	.return {
+		display: block;
+		color: #666;
+		line-height: 30px;
+		padding: 2px 18px 2px 8px;
+		cursor: pointer;
+		text-align: center;
+		background: #fff;
+		border-radius: 8px;
+		width: 40px;
+	}
+</style>
+<html xmlns="http://www.w3.org/1999/xhtml">
+	<head>
+		<meta name='viewport'   content="width=device-width, viewport-fit=cover"   />
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+		<meta name="viewport"
+			content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+		<title></title>
+		<link rel="stylesheet" type="text/css" href="css/pub.css" />
+		<link rel="stylesheet" type="text/css" href="css/table.css" />
+		<script type="text/javascript" charset="utf-8" src="js/jquery-1.8.3.min.js"></script>
+		<script type="text/javascript" src="js/jweixin-1.6.0.js"></script>
+		<script type="text/javascript" src="js/uni.webview.1.5.2.js"></script>
+		<script>
+			document.write("<script type='text/javascript' src='js/ceng.js?t=" + Date.now() + "'><\/script>");
+			document.write("<script type='text/javascript' src='js/layer.js?t=" + Date.now() + "'><\/script>");
+			document.write("<script type='text/javascript' src='js/script.js?t=" + Date.now() + "'><\/script>");
+			document.write("<script type='text/javascript' src='js/common.js?t=" + Date.now() + "'><\/script>");
+			document.write("<script type='text/javascript' src='js/initialize.js?t=" + Date.now() + "'><\/script>");
+			document.write("<script type='text/javascript' src='js/language.js?t=" + Date.now() + "'><\/script>");
+			document.write("<script type='text/javascript' src='js/content.js?t=" + Date.now() + "'><\/script>");
+		</script>
+	</head>
+	<body>
+		<script>
+			//从url截取获得的所有信息存入缓存
+			var url = window.location.href.substr(0).split("?")[1];
+			var type = url.split("&");
+			var obj = {
+				language: "zh-CN"
+			};
+			for (var i = 0; i < type.length; i++) {
+				var key = type[i].split("=")[0];
+				var val = type[i].split("=")[1];
+				if (key == "language") {
+					obj.language = val;
+				} else if (key == "token") {
+					obj.token = val;
+				} else if (key == "code") {
+					obj.code = val;
+				} else if (key == "play_id") {
+					obj.play_id = val;
+				} else if (key == "chart_id") {
+					obj.chart_id = val;
+				} else if (key == "from_Id") {
+					obj.from_Id = val;
+				} else if (key == "back") {
+					obj.back = val;
+				} else if (key == "from_type") {
+					obj.from_type = val;
+				}
+			}
+			common.cookieSet("trendid", obj.chart_id);
+			common.cookieSet("language", obj.language);
+			common.cookieSet("obj", JSON.stringify(obj));
+			$(document).ready(function() {
+				common.receive(JSON.parse(common.cookieGet("obj")));
+				window.setInterval(getData, 5000);
+			});
+		</script>
+		<div style="background-color: #064b86;top: 0px;height:25px" class="top"></div>
+		<div class="bukong1"></div>
+		<div class="diqu">
+			<p class="dqtanbg" id="qss">50</p>
+			<div class="diqu">
+				<ul class="dqtan">
+					<script>
+						var issue = [10, 20, 30, 50, 100, 200, 300];
+						for (var i = 0; i < issue.length; i++) {
+							if (issue[i] == 50) {
+								document.writeln("<li id='q" + issue[i] + "' class='on' onclick='common.refresh(" + issue[i] + ")'>" +
+									issue[i] +
+									"期</li>");
+							} else {
+								document.writeln("<li id='q" + issue[i] + "' onclick='common.refresh(" + issue[i] + ")'>" + issue[i] +
+									"期</li>");
+							}
+						}
+					</script>
+				</ul>
+			</div>
+		</div>
+		<div class="top">
+			<div class="topname" id="chartName"></div>
+		</div>
+		<div class="t-head">
+			<div class="t-h-wrap" id="hh">
+				<table class="t-zebra" id="width2">
+					<colgroup id="colgroup">
+					</colgroup>
+					<tbody id="titlecontent">
+					</tbody>
+				</table>
+			</div>
+		</div>
+		<div class="l-top">
+			<table class="l-zebra ">
+				<tbody>
+					<tr>
+						<td style="line-height: 59px;" class="qh l3" id="issue"></td>
+					</tr>
+					<tr></tr>
+				</tbody>
+			</table>
+		</div>
+		<div class="l-center" id="dd">
+			<table class="l-zebra">
+				<tbody id="opennumber">
+
+				</tbody>
+			</table>
+		</div>
+		<!--别删，删了不好使-->
+		<div class="t-content" id="cc" onscroll="aa()">
+			<table class="zebra" id="width1">
+
+			</table>
+		</div>
+		<div class="l-bottom">
+			<table class="zebra">
+				<tbody>
+					<tr class="bg6 wai " id="tj">
+						<td>
+							<span class="btn m" id="submit" onclick="common.submiting()"></span>
+							<span class="btn m" id="clean" onClick="common.clickClean()"></span>
+						</td>
+
+					</tr>
+					<tr class="wai">
+						<td id="arise"></td>
+					</tr>
+					<tr class="wai">
+						<td id="continuous"></td>
+					</tr>
+					<tr class="wai">
+						<td id="omit"></td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+		<div class="bukong2"></div>
+		<div class="t-bottom">
+			<div class="t-b-wrap" id="mm">
+				<table class="zebra">
+					<colgroup id="bottomcol">
+					</colgroup>
+					<tbody id="omitall">
+						<tr class="bg6 wai m" id="bottomval">
+						</tr>
+						<tr id="arise1" class="wai">
+
+						</tr>
+						<tr id="continuous1" class="wai">
+
+						</tr>
+						<tr id="omit1" class="wai">
+
+						</tr>
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</body>
+</html>
