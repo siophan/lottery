@@ -15,6 +15,7 @@ class Settings:
     admin_key: str = ""
     db_path: str = "data/app.db"
     session_ttl: int = 604800       # 我方会话 7 天
+    session_idle_ttl: int = 7200    # 会话空闲时限：这么久没有任何请求（软件崩溃 / 断网 / 休眠）即失效，释放设备占用
     dayys_token_ttl: int = 3600     # data-ys token 刷新间隔（秒）
     admin_session_ttl: int = 86400     # 管理员会话 1 天
     admin_cookie_secure: bool = True   # 生产必开；本地 http 调试置 false
@@ -42,6 +43,7 @@ def load_settings(env: Mapping[str, str]) -> Settings:
         admin_key=env.get("ADMIN_KEY", ""),
         db_path=env.get("DB_PATH", "data/app.db"),
         session_ttl=int(env.get("SESSION_TTL", 604800)),
+        session_idle_ttl=int(env.get("SESSION_IDLE_TTL", 7200)),
         dayys_token_ttl=int(env.get("DATA_YS_TOKEN_TTL", 3600)),
         admin_session_ttl=int(env.get("ADMIN_SESSION_TTL", 86400)),
         admin_cookie_secure=flag(env.get("ADMIN_COOKIE_SECURE", "true")),

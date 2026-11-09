@@ -5,7 +5,7 @@ const path = require('path');
 const vm = require('vm');
 const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, APP_LAYERS, RACE_MARK, patchTrend, TREND_CHUNK, TREND_LAYERS, AUTH_MARK, KICK_MARK,
   patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
-  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
+  KICK2_MARK, KICK3_MARK, SESSION_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
   patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M,
   NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT, RULES_MARK, RULES_PAGES, rulesDefault } = require('../scripts/patch-ds-client.js');
 const { render: renderRules } = require('../scripts/extract-rules-texts.js');
@@ -554,7 +554,7 @@ function appModuleSource(raw, locator) {
 }
 const REQ_LOCATOR = 'service.interceptors.request.use(config => {';
 
-function requestHarness(token = 'TOK', userInfo = null) {
+function requestHarness(token = 'TOK', userInfo = null, session = undefined) {
   const src = appModuleSource(fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8'), REQ_LOCATOR);
   const ic = {};
   const service = {
@@ -573,7 +573,7 @@ function requestHarness(token = 'TOK', userInfo = null) {
       '5c96': { MessageBox: { alert: (msg, title, opts) => { alerts.push(msg); boxes.push(opts); } } },
       f121: { apiURL: API_URL, fromId: 1004 },
     },
-    window: { electron: { ipcRenderer: { send: (...a) => sent.push(a) } } },
+    window: Object.assign({ electron: { ipcRenderer: { send: (...a) => sent.push(a) } } }, session ? { dsSession: session } : {}),
     globals: { localStorage: { getItem: (k) => (store[k] == null ? null : store[k]), removeItem: (k) => { delete store[k]; } } },
   });
   const send = (url) => ic.req({ url, headers: {} }).headers;
@@ -983,7 +983,7 @@ test('app chunk: 首页模板在 .card 之后（#content 之前、不在 .card �
 });
 
 // 执行整个首页模块（依赖一律桩），取出 index.vue 的组件选项
-function indexHarness({ withProfile = true, points = '5', userInfo, legacy, token } = {}) {
+function indexHarness({ withProfile = true, points = '5', userInfo, legacy, token, session } = {}) {
   const mounts = [];
   const ctl = { refreshed: [], destroyed: 0, refresh(p) { this.refreshed.push(p); }, destroy() { this.destroyed++; } };
   const service = function () {};
@@ -1005,6 +1005,7 @@ function indexHarness({ withProfile = true, points = '5', userInfo, legacy, toke
   const win = { electron: { ipcRenderer: { send() {}, on() {} } } };
   if (withProfile) win.dsProfile = { mount: (el, o) => { mounts.push([el, o]); return ctl; } };
   if (legacy) win.dsLegacyKey = legacy;
+  if (session) win.dsSession = session;
   fn({ exports: exp }, exp, req, win);
   const comp = exp.dsIndex;
   const el = { id: 'mount-point' };
@@ -1370,4 +1371,66 @@ test('extract-rules-texts: render 把 Vue 模板节点转成 HTML', () => {
   ]);
   assert.throws(() => renderRules(`[_c('p', { on: {} }, [])]`, {}), /未处理的 on/);
   assert.throws(() => renderRules(`[_c('img', { attrs: { "src": "x" } })]`, {}), /未处理的属性 src/);
+});
+
+// ---- 单设备登录：kick v3（踢下线交给 dsSession，回登录页而不是退出）、session v1（首页心跳） ----
+test('app chunk: request 模块含 kick v3 补丁，源码语法有效', () => {
+  const src = appModuleSource(fs.readFileSync(path.join(DIR, APP_CHUNK), 'utf8'), REQ_LOCATOR);
+  assert.ok(src.includes(KICK3_MARK));
+  new vm.Script(src);
+});
+
+test('app chunk: 有 dsSession 时踢下线交给它（带服务端提示），不弹原版框、不退出程序', () => {
+  for (const [code, msg, expect] of [
+    [10021, '该账号已在其他设备登录，您已被强制下线，请重新登录', '该账号已在其他设备登录，您已被强制下线，请重新登录'],
+    [10020, '登录已超时，请重新登录', '登录已超时，请重新登录'],
+    [10024, undefined, '账号已封禁！'],                       // 服务端没给 msg：用原有文案
+    [10025, '', '无积分，无权操作，请充值积分后自动恢复使用！'],
+  ]) {
+    const calls = [];
+    const h = requestHarness('TOK', JSON.stringify({ username: 'A1' }), { kicked: (c, m) => { calls.push([c, m]); return true; } });
+    assert.strictEqual(h.ic.res({ status: 200, data: { code, msg }, config: { url: API_URL + '/user/isExpire' } }), undefined);
+    assert.deepStrictEqual(calls, [[code, expect]], String(code));
+    assert.strictEqual(h.alerts.length, 0);
+    assert.deepStrictEqual(h.sent, []);
+    assert.strictEqual(h.store.token, 'TOK');                 // 本地登录信息由主窗口确认后再清
+  }
+});
+
+test('app chunk: dsSession.kicked 返回 false（非 Electron）时仍走原版弹窗 + 退出', () => {
+  const h = requestHarness('TOK', JSON.stringify({ username: 'A1' }), { kicked: () => false });
+  h.ic.res({ status: 200, data: { code: 10021, msg: 'x' }, config: { url: API_URL + '/x' } });
+  assert.strictEqual(h.alerts.length, 1);
+  h.boxes[0].callback('confirm');
+  assert.deepStrictEqual(plain(h.sent), [['kick'], ['close', 'A1']]);
+});
+
+test('app chunk: 第三方接口 / 登录接口的 10021 不交给 dsSession', async () => {
+  const calls = [];
+  const h = requestHarness('TOK', null, { kicked: (...a) => { calls.push(a); return true; } });
+  const res = { code: 10021, msg: 'x' };
+  assert.strictEqual(await h.ic.res({ status: 200, data: res, config: { url: 'https://qqtj.example.com/draw' } }), res);
+  assert.strictEqual(await h.ic.res({ status: 200, data: res, config: { url: API_URL + '/auth/login' } }), res);
+  assert.deepStrictEqual(calls, []);
+});
+
+test('首页 mounted 启动 dsSession 心跳（apiURL），destroyed 停止；脚本未加载时不报错', () => {
+  const calls = [];
+  const session = { start: (o) => calls.push(['start', o.apiURL]), stop: () => calls.push(['stop']) };
+  const h = indexHarness({ session, token: 'TOK', userInfo: { username: 'Z1' } });
+  h.comp.mounted.call(h.vmThis);
+  h.comp.destroyed.call(h.vmThis);
+  assert.deepStrictEqual(calls, [['start', API_URL], ['stop']]);
+  const none = indexHarness({ token: 'TOK' });
+  none.comp.mounted.call(none.vmThis);
+  none.comp.destroyed.call(none.vmThis);
+});
+
+test('index.html 先加载 session-guard.js，再加载业务脚本', () => {
+  const html = fs.readFileSync(path.join(DIR, '..', 'index.html'), 'utf8');
+  const i = html.indexOf('<script src=app://./session-guard.js></script>');
+  assert.ok(i > 0);
+  assert.ok(i < html.indexOf('<script type=module src=app://./js/app.'));
+  assert.ok(i < html.indexOf('<script src=app://./ds-sources.js>'));
+  assert.strictEqual(html.split('session-guard.js').length - 1, 1);
 });

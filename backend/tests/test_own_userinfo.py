@@ -108,7 +108,8 @@ def test_legacy_prefixes_confirms_only_shared_account_codes():
     conn, user, tc, _ = build()
     tok = _session(conn, user)
     assert _legacy(tc, tok, {"candidates": ["Y1888"]})["data"]["matches"] == []   # 还没人登录过：不知道旧编号
-    tc.post("/api/auth/login", json={"username": "20240001", "password": "pw"})      # 登录时记下共用账号编号
+    r = tc.post("/api/auth/login", json={"username": "20240001", "password": "pw"})  # 登录时记下共用账号编号
+    tok = r.json()["data"]["token"]       # 单设备登录：重新登录后之前的会话作废，改用新 token
     body = _legacy(tc, tok, {"candidates": ["Z0000009", "Y1888", "Y1888", "20240001"]})
     assert body == {"code": 0, "msg": "成功", "data": {"matches": ["Y1888"]}}
 

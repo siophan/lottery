@@ -40,6 +40,14 @@ export interface UserRow {
   number_status: string // pending 待激活 | activated 已激活 | arrears 无余额 | to_recycle 待回收 | unassigned 未分配
   points: number // 积分余额
   nickname: string // 实际显示昵称（未设置时为默认昵称）
+  // 单设备登录：当前有效的登录会话（同一账号同一时间只有一台电脑）
+  online: boolean // 最近 90 秒内有请求（客户端每 15 秒心跳）
+  logged_in: boolean // 有有效会话（休眠 / 断网时 logged_in 为真但 online 为假）
+  device_id: string | null // 设备编号（本机硬件特征码的哈希）
+  device_name: string | null // 计算机名（系统）
+  login_at: number | null
+  last_seen_at: number | null
+  login_ip: string | null
 }
 
 export interface ApiResult {
@@ -151,6 +159,11 @@ export async function unbindUserPhone(code: string): Promise<ApiResult> {
   return result(
     await req('/users/' + encodeURIComponent(code) + '/unbind-phone', { method: 'POST' }),
   )
+}
+
+// 强制下线：作废该账号的登录会话，客户端 15 秒内弹出下线提示并回到登录页
+export async function kickUser(code: string): Promise<ApiResult> {
+  return result(await req('/users/' + encodeURIComponent(code) + '/kick', { method: 'POST' }))
 }
 
 export async function deleteUser(code: string): Promise<ApiResult> {

@@ -9,6 +9,7 @@ from .. import db
 from ..security import hash_password, verify_password
 from ..throttle import LOCKED_MSG, client_ip
 from ..dayys_session import DataYsLoginError
+from .. import gate
 from ..gate import POINTS_EMPTY
 from ..userinfo import client_user_info
 
@@ -23,6 +24,9 @@ SMS_CODE_TTL = 300              # 验证码 5 分钟有效
 SMS_COOLDOWN = 60               # 同号冷却 60 秒
 SMS_DAILY_LIMIT = 10            # 同号 24 小时上限
 PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
+
+# 旧版客户端不上报设备码：单设备登录上线后不再允许登录，提示下载新版
+OLD_CLIENT = {"code": 1, "msg": "当前软件版本过旧，请下载安装最新版本后再登录"}
 
 _TICKET_INVALID = {"code": 10031, "msg": "操作已超时，请重新登录"}
 _SMS_CHECK_MSG = {
@@ -93,6 +97,10 @@ async def login(request: Request):
     settings = request.app.state.settings
     dayys = request.app.state.dayys
 
+    device = gate.device_of(request.headers)
+    if not device:
+        return JSONResponse(OLD_CLIENT)
+
     throttle = request.app.state.login_throttle
     ip = client_ip(request)
     # 先查限流再验密码：锁定期间不做 PBKDF2，既挡暴力猜测也省 CPU
@@ -142,7 +150,11 @@ async def login(request: Request):
     user_info = client_user_info(upstream_info, user)
 
     db.mark_first_login(conn, user.id, now)     # 首次登录才开始计费；之后的登录不变
-    token = db.create_session(conn, user.id, settings.session_ttl)
+    # 单设备登录：作废该账号在其他设备上的会话，旧设备下一次请求（含每 15 秒的心跳）收到 10021 被挤下线
+    token, kicked = db.login_session(conn, user.id, settings.session_ttl, device_id=device,
+                                     device_name=gate.device_name_of(request.headers), ip=ip, now=now)
+    if kicked:
+        print(f"login {user.code}: replaced {kicked} session(s) on other devices")
     # points：客户端据此在登录后提示低积分（0 < points < 7）
     return JSONResponse({"code": 0, "data": {"token": token, "userInfo": user_info, "points": user.points}})
 
@@ -230,3 +242,23 @@ async def onboard(request: Request):
                                                 "phoneVerified": ONBOARD_SMS_REQUIRED}):
         return JSONResponse(_TICKET_INVALID)
     return JSONResponse({"code": 0, "msg": "设置成功！请用刚设置的新密码登录，初始密码 123456 已失效"})
+
+
+@router.post("/auth/heartbeat")
+async def heartbeat(request: Request):
+    """客户端主窗口每 15 秒一次：会话仍有效回 code 0（并刷新最后活跃时间）；被挤下线 / 失效回对应错误码。"""
+    user, err = gate.authorize_request(request)
+    if user is None:
+        return JSONResponse(err)
+    return JSONResponse({"code": 0, "msg": "成功"})
+
+
+@router.post("/auth/logout")
+async def logout(request: Request):
+    """退出登录 / 关闭软件：删掉本会话，账号可立即在其他电脑登录。只认本设备的会话；无效 token 也回成功。"""
+    conn = request.app.state.db_conn
+    token = request.headers.get("token", "")
+    sess = db.get_session(conn, token) if token else None
+    if sess is not None and (sess.device_id is None or sess.device_id == gate.device_of(request.headers)):
+        db.delete_session(conn, token)
+    return JSONResponse({"code": 0, "msg": "成功"})
