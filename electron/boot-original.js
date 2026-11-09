@@ -6,10 +6,11 @@
 // 之所以还需要代理：原版 shipped bundle 的 apiURL 就是 127.0.0.1:8000，
 // 说明原 Windows 版同样依赖一个本地代理把 /api/* 转发到上游 soft-api.data-ys.com。
 const path = require('path');
-const { ipcMain, dialog, BrowserWindow } = require('electron');
+const { app, ipcMain, dialog, BrowserWindow, session, net, screen } = require('electron');
 const { startServer, UPSTREAM_DEFAULT } = require('./server');
 const { guardNewPage, BLOCKED_MSG, GUARDED_CHANNELS } = require('./page-guard');
 const { createCopyRelay } = require('./kline-copies');
+const deviceSession = require('./device-session');
 
 // 复制出来的 K 线窗口直接从主进程收到发给 K 线窗口的消息（开奖刷新等），不依赖源 K 线窗口是否开着；见 kline-copies.js
 const copyRelay = createCopyRelay(() => BrowserWindow.getAllWindows());
@@ -59,6 +60,13 @@ const CLIENT_DIR = path.join(__dirname, '..', 'client');
 startServer({ port: PROXY_PORT, clientDir: CLIENT_DIR, upstream: UPSTREAM_DEFAULT })
   .then(({ port }) => console.log(`[proxy] listening on 127.0.0.1:${port} -> ${UPSTREAM_DEFAULT}`))
   .catch((e) => console.error('[proxy] 启动失败:', (e && e.message) || e));
+
+// 单设备登录：本机设备码随每个发往我方接口的请求上报；被挤下线回登录页、关闭软件时注销会话（见 device-session.js）。
+// 设备码同步算一次（读注册表 / ioreg，几十毫秒）；ready 监听要先于原版主进程注册，保证建窗前请求头钩子已就位
+const DEVICE_ID = deviceSession.computeDeviceId({ userDataDir: app.getPath('userData') });
+app.on('ready', () => {
+  deviceSession.install({ app, session: session.defaultSession, ipcMain, BrowserWindow, net, screen, deviceId: DEVICE_ID });
+});
 
 // 加载原版主进程（其 __dirname 为 client/，app:// / renderer.js / images 路径均正确）
 require('../client/background.js');

@@ -240,7 +240,8 @@ def test_list_users_new_fields_mask_phone():
     assert a["phone"] == "138****1234" and a["onboarded"] is True
     assert set(a) == {"code", "status", "status_by", "expires_at", "created_at", "activated",
                       "first_activated_at", "phone", "onboarded",
-                      "agent_id", "agent_name", "number_status", "points", "nickname"}
+                      "agent_id", "agent_name", "number_status", "points", "nickname",
+                      "online", "logged_in", "device_id", "device_name", "login_at", "last_seen_at", "login_ip"}
     assert "13812341234" not in tc.get("/admin/users", headers=H).text
 
 # ---------------- 审计列表 ----------------

@@ -10,7 +10,7 @@ import {
   ProFormTextArea,
   ProTable,
 } from '@ant-design/pro-components'
-import { App, Button, Dropdown, Popconfirm, Tag } from 'antd'
+import { App, Button, Dropdown, Popconfirm, Tag, Tooltip } from 'antd'
 import { DownOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import {
@@ -21,6 +21,7 @@ import {
   createUser,
   deleteUser,
   getMe,
+  kickUser,
   listAgents,
   listUsers,
   Me,
@@ -45,6 +46,11 @@ import {
 import UserProfileLink from './UserProfileLink'
 
 const AMOUNT_RULES = [{ required: true, message: '请输入积分数量' }]
+
+// 单设备登录的登录状态：在线（90 秒内有心跳）/ 已登录但无心跳（休眠、断网，会话空闲 2 小时后失效）/ 未登录
+type LoginState = 'online' | 'idle' | 'offline'
+const loginState = (r: UserRow): LoginState => (r.online ? 'online' : r.logged_in ? 'idle' : 'offline')
+const KICK_CONFIRM = '强制下线后，该账号所在电脑会弹出下线提示并回到登录页，需要重新登录。确认？'
 
 // 后台人员：全部账号 + 全部操作（含加分 / 扣分 / 批量充值）；
 // 用户常把首登弹窗当成登录失败、改完密码又输 123456：激活成功时提示代理转告完整步骤
@@ -160,6 +166,42 @@ export default function UsersTable({ me }: { me: Me }) {
         r.status === 'active' ? dom : <>{dom}（{r.status_by === 'agent' ? '代理' : '管理员'}）</>,
     },
     {
+      title: '登录状态',
+      dataIndex: 'login_state',
+      valueType: 'select',
+      valueEnum: {
+        online: { text: '在线', status: 'Success' },
+        idle: { text: '已登录（无心跳）', status: 'Warning' },
+        offline: { text: '未登录', status: 'Default' },
+      },
+      renderText: (_, r) => loginState(r),
+    },
+    {
+      title: '登录设备',
+      dataIndex: 'device_id',
+      hideInSearch: true,
+      render: (_, r) =>
+        r.logged_in ? (
+          <Tooltip
+            title={
+              <>
+                设备编号：{r.device_id || '—'}
+                <br />
+                登录 IP：{r.login_ip || '—'}
+              </>
+            }
+          >
+            <div>{r.device_name || (r.device_id ? r.device_id.slice(0, 12) : '—')}</div>
+            <div style={{ fontSize: 12, color: '#999' }}>
+              登录 {r.login_at ? fmtDateTime(r.login_at) : '—'}
+              {r.last_seen_at ? ` · 活跃 ${dayjs.unix(r.last_seen_at).format('HH:mm')}` : ''}
+            </div>
+          </Tooltip>
+        ) : (
+          '—'
+        ),
+    },
+    {
       title: '手机号',
       dataIndex: 'phone',
       hideInSearch: true,
@@ -220,9 +262,21 @@ export default function UsersTable({ me }: { me: Me }) {
                 </a>
               )
             )
+          const kickOp = record.logged_in && (
+            <Popconfirm
+              key="kick"
+              title={KICK_CONFIRM}
+              okText="强制下线"
+              cancelText="取消"
+              onConfirm={() => run(kickUser(record.code), '已强制下线', '操作失败')}
+            >
+              <a>强制下线</a>
+            </Popconfirm>
+          )
           return [
             activate,
             pauseOp,
+            kickOp,
             <ModalForm
               key="recharge"
               title={`充值 · ${record.code}`}
@@ -246,6 +300,18 @@ export default function UsersTable({ me }: { me: Me }) {
         }
         // 不常用 / 有风险的操作收进「更多」，确认走 modal.confirm（Dropdown 内无法嵌 Popconfirm）。
         const more = [
+          record.logged_in && {
+            key: 'kick',
+            label: '强制下线',
+            onClick: () =>
+              modal.confirm({
+                title: `强制下线账号 ${record.code}？`,
+                content: KICK_CONFIRM,
+                okText: '强制下线',
+                cancelText: '取消',
+                onOk: () => run(kickUser(record.code), '已强制下线', '操作失败'),
+              }),
+          },
           record.status !== 'banned' && {
             key: 'ban',
             label: '封禁',
@@ -424,6 +490,9 @@ export default function UsersTable({ me }: { me: Me }) {
         }
         if (params.number_status) {
           rows = rows.filter((u) => u.number_status === params.number_status)
+        }
+        if (params.login_state) {
+          rows = rows.filter((u) => loginState(u) === params.login_state)
         }
         if (sort.points) {
           const dir = sort.points === 'ascend' ? 1 : -1

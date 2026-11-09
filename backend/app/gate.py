@@ -82,27 +82,81 @@ def empty_response(path: str) -> dict | None:
     norm = normalize(path)
     return {"code": 0, "msg": "成功", "data": EMPTY_DATA[norm]} if norm in EMPTY_DATA else None
 
-def authorize_user(conn, token_header: str):
-    """与 authorize 相同的校验；通过 → (User, None)，否则 (None, 错误响应)。"""
+# 单设备登录（同一账号同一时间只在一台电脑上有效）：
+# 客户端主进程给发往我方接口的每个请求加 X-Device-Id（本机硬件特征码的哈希）和 X-Device-Name（URL 编码的计算机名）。
+DEVICE_HEADER = "x-device-id"
+DEVICE_NAME_HEADER = "x-device-name"
+DEVICE_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
+DEFAULT_IDLE_TTL = 7200         # 与 Settings.session_idle_ttl 默认一致
+TOUCH_EVERY = 30                # 最后活跃时间最多每 30 秒写一次库
+ONLINE_WINDOW = 90              # 最后活跃在 90 秒内算在线（客户端每 15 秒心跳一次）
+KICKED_MSG = {
+    "replaced": "该账号已在其他设备登录，您已被强制下线，请重新登录",
+    "admin": "您已被后台强制下线，请重新登录",
+}
+
+def kicked_response(reason: str | None) -> dict:
+    # 10021：客户端原有的「被挤下线」码，弹窗提示 msg、清空本地会话、回到登录页
+    return {"code": 10021, "msg": KICKED_MSG.get(reason or "", KICKED_MSG["replaced"])}
+
+def device_of(headers) -> str:
+    """请求头里的设备码；格式不对按没带处理（返回空串）。"""
+    v = (headers.get(DEVICE_HEADER) or "").strip()
+    return v if DEVICE_RE.fullmatch(v) else ""
+
+def device_name_of(headers) -> str | None:
+    from urllib.parse import unquote
+    raw = headers.get(DEVICE_NAME_HEADER) or ""
+    try:
+        name = unquote(raw, errors="strict")
+    except UnicodeDecodeError:
+        return None
+    name = "".join(ch for ch in name if ch.isprintable()).strip()[:64]
+    return name or None
+
+def authorize_user(conn, token_header: str, device: str = "", *, idle_ttl: int = DEFAULT_IDLE_TTL,
+                   now: int | None = None):
+    """会话 + 账号状态校验；通过 → (User, None)，否则 (None, 错误响应)。
+    device 为请求头里的设备码：会话绑定了设备时必须一致（旧设备拿着被盗用的 token 换台电脑也不行）。"""
+    now = int(time.time()) if now is None else now
     if not token_header:
         return None, {"code": 10020, "msg": "未登录"}
     sess = db.get_session(conn, token_header)
-    if sess is None or sess.expires_at < int(time.time()):
+    if sess is None or sess.expires_at < now:
         return None, {"code": 10020, "msg": "登录已失效，请重新登录"}
+    if sess.revoked_at is not None:         # 被其他设备登录挤掉 / 后台强制下线
+        return None, kicked_response(sess.revoked_reason)
+    if sess.device_id is not None and device != sess.device_id:
+        return None, {"code": 10020, "msg": "登录已失效，请重新登录"}
+    if (sess.last_seen_at or sess.created_at) < now - idle_ttl:
+        db.delete_session(conn, sess.token)     # 空闲超时（崩溃 / 断网 / 休眠）：释放设备占用
+        return None, {"code": 10020, "msg": "登录已超时，请重新登录"}
     user = db.get_user_by_id(conn, sess.user_id)
     if user is not None and user.status == "banned":
         return None, {"code": 10024, "msg": "账号已封禁，无法登录"}
     # 待激活 / 暂停 / 到期 / 未完成首登：旧会话一律视为无效，防止绕过
     if (user is None or user.first_activated_at is None or user.status != "active"
             or user.onboarded_at is None
-            or (user.expires_at is not None and user.expires_at < int(time.time()))):
+            or (user.expires_at is not None and user.expires_at < now)):
         return None, {"code": 10022, "msg": "账号已停用或已到期"}
     if user.points <= 0:        # 积分暂停（余额为 0）：优先级最低，排在封禁 / 暂停 / 到期 / 未完成首登之后
         return None, dict(POINTS_EMPTY)
+    if sess.last_seen_at is None or now - sess.last_seen_at >= TOUCH_EVERY:
+        db.touch_session(conn, sess.token, now)
     return user, None
 
-def authorize(conn, token_header: str):
-    user, err = authorize_user(conn, token_header)
+def authorize_request(request):
+    """从请求里取 token、设备码与空闲时限，调 authorize_user。"""
+    return authorize_user(request.app.state.db_conn, request.headers.get("token", ""),
+                          device_of(request.headers),
+                          idle_ttl=request.app.state.settings.session_idle_ttl)
+
+def authorize(conn, token_header: str, device: str = "", *, idle_ttl: int = DEFAULT_IDLE_TTL):
+    user, err = authorize_user(conn, token_header, device, idle_ttl=idle_ttl)
+    return user is not None, err
+
+def authorize_ok(request):
+    user, err = authorize_request(request)
     return user is not None, err
 
 def response_signals_invalid(content: bytes) -> bool:

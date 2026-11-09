@@ -47,7 +47,9 @@ async def stream_events(hub, key: tuple, user_id: int, still_valid):
 async def draws_stream(request: Request, code: str = "", mantissa: str = "", source: str = ""):
     conn = request.app.state.db_conn
     token = request.headers.get("token", "")
-    user, err = gate.authorize_user(conn, token)
+    device = gate.device_of(request.headers)
+    idle = request.app.state.settings.session_idle_ttl
+    user, err = gate.authorize_user(conn, token, device, idle_ttl=idle)
     if user is None:
         return err
     if not PARAM_RE.fullmatch(code) or (mantissa and not PARAM_RE.fullmatch(mantissa)) \
@@ -68,7 +70,7 @@ async def draws_stream(request: Request, code: str = "", mantissa: str = "", sou
         return {"code": 1, "msg": "推送连接过多"}
 
     def still_valid() -> bool:
-        return gate.authorize_user(conn, token)[0] is not None
+        return gate.authorize_user(conn, token, device, idle_ttl=idle)[0] is not None
 
     return StreamingResponse(
         stream_events(hub, key, user.id, still_valid),

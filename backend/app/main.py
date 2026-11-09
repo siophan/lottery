@@ -48,8 +48,9 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
             except Exception as e:      # 采集起不来（如库里 headers_json 损坏）只记日志，代理照常启动
                 print(f"collector start failed: {e!r}")
         # 每日维护（清理过期审计/会话/票据等）：启动时先跑一次，之后每 24h 一次
-        run_maintenance(app.state.db_conn, int(time.time()))
-        app.state.maintenance_task = asyncio.create_task(maintenance_loop(app.state.db_conn))
+        idle = app.state.settings.session_idle_ttl
+        run_maintenance(app.state.db_conn, int(time.time()), session_idle_ttl=idle)
+        app.state.maintenance_task = asyncio.create_task(maintenance_loop(app.state.db_conn, session_idle_ttl=idle))
         # 积分每日扣减：启动即跑一轮，之后每 60 秒一轮（进程内，单实例部署）
         app.state.charge_task = asyncio.create_task(charge_loop(app.state.db_conn))
         try:
@@ -151,7 +152,7 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
 
         norm = gate.normalize(path)
         if gate.SAFE_PATH.fullmatch(path) and norm in app.state.member.handlers:
-            user, err = gate.authorize_user(app.state.db_conn, request.headers.get("token", ""))
+            user, err = gate.authorize_request(request)
             if user is None:
                 return JSONResponse(err)
             try:
@@ -168,18 +169,19 @@ def create_app(settings: Settings = None, client=None, conn=None, dayys=None, co
             empty = gate.empty_response(path)
             if empty is None:
                 return JSONResponse(gate.BLOCKED)
-            ok, err = gate.authorize(app.state.db_conn, request.headers.get("token", ""))
+            ok, err = gate.authorize_ok(request)
             return JSONResponse(empty if ok else err)
         body = await request.body()
         headers = dict(request.headers)
 
         user = None
         if path not in gate.PREAUTH_PATHS:
-            user, err = gate.authorize_user(app.state.db_conn, headers.get("token", ""))
+            user, err = gate.authorize_request(request)
             if user is None:
                 return JSONResponse(err)
             headers["token"] = await app.state.dayys.get_token()   # 换成 data-ys token
-        for k in [k for k in headers if k.lower() == "fromid"]:    # 去掉客户端自带的任意大小写 fromId
+        # 去掉客户端自带的任意大小写 fromId；本机设备码只给我方校验用，不转发给上游
+        for k in [k for k in headers if k.lower() in ("fromid", gate.DEVICE_HEADER, gate.DEVICE_NAME_HEADER)]:
             del headers[k]
         headers["fromId"] = app.state.settings.from_id             # 确保带 fromId
 

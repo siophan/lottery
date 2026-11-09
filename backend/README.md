@@ -79,7 +79,7 @@ The proxy is designed for **local development only** (CORS restricted to localho
 - `DATA_YS_DEVICE_ID`：服务器固定设备号（任意稳定字符串，默认 `ys-middleware`）
 - `ADMIN_KEY`：管理 API 密钥
 - `DB_PATH`：SQLite 路径（默认 `data/app.db`）
-- 可选：`SESSION_TTL`（默认 604800）、`DATA_YS_TOKEN_TTL`（默认 3600）、`UPSTREAM_TIMEOUT`
+- 可选：`SESSION_TTL`（默认 604800）、`SESSION_IDLE_TTL`（单设备登录的会话空闲时限，默认 7200 秒）、`DATA_YS_TOKEN_TTL`（默认 3600）、`UPSTREAM_TIMEOUT`
 
 ### 运行
 ```bash

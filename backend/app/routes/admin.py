@@ -3,7 +3,7 @@ import sqlite3
 import time
 from fastapi import APIRouter, Request, Body, Response, Depends
 from fastapi.responses import JSONResponse, FileResponse
-from .. import db, profile
+from .. import db, profile, gate
 from .. import admin_auth, db_agents
 from ..admin_auth import Principal
 from ..throttle import LOCKED_MSG, client_ip
@@ -84,6 +84,8 @@ async def list_users(request: Request, p: Principal = ANY_ROLE):
         return _err("参数无效", 400)
     if p.role == "agent":            # 代理只读本人名下账号，忽略传入的 agent_id
         agent_id = p.agent_id
+    now = int(time.time())
+    live = db.live_sessions_by_user(conn, now, request.app.state.settings.session_idle_ttl)
     return {"users": [
         {"code": u.code, "status": u.status, "status_by": u.status_by, "expires_at": u.expires_at, "created_at": u.created_at,
          "activated": u.first_activated_at is not None,
@@ -93,9 +95,34 @@ async def list_users(request: Request, p: Principal = ANY_ROLE):
          "agent_id": u.agent_id, "agent_name": agent_name,
          "number_status": db.number_status(u, agent_status),
          "points": u.points,
-         "nickname": profile.display_nickname(u)}
+         "nickname": profile.display_nickname(u),
+         **_login_state(live.get(u.id), now)}
         for u, agent_name, agent_status in db.list_users_with_agent(conn, agent_id)
     ]}
+
+def _login_state(sess, now: int) -> dict:
+    """当前登录设备（单设备登录）：online 最近 90 秒内有请求；会话还在但没心跳（休眠 / 断网）时 online 为 false。"""
+    if sess is None:
+        return {"online": False, "logged_in": False, "device_id": None, "device_name": None,
+                "login_at": None, "last_seen_at": None, "login_ip": None}
+    seen = sess.last_seen_at or sess.created_at
+    return {"online": now - seen <= gate.ONLINE_WINDOW, "logged_in": True,
+            "device_id": sess.device_id, "device_name": sess.device_name,
+            "login_at": sess.created_at, "last_seen_at": seen, "login_ip": sess.ip}
+
+@router.post("/users/{code}/kick")
+async def kick_user(code: str, request: Request, p: Principal = ANY_ROLE):
+    """强制下线：作废该账号的登录会话，客户端下一次心跳（15 秒内）弹出下线提示并回到登录页。
+    代理只能操作本人名下账号（他人账号按不存在处理）。"""
+    conn = request.app.state.db_conn
+    u = db.get_user_by_code(conn, code)
+    if u is None or (p.role == "agent" and u.agent_id != p.agent_id):
+        return _not_found()
+    n = db.revoke_user_sessions(conn, u.id, "admin", int(time.time()))
+    if n == 0:
+        return _err("该账号当前未登录", 409)
+    _audit(request, p, "user.kick", u.code, {"sessions": n})
+    return {"ok": True}
 
 @router.get("/users/{code}/profile")
 async def user_profile(code: str, request: Request, p: Principal = ANY_ROLE):

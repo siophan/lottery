@@ -22,7 +22,7 @@ def _profile(conn, u: db.User) -> dict:
                 "nicknameIsDefault": u.nickname is None, "avatarIsDefault": avatar is None})
 
 def _auth(request: Request):
-    return gate.authorize_user(request.app.state.db_conn, request.headers.get("token", ""))
+    return gate.authorize_request(request)
 
 @router.get("/user/profile")
 async def get_profile(request: Request):

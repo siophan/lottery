@@ -422,6 +422,48 @@ const KICK2_REPLACEMENTS = [
   },
 ];
 
+// 单设备登录：拦截器的踢下线分支（任何窗口）交给 window.dsSession（client/session-guard.js）——通知主进程关掉其他窗口、
+// 主窗口弹出服务端给的提示（10021「该账号已在其他设备登录，您已被强制下线，请重新登录」等）、确定后回到登录页，
+// 不再像原版那样直接退出程序。session-guard 未加载（非 Electron）时仍走原来的弹窗 + 退出。
+const KICK3_MARK = '/* ds-patch kick v3 */';
+const KICK3_REPLACEMENTS = [
+  {
+    find: '      let userInfo = localStorage.getItem("userInfo");\n      userInfo = JSON.parse(userInfo);\n      element_ui__WEBPACK_IMPORTED_MODULE_1__["MessageBox"].alert(massege,',
+    repl: [
+      `      ${KICK3_MARK}`,
+      '      if (window.dsSession && window.dsSession.kicked(res.code, res.msg || massege)) {',
+      '        return;',
+      '      }',
+      '      let userInfo = localStorage.getItem("userInfo");',
+      '      userInfo = JSON.parse(userInfo);',
+      '      element_ui__WEBPACK_IMPORTED_MODULE_1__["MessageBox"].alert(massege,',
+    ].join('\n'),
+    count: 1,
+  },
+];
+
+// 单设备登录心跳：首页（只在主窗口）mounted 时启动 window.dsSession 心跳（每 15 秒），destroyed 时停止
+const SESSION_MARK = '/* ds-patch session v1 */';
+const SESSION_APP_REPLACEMENTS = [
+  {
+    find: '      window.dsLegacyKey.migrate(__webpack_require__("f121")["apiURL"], localStorage.getItem("token"), userInfo && userInfo.username);\n    }\n  },\n  activated() {',
+    repl: [
+      '      window.dsLegacyKey.migrate(__webpack_require__("f121")["apiURL"], localStorage.getItem("token"), userInfo && userInfo.username);',
+      '    }',
+      `    ${SESSION_MARK}`,
+      '    if (window.dsSession) window.dsSession.start({ apiURL: __webpack_require__("f121")["apiURL"] });',
+      '  },',
+      '  activated() {',
+    ].join('\n'),
+    count: 1,
+  },
+  {
+    find: '    if (this.dsProfileCtl) this.dsProfileCtl.destroy();\n  }\n});',
+    repl: '    if (this.dsProfileCtl) this.dsProfileCtl.destroy();\n    if (window.dsSession) window.dsSession.stop();\n  }\n});',
+    count: 1,
+  },
+];
+
 // 用户信息区（子项目 D）：登录成功时把 data.points 存入 localStorage.dsPoints（首页先显示、再向后台刷新）；
 // 首页 index.vue（在 app chunk 里）在 .card 之后（#content 之前）加挂载点 ref="dsProfile"（不放进 opacity .74 的 .card；
 // 必须排在 .card 里 -webkit-app-region: drag 条之后，no-drag 区域才会覆盖它，点头像/昵称不会拖动窗口），
@@ -524,6 +566,7 @@ const APP_LAYERS = [
       { mark: AUTH_MARK, replacements: AUTH_REPLACEMENTS },
       { mark: KICK_MARK, replacements: KICK_REPLACEMENTS },
       { mark: KICK2_MARK, replacements: KICK2_REPLACEMENTS },
+      { mark: KICK3_MARK, replacements: KICK3_REPLACEMENTS },
     ],
   },
   {
@@ -532,6 +575,7 @@ const APP_LAYERS = [
       { mark: PROFILE_MARK, replacements: PROFILE_APP_REPLACEMENTS },
       { mark: CODE_MARK, replacements: CODE_APP_REPLACEMENTS },
       { mark: LEGACY_KEY_MARK, replacements: LEGACY_KEY_APP_REPLACEMENTS },
+      { mark: SESSION_MARK, replacements: SESSION_APP_REPLACEMENTS },
     ],
   },
 ];
@@ -1022,7 +1066,7 @@ function patchChunk(raw, name) {
 
 module.exports = { patchChunk, CHUNKS, MARK, enc, applyLayers, patchApp, APP_CHUNK, APP_MARK, KEEP_MARK, RESELECT_MARK, RACE_MARK, TREND_MARK, AUTH_MARK, CLOSE_MARK, AUTOPICK_MARK, RACE_MANTISSA_MARK, TREND_CATCH_MARK, TREND_SYNC_MARK, TREND_PAGE_MARK, AUTOPICK_ONCE_MARK, CHUNK_LAYERS, APP_LAYERS,
   patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK, ONBOARD_SMS_MARK,
-  KICK2_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
+  KICK2_MARK, KICK3_MARK, SESSION_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
   patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M,
   NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT, RULES_MARK, RULES_PAGES, rulesDefault, LEGACY_KEY_MARK };
 

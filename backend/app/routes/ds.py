@@ -7,7 +7,7 @@ router = APIRouter()
 MAX_ROWS = KEEP_ROWS      # 上限 = 库内保留深度，客户端遗漏页会请求 rows=3000
 
 def _deny(request: Request):
-    ok, err = gate.authorize(request.app.state.db_conn, request.headers.get("token", ""))
+    ok, err = gate.authorize_ok(request)
     return None if ok else err
 
 @router.get("/ds/sources")

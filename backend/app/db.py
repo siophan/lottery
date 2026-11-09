@@ -44,6 +44,12 @@ class Session:
     user_id: int
     created_at: int
     expires_at: int
+    device_id: str | None = None        # 登录设备的硬件特征码（客户端主进程算出的哈希）；None = 单设备登录上线前的会话
+    device_name: str | None = None      # 设备名称（计算机名 + 系统），仅供后台查看
+    ip: str | None = None               # 登录 IP
+    last_seen_at: int | None = None     # 最后一次通过校验的请求时间；超过空闲时限即失效
+    revoked_at: int | None = None       # 被挤下线 / 后台强制下线的时间；None = 有效
+    revoked_reason: str | None = None   # replaced 其他设备登录 | admin 后台强制下线
 
 @dataclass
 class Admin:
@@ -289,6 +295,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate_agent_tiers(conn)
     _migrate_own_userinfo_sessions(conn)
     _migrate_member_data(conn)
+    _migrate_single_device_sessions(conn)
     if not ds_existed:
         for s in DEFAULT_SOURCES:
             create_data_source(conn, key=s["key"], name=s["name"], adapter=s["adapter"],
@@ -303,6 +310,23 @@ def _migrate_own_userinfo_sessions(conn) -> None:
         return
     conn.execute("DELETE FROM sessions")
     conn.execute("INSERT INTO settings(key,value) VALUES(?,?)", (flag, "1"))
+    conn.commit()
+
+SESSION_DEVICE_COLUMNS = (("device_id", "TEXT"), ("device_name", "TEXT"), ("ip", "TEXT"),
+                          ("last_seen_at", "INTEGER"), ("revoked_at", "INTEGER"), ("revoked_reason", "TEXT"))
+
+def _migrate_single_device_sessions(conn) -> None:
+    # 单设备登录：会话记下登录设备、最后活跃时间、被挤下线的原因。升级时一次性清掉全部客户会话（只做一次）：
+    # 旧版客户端不上报设备码，清掉后只能用新版重新登录（登录接口拒绝不带设备码的请求）
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+    for name, typ in SESSION_DEVICE_COLUMNS:
+        if name not in have:
+            conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {typ}")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+    flag = "sessions_reset:single_device"
+    if not conn.execute("SELECT 1 FROM settings WHERE key=?", (flag,)).fetchone():
+        conn.execute("DELETE FROM sessions")
+        conn.execute("INSERT INTO settings(key,value) VALUES(?,?)", (flag, "1"))
     conn.commit()
 
 def _migrate_member_data(conn) -> None:
@@ -826,27 +850,83 @@ def number_status(u: User, agent_status: str | None) -> str:
         return "unassigned"
     return "to_recycle" if agent_status == "cancelled" else "pending"
 
-def create_session(conn, user_id: int, ttl: int) -> str:
+def create_session(conn, user_id: int, ttl: int, *, device_id: str | None = None,
+                   device_name: str | None = None, ip: str | None = None) -> str:
     tok = new_token()
     now = int(time.time())
     conn.execute(
-        "INSERT INTO sessions(token,user_id,created_at,expires_at) VALUES(?,?,?,?)",
-        (tok, user_id, now, now + ttl),
+        "INSERT INTO sessions(token,user_id,created_at,expires_at,device_id,device_name,ip,last_seen_at)"
+        " VALUES(?,?,?,?,?,?,?,?)",
+        (tok, user_id, now, now + ttl, device_id, device_name, ip, now),
     )
     conn.commit()
     return tok
 
+REVOKED_KEEP = 86400        # 被挤下线的会话再留一天：期间旧设备的请求能拿到「已在其他设备登录」的提示，之后清理
+
+def login_session(conn, user_id: int, ttl: int, *, device_id: str, device_name: str | None,
+                  ip: str | None, now: int) -> tuple[str, int]:
+    """单设备登录：作废该账号其余全部有效会话（标记 replaced），再建本设备的新会话；同一事务。
+    返回 (新 token, 被挤下线的会话数)。"""
+    tok = new_token()
+    try:
+        cur = conn.execute(
+            "UPDATE sessions SET revoked_at=?, revoked_reason='replaced', expires_at=MIN(expires_at, ?)"
+            " WHERE user_id=? AND revoked_at IS NULL",
+            (now, now + REVOKED_KEEP, user_id))
+        conn.execute(
+            "INSERT INTO sessions(token,user_id,created_at,expires_at,device_id,device_name,ip,last_seen_at)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (tok, user_id, now, now + ttl, device_id, device_name, ip, now))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return tok, cur.rowcount
+
+def revoke_user_sessions(conn, user_id: int, reason: str, now: int) -> int:
+    """后台强制下线等：把该账号的有效会话标记为已作废；返回作废条数。"""
+    cur = conn.execute(
+        "UPDATE sessions SET revoked_at=?, revoked_reason=?, expires_at=MIN(expires_at, ?)"
+        " WHERE user_id=? AND revoked_at IS NULL AND expires_at >= ?",
+        (now, reason, now + REVOKED_KEEP, user_id, now))
+    conn.commit()
+    return cur.rowcount
+
+def _row_to_session(r) -> Session:
+    return Session(r["token"], r["user_id"], r["created_at"], r["expires_at"], r["device_id"],
+                   r["device_name"], r["ip"], r["last_seen_at"], r["revoked_at"], r["revoked_reason"])
+
 def get_session(conn, token: str) -> Session | None:
     r = conn.execute("SELECT * FROM sessions WHERE token=?", (token,)).fetchone()
-    return Session(r["token"], r["user_id"], r["created_at"], r["expires_at"]) if r else None
+    return _row_to_session(r) if r else None
+
+def touch_session(conn, token: str, now: int) -> None:
+    conn.execute("UPDATE sessions SET last_seen_at=? WHERE token=?", (now, token))
+    conn.commit()
+
+def live_sessions_by_user(conn, now: int, idle_ttl: int) -> dict[int, Session]:
+    """每个账号当前有效（未作废、未过期、未空闲超时）的会话，取最新登录的一条。"""
+    rows = conn.execute(
+        "SELECT * FROM sessions WHERE revoked_at IS NULL AND expires_at >= ?"
+        " AND COALESCE(last_seen_at, created_at) >= ? ORDER BY created_at",
+        (now, now - idle_ttl)).fetchall()
+    return {r["user_id"]: _row_to_session(r) for r in rows}
 
 def delete_session(conn, token: str) -> None:
     conn.execute("DELETE FROM sessions WHERE token=?", (token,))
     conn.commit()
 
-def purge_expired_sessions(conn) -> int:
+def purge_expired_sessions(conn, idle_ttl: int | None = None) -> int:
+    """删除过期会话；给了 idle_ttl 时也删空闲超时的（异常退出 / 断网后没有心跳的设备）。"""
     now = int(time.time())
-    cur = conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+    if idle_ttl is None:
+        cur = conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+    else:
+        cur = conn.execute(
+            "DELETE FROM sessions WHERE expires_at < ? OR"
+            " (revoked_at IS NULL AND COALESCE(last_seen_at, created_at) < ?)",
+            (now, now - idle_ttl))
     conn.commit()
     return cur.rowcount
 
