@@ -1,7 +1,7 @@
 {
   "name": "ys-mac",
   "version": "1.0.0",
-  "description": "赢晟 数据/选号工具 macOS 版",
+  "description": "lottery mao 数据/选号工具",
   "main": "electron/boot-original.js",
   "scripts": {
     "start": "electron .",
@@ -24,6 +24,7 @@
     "files": [
       "electron/**/*",
       "client/**/*",
+      "!client/**/*.{orig,bak}",
       "src/engine/**/*",
       "package.json"
     ],
