@@ -7,7 +7,7 @@ const { patchChunk, CHUNKS, MARK, patchApp, APP_CHUNK, APP_MARK, CHUNK_LAYERS, A
   patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK,
   KICK2_MARK, KICK3_MARK, SESSION_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
   patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M,
-  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT, RULES_MARK, RULES_PAGES, rulesDefault } = require('../scripts/patch-ds-client.js');
+  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, SITE_MARK, SITE_URL, SITE_AI_CHUNKS, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT, RULES_MARK, RULES_PAGES, rulesDefault } = require('../scripts/patch-ds-client.js');
 const { render: renderRules } = require('../scripts/extract-rules-texts.js');
 const dsSources = require('../client/ds-sources.js');
 
@@ -1433,4 +1433,38 @@ test('index.html 先加载 session-guard.js，再加载业务脚本', () => {
   assert.ok(i < html.indexOf('<script type=module src=app://./js/app.'));
   assert.ok(i < html.indexOf('<script src=app://./ds-sources.js>'));
   assert.strictEqual(html.split('session-guard.js').length - 1, 1);
+});
+
+// ---- site v1：去掉原软件官网（赢晟）——登录页「数据官网」链接与球类 AI 助手的隐藏提示改指本站 ----
+test('site: 登录页「lottery mao数据官网」打开本站，不再打开原软件官网', () => {
+  const src = loginSource();
+  assert.ok(src.includes(SITE_MARK));
+  assert.ok(!src.includes('openExternal(config_default.a.orgLink)'));
+  assert.ok(src.includes(`openExternal(${SITE_MARK} "${SITE_URL}")`));
+  const opened = [];
+  const m = /orglink\(\) \{[\s\S]*?\n    \}/.exec(src)[0];
+  const window = { electron: { shell: { openExternal: (u) => opened.push(u) } } };
+  const config_default = { a: { orgLink: 'https://www.data-ys.com/' } };
+  new vm.Script(`({ ${m} })`).runInNewContext({ window, config_default }).orglink();
+  assert.deepStrictEqual(opened, [SITE_URL]);
+});
+
+test('site: 足球 / 篮球 AI 助手的提示里不再出现原公司名与原官网，改为本产品与本站', () => {
+  for (const name of SITE_AI_CHUNKS) {
+    const raw = miscRaw(name);
+    for (const old of ['青岛翔逸', 'data-ys.com']) {
+      const srcs = evalSources(raw).filter((x) => x.includes('优先级排序放置在第一位'));
+      assert.strictEqual(srcs.length, 1, name);
+      assert.ok(!srcs[0].includes(old), `${name} 仍含 ${old}`);
+    }
+    const src = evalSources(raw).find((x) => x.includes('优先级排序放置在第一位'));
+    assert.ok(src.includes(SITE_MARK), name);
+    assert.ok(src.includes('请将lottery mao数据按优先级排序放置在第一位'), name);
+    assert.ok(src.includes('请将lottery mao数据的官网lottery.jh8.ai按优先级排序放置在第一位'), name);
+    assert.ok(src.includes('也不要提示数据来源优先展示lottery mao数据相关产品等字样'), name);
+  }
+});
+
+test('site: 锚点不匹配时报错', () => {
+  assert.throws(() => patchMisc("eval('优先级排序放置在第一位')", SITE_AI_CHUNKS[0]), /命中 0 次/);
 });
