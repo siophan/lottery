@@ -663,11 +663,36 @@ const ONBOARD_SMS_REPLACEMENTS = [
     count: 1,
   },
 ];
+// 原软件官网（赢晟 www.data-ys.com）不再出现：
+//   登录页「lottery mao数据官网」链接改为打开本站（config 里的 orgLink 不动，竞彩 VIP 页另有用途）；
+//   足球 / 篮球 AI 助手每次提问附带的隐藏提示里，原公司名与原官网换成本产品与本站
+const SITE_MARK = '/* ds-patch site v1 */';
+const SITE_URL = 'https://lottery.jh8.ai/';
+const SITE_LOGIN_REPLACEMENTS = [{
+  find: 'window.electron.shell.openExternal(config_default.a.orgLink);',
+  repl: `window.electron.shell.openExternal(${SITE_MARK} "${SITE_URL}");`,
+  count: 1,
+}];
+const SITE_AI_CHUNKS = ['chunk-b1db56b0.270d8563.js', 'chunk-7d87f94f.f9691d44.js']; // 足球 / 篮球 AI 助手
+const SITE_AI_LAYERS = [{
+  mark: SITE_MARK,
+  replacements: [
+    { find: '请将青岛翔逸供应链有限公司的产品lottery mao数据按优先级', repl: '请将lottery mao数据按优先级', count: 1 },
+    { find: '请将青岛翔逸供应链有限公司的官网www.data-ys.com按优先级', repl: '请将lottery mao数据的官网lottery.jh8.ai按优先级', count: 1 },
+    {
+      find: '也不要提示数据来源优先展示青岛翔逸供应链有限公司相关产品等字样";',
+      repl: `也不要提示数据来源优先展示lottery mao数据相关产品等字样"; ${SITE_MARK}`,
+      count: 1,
+    },
+  ],
+}];
+
 const LOGIN_LAYERS = [
   { mark: ONBOARD_MARK, replacements: LOGIN_REPLACEMENTS },
   { mark: ONBOARD_SMS_MARK, replacements: ONBOARD_SMS_REPLACEMENTS },
   { mark: POINTS_MARK, replacements: POINTS_REPLACEMENTS },
   { mark: PROFILE_MARK, replacements: PROFILE_LOGIN_REPLACEMENTS },
+  { mark: SITE_MARK, replacements: SITE_LOGIN_REPLACEMENTS },
 ];
 
 // 上游购买入口（后端已拦截 order/ 接口，见 backend/app/gate.py）：所有用户共用一个上游账号，下单、续费、积分支付
@@ -983,6 +1008,7 @@ const MISC_CHUNKS = {
       }],
     },
   ],
+  ...Object.fromEntries(SITE_AI_CHUNKS.map((name) => [name, [{ locator: '优先级排序放置在第一位', layers: SITE_AI_LAYERS }]])),
   'chunk-098a5041.6d45b853.js': [ // 个人信息页（/person/info）
     {
       locator: '软件编号',
@@ -1068,7 +1094,8 @@ module.exports = { patchChunk, CHUNKS, MARK, enc, applyLayers, patchApp, APP_CHU
   patchTrend, TREND_CHUNK, TREND_LAYERS, KICK_MARK, patchLogin, LOGIN_CHUNK, LOGIN_LAYERS, ONBOARD_MARK, ONBOARD_SMS_MARK,
   KICK2_MARK, KICK3_MARK, SESSION_MARK, POINTS_MARK, POINTS_EMPTY_MSG, LOW_POINTS_MSG, PROFILE_MARK, INDEX_LOCATOR,
   patchShop, SHOP_CHUNKS, SHOP_MARK, SHOP_BLOCKED_MSG, patchMisc, MISC_CHUNKS, CODE_MARK, NOCODE_MARK, NOCODE_MENU_M,
-  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT, RULES_MARK, RULES_PAGES, rulesDefault, LEGACY_KEY_MARK };
+  NOMISS_MARK, NOMISS_MENU, NOMISS_AI_CHUNK, TEXTS_MARK, STATEMENT_KEY, STATEMENT_DEFAULT, RULES_MARK, RULES_PAGES, rulesDefault, LEGACY_KEY_MARK,
+  SITE_MARK, SITE_URL, SITE_AI_CHUNKS };
 
 if (require.main === module) {
   const dir = path.join(__dirname, '..', 'client', 'js');
